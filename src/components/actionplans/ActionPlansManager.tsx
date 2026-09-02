@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useApp } from '../../context/AppContext';
 import { ActionPlan, ActionPlanStatus } from '../../types';
 import { CRITERIA_DEFINITIONS } from '../../data/criteriaData';
@@ -313,8 +314,8 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
       </div>
 
       {/* New Plan Modal */}
-      {isNewModalOpen && (
-        <div className="fixed inset-0 z-50 bg-[#031E3C]/60 backdrop-blur-xs flex items-center justify-center p-4">
+      {isNewModalOpen && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#031E3C]/60 p-4 backdrop-blur-xs">
           <div className="cm-modal max-w-md w-full p-5 animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between pb-3 border-b border-[#E5E8EC]">
               <div className="flex items-center gap-2">
@@ -431,7 +432,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
               </div>
             </form>
           </div>
-        </div>
+        </div>, document.body
       )}
 
     </div>
