@@ -136,34 +136,30 @@ export const AdminSettingsView: React.FC = () => {
   };
 
   // Save new user
-  const handleCreateUser = (e: React.FormEvent) => {
+  const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userName.trim() || !userEmail.trim()) {
       alert('Por favor completa el nombre y el correo electrónico.');
       return;
     }
 
-    const created = addUser({
-      name: userName.trim(),
-      email: userEmail.trim(),
-      role: userRole,
-      status: userStatus,
-      advisorId: userRole === 'ASESOR' ? userAdvisorId : undefined,
-      teamId: userRole === 'SUPERVISOR' ? userTeamId : undefined
-    });
-
-    showNotification(`Usuario "${created.name}" creado exitosamente.`);
-    setIsUserModalOpen(false);
+    try {
+      const created = await addUser({
+        name: userName.trim(), email: userEmail.trim(), role: userRole, status: userStatus,
+        advisorId: userRole === 'ASESOR' ? userAdvisorId : undefined,
+        teamId: userRole === 'SUPERVISOR' ? userTeamId : undefined
+      });
+      showNotification(`Usuario "${created.name}" creado. Usuario: ${created.username} · clave inicial: 12345678`);
+      setIsUserModalOpen(false);
+    } catch (error) { alert(error instanceof Error ? error.message : 'No fue posible crear el usuario.'); }
   };
 
   // Bulk create users for advisors
-  const handleAutoCreateAdvisorUsers = () => {
-    const count = createUsersForAdvisorsWithoutAccount();
-    if (count > 0) {
-      showNotification(`Se crearon automáticamente ${count} cuentas de usuario para los asesores.`);
-    } else {
-      showNotification('Todos los asesores ya cuentan con un usuario asignado.');
-    }
+  const handleAutoCreateAdvisorUsers = async () => {
+    try {
+      const count = await createUsersForAdvisorsWithoutAccount();
+      showNotification(count > 0 ? `Se crearon automáticamente ${count} cuentas de usuario para los asesores.` : 'Todos los asesores ya cuentan con un usuario asignado.');
+    } catch (error) { alert(error instanceof Error ? error.message : 'No fue posible crear las cuentas.'); }
   };
 
   // Switch active session to this user (for testing perspective)

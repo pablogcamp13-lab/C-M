@@ -28,7 +28,7 @@ import {
 } from '../data/initialData';
 import { INITIAL_INTERVENTIONS } from '../data/interventionsData';
 import { calculateEvaluationSummary, parseTimeToMinutes, formatMinutesToHHMM } from '../utils/calculations';
-import { authApi, evaluationsApi, platformStateApi, sharedRepositoryApi } from '../api/sharedRepository';
+import { adminUsersApi, authApi, evaluationsApi, platformStateApi, sharedRepositoryApi } from '../api/sharedRepository';
 import { QUALITY_WEIGHTS } from '../data/qualityPueData';
 
 export const formatAdvisorUsername = (name: string): string => {
@@ -78,10 +78,10 @@ interface AppContextType {
   filteredOperationalMeasurements: OperationalMeasurement[];
 
   // User management
-  addUser: (userData: Omit<User, 'id' | 'createdAt'>) => User;
+  addUser: (userData: Omit<User, 'id' | 'createdAt'>) => Promise<User>;
   updateUser: (id: string, data: Partial<User>) => void;
   deleteUser: (id: string) => void;
-  createUsersForAdvisorsWithoutAccount: () => number;
+  createUsersForAdvisorsWithoutAccount: () => Promise<number>;
 
   // Campaign & Team management
   addCampaign: (campaign: Omit<Campaign, 'id'>) => Campaign;
@@ -472,13 +472,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   // User Management
-  const addUser = (userData: Omit<User, 'id' | 'createdAt'>): User => {
-    const newUser: User = {
-      ...userData,
-      id: `usr_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-      createdAt: new Date().toISOString(),
-      password: '12345678', mustChangePassword: true
-    };
+  const addUser = async (userData: Omit<User, 'id' | 'createdAt'>): Promise<User> => {
+    const { user: newUser } = await adminUsersApi.create(userData);
     setUsers(prev => [newUser, ...prev]);
     return newUser;
   };
@@ -499,14 +494,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const createUsersForAdvisorsWithoutAccount = (): number => {
+  const createUsersForAdvisorsWithoutAccount = async (): Promise<number> => {
     let createdCount = 0;
     const existingAdvisorIds = new Set(users.filter(u => u.role === 'ASESOR' && u.advisorId).map(u => u.advisorId));
+    const reservedUsernames = new Set(users.map(user => user.username?.toLowerCase()).filter(Boolean));
     const newUsersToAdd: User[] = [];
 
     advisors.forEach(adv => {
       if (!existingAdvisorIds.has(adv.id)) {
-        const username = formatAdvisorUsername(adv.name);
+        const base = formatAdvisorUsername(adv.name); let username = base; let suffix = 1;
+        while (reservedUsernames.has(username.toLowerCase())) username = `${base}.${++suffix}`;
+        reservedUsernames.add(username.toLowerCase());
         const email = `${username}@asesores3c.com`;
         newUsersToAdd.push({
           id: `usr_adv_${adv.id}`,
@@ -524,7 +522,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     if (newUsersToAdd.length > 0) {
-      setUsers(prev => [...prev, ...newUsersToAdd]);
+      const { repository: persisted } = await sharedRepositoryApi.sync({ users: [...users, ...newUsersToAdd], campaigns, teams, advisors });
+      setUsers(persisted.users);
     }
     return createdCount;
   };

@@ -92,7 +92,7 @@ class GoogleStorage {
     const [users, campaigns, teams, advisors] = await Promise.all(['USERS', 'CAMPAIGNS', 'TEAMS', 'ADVISORS'].map(name => this.rows(name as SheetName)));
     if (![users, campaigns, teams, advisors].every(Boolean)) return null;
     return {
-      users: users!.map(row => ({ id: row.id!, name: row.name!, email: row.email!, username: row.username || undefined, role: row.role as User['role'], status: row.status as User['status'], teamId: row.team_id || undefined, advisorId: row.advisor_id || undefined, avatar: row.avatar || undefined, createdAt: row.created_at!, password: undefined })),
+      users: users!.map(row => ({ id: row.id!, name: row.name!, email: row.email!, username: row.username || undefined, role: row.role as User['role'], status: row.status as User['status'], teamId: row.team_id || undefined, advisorId: row.advisor_id || undefined, avatar: row.avatar || undefined, createdAt: row.created_at!, password: undefined, mustChangePassword: row.must_change_password !== '0' })),
       campaigns: campaigns!.map(row => ({ id: row.id!, name: row.name!, client: row.client!, status: row.status as Campaign['status'], products: JSON.parse(row.products_json || '[]'), description: row.description || undefined })),
       teams: teams!.map(row => ({ id: row.id!, campaignId: row.campaign_id!, supervisorId: row.supervisor_id!, name: row.name! })),
       advisors: advisors!.map(row => JSON.parse(row.data_json || '{}') as Advisor)
@@ -103,11 +103,11 @@ class GoogleStorage {
     const [users, advisors] = await Promise.all([this.rows('USERS'), this.rows('ADVISORS')]);
     if (!users || !advisors) return null;
     const advisorDnis = new Map(advisors.map(row => [row.id, row.dni]));
-    return users.filter(row => row.id && row.email && row.password_hash).map(row => ({
+    return users.filter(row => row.id && row.email).map(row => ({
       id: row.id!, name: row.name!, email: row.email!, username: row.username || undefined,
       role: row.role as User['role'], status: row.status as User['status'], teamId: row.team_id || undefined,
       advisorId: row.advisor_id || undefined, advisorDni: row.advisor_id ? advisorDnis.get(row.advisor_id) || undefined : undefined,
-      avatar: row.avatar || undefined, createdAt: row.created_at!, passwordHash: row.password_hash!, mustChangePassword: row.must_change_password !== '0'
+      avatar: row.avatar || undefined, createdAt: row.created_at!, passwordHash: row.password_hash || '', mustChangePassword: row.must_change_password !== '0'
     }));
   }
 

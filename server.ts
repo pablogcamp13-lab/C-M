@@ -109,11 +109,12 @@ async function readRepository() {
 }
 
 async function saveRepository(input: SharedRepository) {
+  const persisted = persistRepository(input);
   if (googleStorage.enabled) {
-    try { await googleStorage.saveRepository(input, passwordHashes()); }
+    try { await googleStorage.saveRepository(persisted, passwordHashes()); }
     catch (error) { console.error('[google-storage] No fue posible guardar la dotación en Sheets.', error instanceof Error ? error.message : ''); throw new Error('No fue posible sincronizar la información con Google Sheets.'); }
   }
-  return persistRepository(input);
+  return persisted;
 }
 
 function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -133,13 +134,17 @@ async function syncAuthUsersFromGoogle() {
   const upsert = db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash,must_change_password)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar,created_at=excluded.created_at,password_hash=excluded.password_hash,must_change_password=excluded.must_change_password`);
   db.exec('BEGIN IMMEDIATE');
+  const repaired: Array<{ id: string; passwordHash: string }> = [];
   try {
     for (const user of users) {
-      upsert.run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt, user.passwordHash, user.mustChangePassword ? 1 : 0);
+      const passwordHash = user.passwordHash || hashPassword(INITIAL_PASSWORD);
+      upsert.run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt, passwordHash, user.passwordHash ? (user.mustChangePassword ? 1 : 0) : 1);
+      if (!user.passwordHash) repaired.push({ id: user.id, passwordHash });
       if (user.advisorId && user.advisorDni) { advisorDnisForAuth.set(user.advisorId, user.advisorDni); advisorUsersByDni.set(user.advisorDni, user.id); }
     }
     db.exec('COMMIT'); lastGoogleAuthSync = Date.now();
   } catch (error) { db.exec('ROLLBACK'); throw error; }
+  for (const user of repaired) await googleStorage.updateUserPasswordHash(user.id, user.passwordHash, true);
 }
 
 // Lazy initialization of Gemini client
@@ -197,6 +202,20 @@ async function startServer() {
   });
   app.post('/api/auth/logout', requireAuth, (req, res) => { db.prepare('DELETE FROM sessions WHERE token=?').run((req as any).token); res.status(204).end(); });
   const requireAdmin = (req: express.Request, res: express.Response) => (req as any).authUser?.role === 'ADMINISTRADOR' || res.status(403).json({ error: 'Acceso restringido a administración.' });
+  app.post('/api/admin/users', requireAuth, async (req, res) => {
+    if (requireAdmin(req, res) !== true) return;
+    const body = req.body || {}; const name = String(body.name || '').trim(); const email = String(body.email || '').trim().toLowerCase();
+    const validRoles = ['ADMINISTRADOR','CONSULTOR','SUPERVISOR','FORMADOR','GERENCIA','ASESOR']; const role = validRoles.includes(body.role) ? body.role : 'ASESOR'; const status = body.status === 'INACTIVO' ? 'INACTIVO' : 'ACTIVO';
+    if (!name || !email) return res.status(400).json({ error: 'Nombre y correo son obligatorios.' });
+    if (db.prepare('SELECT 1 FROM users WHERE lower(email)=lower(?)').get(email)) return res.status(409).json({ error: 'El correo ya está registrado.' });
+    const base = String(body.username || name).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\s.]/g, '').trim().replace(/[\s.]+/g, '.').replace(/^\.|\.$/g, '') || `usuario.${Date.now()}`;
+    let username = base; let suffix = 1; while (db.prepare('SELECT 1 FROM users WHERE lower(username)=lower(?)').get(username)) username = `${base}.${++suffix}`;
+    const id = `usr_${randomBytes(8).toString('hex')}`; const createdAt = new Date().toISOString();
+    db.prepare('INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,created_at,password_hash,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,?,1)').run(id,name,email,username,role,status,body.teamId||null,body.advisorId||null,createdAt,hashPassword(INITIAL_PASSWORD));
+    try { if (googleStorage.enabled) await googleStorage.saveRepository(repository(), passwordHashes()); }
+    catch (error) { db.prepare('DELETE FROM users WHERE id=?').run(id); console.error('[google-storage] No fue posible crear el usuario.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible guardar el usuario en Google Sheets.' }); }
+    return res.status(201).json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id)) });
+  });
   app.patch('/api/admin/users/:id', requireAuth, async (req, res) => {
     if (requireAdmin(req, res) !== true) return;
     const current = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id) as any; if (!current) return res.status(404).json({ error: 'Usuario no encontrado.' });
