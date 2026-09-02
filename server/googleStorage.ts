@@ -4,6 +4,7 @@ import { Readable } from 'node:stream';
 import type { Advisor, Campaign, Team, User } from '../src/types';
 
 export type SharedRepository = { users: User[]; campaigns: Campaign[]; teams: Team[]; advisors: Advisor[] };
+export type AuthUserRecord = { id: string; name: string; email: string; username?: string; role: User['role']; status: User['status']; teamId?: string; advisorId?: string; advisorDni?: string; avatar?: string; createdAt: string; passwordHash: string };
 
 const SHEETS = {
   USERS: ['id', 'name', 'email', 'username', 'role', 'status', 'team_id', 'advisor_id', 'avatar', 'created_at', 'password_hash'],
@@ -11,7 +12,7 @@ const SHEETS = {
   TEAMS: ['id', 'campaign_id', 'supervisor_id', 'name'],
   ADVISORS: ['id', 'dni', 'employee_code', 'name', 'campaign_id', 'team_id', 'supervisor_id', 'data_json'],
   EVALUATIONS: ['id', 'advisor_id', 'evaluator_id', 'evaluation_type', 'evaluated_at', 'payload_json', 'created_at'],
-  FEEDBACKS: ['feedback_id', 'evaluation_id', 'advisor_id', 'supervisor_id', 'evaluator_id', 'evaluation_type', 'feedback_text', 'advisor_response', 'supervisor_closure_comment', 'status', 'created_at', 'advisor_action_at', 'closed_at', 'updated_at'],
+  FEEDBACKS: ['feedback_id', 'evaluation_id', 'advisor_id', 'supervisor_id', 'evaluator_id', 'evaluation_type', 'feedback_text', 'advisor_response', 'advisor_evidence_url', 'supervisor_closure_comment', 'status', 'created_at', 'advisor_action_at', 'closed_at', 'updated_at'],
   APP_STATE: ['id', 'payload_json', 'updated_at']
 } as const;
 
@@ -95,6 +96,20 @@ class GoogleStorage {
       advisors: advisors!.map(row => JSON.parse(row.data_json || '{}') as Advisor)
     };
   }
+
+  async loadUsersForAuthentication(): Promise<AuthUserRecord[] | null> {
+    const [users, advisors] = await Promise.all([this.rows('USERS'), this.rows('ADVISORS')]);
+    if (!users || !advisors) return null;
+    const advisorDnis = new Map(advisors.map(row => [row.id, row.dni]));
+    return users.filter(row => row.id && row.email && row.password_hash).map(row => ({
+      id: row.id!, name: row.name!, email: row.email!, username: row.username || undefined,
+      role: row.role as User['role'], status: row.status as User['status'], teamId: row.team_id || undefined,
+      advisorId: row.advisor_id || undefined, advisorDni: row.advisor_id ? advisorDnis.get(row.advisor_id) || undefined : undefined,
+      avatar: row.avatar || undefined, createdAt: row.created_at!, passwordHash: row.password_hash!
+    }));
+  }
+
+  async updateUserPasswordHash(id: string, passwordHash: string) { await this.upsert('USERS', 'id', { id, password_hash: passwordHash }); }
 
   async saveRepository(repository: SharedRepository, passwordHashes: Map<string, string>) {
     if (!this.enabled) return;

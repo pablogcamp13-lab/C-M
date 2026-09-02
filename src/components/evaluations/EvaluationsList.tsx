@@ -22,13 +22,23 @@ interface EvaluationsListProps {
 export const EvaluationsList: React.FC<EvaluationsListProps> = ({ 
   onSelectEvaluation, onOpenNewEvaluation
 }) => {
-  const { filteredEvaluations, advisors, users, deleteEvaluation } = useApp();
+  const { filteredEvaluations, advisors, users, currentUser, deleteEvaluation } = useApp();
   const [sortField, setSortField] = useState<'date' | 'score' | 'advisor'>('date');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<'ALL' | 'QUALITY' | 'D3C'>('ALL');
+  const [resultFilter, setResultFilter] = useState<'ALL' | 'VENTA' | 'NO_VENTA'>('ALL');
+  const [stateFilter, setStateFilter] = useState<'ALL' | 'PENDIENTE' | 'FINALIZADA'>('ALL');
+  const isAdvisor = currentUser.role === 'ASESOR';
+  const visibleEvaluations = filteredEvaluations.filter(ev => {
+    if (typeFilter !== 'ALL' && ev.evaluationType !== typeFilter) return false;
+    if (resultFilter !== 'ALL' && (ev.sale ? 'VENTA' : 'NO_VENTA') !== resultFilter) return false;
+    const state = (ev as any).reviewedAt ? 'FINALIZADA' : 'PENDIENTE';
+    return stateFilter === 'ALL' || state === stateFilter;
+  });
 
   // Sorting
-  const sortedEvaluations = [...filteredEvaluations].sort((a, b) => {
+  const sortedEvaluations = [...visibleEvaluations].sort((a, b) => {
     if (sortField === 'date') {
       const cmp = new Date(a.date).getTime() - new Date(b.date).getTime();
       return sortAsc ? cmp : -cmp;
@@ -65,12 +75,12 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
         <div className="cm-page-heading flex items-center justify-between pb-1">
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-[#031E3C] tracking-tight font-heading">
-              Evaluaciones
+              {isAdvisor ? 'Mis evaluaciones' : 'Evaluaciones'}
             </h2>
             <p className="text-xs text-[#667085] mt-0.5 font-medium">
-              {filteredEvaluations.length} {filteredEvaluations.length === 1 ? 'registro encontrado' : 'registros encontrados'}
+              {visibleEvaluations.length} {visibleEvaluations.length === 1 ? 'registro encontrado' : 'registros encontrados'}
             </p>
-          </div><button onClick={onOpenNewEvaluation} className="inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-[#1FD6FF] to-[#2E7BFF] px-3 py-2 text-xs font-bold text-[#031326]"><Phone className="h-4 w-4" />Nueva evaluación</button>
+          </div><div className="flex flex-wrap items-center justify-end gap-2"><select value={typeFilter} onChange={event => setTypeFilter(event.target.value as typeof typeFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todas</option><option value="QUALITY">Calidad</option><option value="D3C">Mejora Continua</option></select><select value={resultFilter} onChange={event => setResultFilter(event.target.value as typeof resultFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todo resultado</option><option value="VENTA">Venta</option><option value="NO_VENTA">No venta</option></select><select value={stateFilter} onChange={event => setStateFilter(event.target.value as typeof stateFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todo estado</option><option value="PENDIENTE">Pendiente de revisión</option><option value="FINALIZADA">Finalizada</option></select>{!isAdvisor && <button onClick={onOpenNewEvaluation} className="inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-[#1FD6FF] to-[#2E7BFF] px-3 py-2 text-xs font-bold text-[#031326]"><Phone className="h-4 w-4" />Nueva evaluación</button>}</div>
         </div>
 
         {/* Evaluations Table */}
@@ -89,6 +99,8 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                       <ArrowUpDown className="w-3 h-3 text-[#667085]" />
                     </div>
                   </th>
+
+                  <th className="py-3 px-3"><span>Tipo</span></th>
 
                   <th 
                     className="py-3 px-3 cursor-pointer hover:text-[#031E3C] transition-colors"
@@ -166,6 +178,8 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                           </div>
                         </td>
 
+                        <td className="py-3 px-3"><span className="cm-badge">{ev.evaluationType === 'QUALITY' ? 'Calidad' : 'Mejora Continua'}</span></td>
+
                         {/* 3. Score 3C (Numeric Badge) */}
                         <td className="py-3 px-3 text-center">
                           <span className={`inline-block text-xs font-bold font-kpi px-2.5 py-1 rounded-md border ${getScoreBadgeClass(ev.scoreTotal)}`}>
@@ -203,13 +217,13 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                         {/* 7. Acciones */}
                         <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1">
-                            <button
+                            {!isAdvisor && <button
                               onClick={() => onSelectEvaluation(ev)}
                               className="p-1.5 text-[#667085] hover:text-[#FF6B00] hover:bg-[#FF6B00]/10 rounded-lg transition-colors"
                               title="Ver ficha de evaluación"
                             >
                               <Eye className="w-4 h-4" />
-                            </button>
+                            </button>}
                             <button
                               onClick={() => setDeleteConfirmId(ev.id)}
                               className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -225,7 +239,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                   })
                 ) : (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-xs text-[#667085]">
+                    <td colSpan={8} className="py-12 text-center text-xs text-[#667085]">
                       <div className="max-w-xs mx-auto space-y-2">
                         <AlertCircle className="w-6 h-6 text-[#667085] mx-auto opacity-50" />
                         <p className="font-semibold text-[#031E3C]">No se encontraron evaluaciones</p>

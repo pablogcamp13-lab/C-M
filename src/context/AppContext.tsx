@@ -261,7 +261,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const repository = { users, campaigns, teams, advisors };
       try {
         const migrationKey = `${STORAGE_PREFIX}shared_repository_migrated_v1`;
-        if (!localStorage.getItem(migrationKey)) {
+        if (currentUser.role !== 'ASESOR' && !localStorage.getItem(migrationKey)) {
           await sharedRepositoryApi.migrate(repository);
           localStorage.setItem(migrationKey, 'true');
         }
@@ -271,7 +271,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const localState = { evaluations, actionPlans, interventions, advisorInterventions, operationalMeasurements, importHistory, config };
         const stateMigrationKey = `${STORAGE_PREFIX}platform_state_migrated_v1`;
         const persistedState = await platformStateApi.load();
-        if (!localStorage.getItem(stateMigrationKey) && !persistedState) { await platformStateApi.save(localState); }
+        if (currentUser.role !== 'ASESOR' && !localStorage.getItem(stateMigrationKey) && !persistedState) { await platformStateApi.save(localState); }
         if (!localStorage.getItem(stateMigrationKey)) localStorage.setItem(stateMigrationKey, 'true');
         const state = persistedState || await platformStateApi.load();
         if (state) {
@@ -284,19 +284,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     };
     hydrate();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, currentUser.role]);
 
   // Persistencia incremental del repositorio único de dotación. Los demás módulos
   // siguen en su almacenamiento actual hasta sus fases de migración respectivas.
   useEffect(() => {
-    if (!isAuthenticated || !rosterHydrated.current) return;
+    if (!isAuthenticated || currentUser.role === 'ASESOR' || !rosterHydrated.current) return;
     void sharedRepositoryApi.sync({ users, campaigns, teams, advisors }).catch(error => console.error('No fue posible sincronizar la dotación', error));
-  }, [users, campaigns, teams, advisors, isAuthenticated]);
+  }, [users, campaigns, teams, advisors, isAuthenticated, currentUser.role]);
 
   useEffect(() => {
-    if (!isAuthenticated || !platformStateHydrated.current) return;
+    if (!isAuthenticated || currentUser.role === 'ASESOR' || !platformStateHydrated.current) return;
     void platformStateApi.save({ evaluations, actionPlans, interventions, advisorInterventions, operationalMeasurements, importHistory, config }).catch(error => console.error('No fue posible sincronizar el estado de plataforma', error));
-  }, [evaluations, actionPlans, interventions, advisorInterventions, operationalMeasurements, importHistory, config, isAuthenticated]);
+  }, [evaluations, actionPlans, interventions, advisorInterventions, operationalMeasurements, importHistory, config, isAuthenticated, currentUser.role]);
 
   const login = async (identity: string, password: string) => {
     const user = await authApi.login(identity, password);

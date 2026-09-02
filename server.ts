@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS app_state (id TEXT PRIMARY KEY, payload_json TEXT NOT
 CREATE TABLE IF NOT EXISTS feedbacks (feedback_id TEXT PRIMARY KEY, evaluation_id TEXT NOT NULL UNIQUE REFERENCES evaluations(id), advisor_id TEXT NOT NULL REFERENCES advisors(id), supervisor_id TEXT NOT NULL REFERENCES users(id), evaluator_id TEXT NOT NULL REFERENCES users(id), evaluation_type TEXT NOT NULL CHECK(evaluation_type IN ('QUALITY','D3C')), feedback_text TEXT NOT NULL DEFAULT '', advisor_response TEXT, supervisor_closure_comment TEXT, status TEXT NOT NULL CHECK(status IN ('PENDIENTE','VALIDADO_ASESOR','OBSERVADO_ASESOR','CERRADO_SUPERVISOR')), created_at TEXT NOT NULL, advisor_action_at TEXT, closed_at TEXT, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_advisors_campaign ON advisors(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_evaluations_advisor_type ON evaluations(advisor_id, evaluation_type);`);
+if (!(db.prepare('PRAGMA table_info(feedbacks)').all() as any[]).some(column => column.name === 'advisor_evidence_url')) db.exec('ALTER TABLE feedbacks ADD COLUMN advisor_evidence_url TEXT');
 
 if (isProduction && !process.env.INITIAL_ADMIN_PASSWORD) throw new Error('INITIAL_ADMIN_PASSWORD es obligatoria en producción.');
 const DEFAULT_ADMIN_PASSWORD = process.env.INITIAL_ADMIN_PASSWORD || 'admin1234';
@@ -118,6 +119,25 @@ function requireAuth(req: express.Request, res: express.Response, next: express.
   (req as any).authUser = publicUser(session); (req as any).token = token; next();
 }
 
+let lastGoogleAuthSync = 0;
+const advisorDnisForAuth = new Map<string, string>();
+const advisorUsersByDni = new Map<string, string>();
+async function syncAuthUsersFromGoogle() {
+  if (!googleStorage.enabled || Date.now() - lastGoogleAuthSync < 60_000) return;
+  const users = await googleStorage.loadUsersForAuthentication();
+  if (!users?.length) return;
+  const upsert = db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar,created_at=excluded.created_at,password_hash=excluded.password_hash`);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const user of users) {
+      upsert.run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt, user.passwordHash);
+      if (user.advisorId && user.advisorDni) { advisorDnisForAuth.set(user.advisorId, user.advisorDni); advisorUsersByDni.set(user.advisorDni, user.id); }
+    }
+    db.exec('COMMIT'); lastGoogleAuthSync = Date.now();
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+}
+
 // Lazy initialization of Gemini client
 let aiClient: GoogleGenAI | null = null;
 
@@ -142,11 +162,22 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-  app.post('/api/auth/login', (req, res) => {
+  app.post('/api/auth/login', async (req, res) => {
     const { identity, password } = req.body || {};
     if (!identity || !password) return res.status(400).json({ error: 'Usuario y contraseña son obligatorios.' });
-    const user = db.prepare('SELECT * FROM users WHERE lower(email)=lower(?) OR lower(username)=lower(?)').get(String(identity), String(identity));
-    if (!user || user.status !== 'ACTIVO' || !validPassword(String(password), String(user.password_hash))) return res.status(401).json({ error: 'Credenciales inválidas.' });
+    try { await syncAuthUsersFromGoogle(); }
+    catch (error) { console.error('[google-storage] No fue posible sincronizar cuentas para el acceso.', error instanceof Error ? error.message : ''); }
+    const identityText = String(identity).trim(); const passwordText = String(password);
+    let user = db.prepare('SELECT * FROM users WHERE lower(email)=lower(?) OR lower(username)=lower(?)').get(identityText, identityText) as any;
+    if (!user && advisorUsersByDni.has(identityText)) user = db.prepare('SELECT * FROM users WHERE id=?').get(advisorUsersByDni.get(identityText)) as any;
+    const advisorDni = user?.advisor_id ? advisorDnisForAuth.get(user.advisor_id) || (db.prepare('SELECT dni FROM advisors WHERE id=?').get(user.advisor_id) as any)?.dni : undefined;
+    const validAdvisorInitialPassword = user?.role === 'ASESOR' && Boolean(advisorDni) && passwordText === advisorDni;
+    if (!user || user.status !== 'ACTIVO' || (!validPassword(passwordText, String(user.password_hash)) && !validAdvisorInitialPassword)) return res.status(401).json({ error: 'Credenciales inválidas.' });
+    if (validAdvisorInitialPassword && !validPassword(passwordText, String(user.password_hash))) {
+      const passwordHash = hashPassword(passwordText); db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(passwordHash, user.id);
+      try { if (googleStorage.enabled) await googleStorage.updateUserPasswordHash(user.id, passwordHash); } catch (error) { console.error('[google-storage] No fue posible actualizar la clave inicial del asesor.', error instanceof Error ? error.message : ''); }
+      user = { ...user, password_hash: passwordHash };
+    }
     const token = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString();
     db.prepare('INSERT INTO sessions (token,user_id,expires_at,created_at) VALUES (?,?,?,?)').run(token, user.id, expiresAt, new Date().toISOString());
@@ -155,16 +186,32 @@ async function startServer() {
   app.get('/api/auth/me', requireAuth, (req, res) => res.json({ user: (req as any).authUser }));
   app.post('/api/auth/logout', requireAuth, (req, res) => { db.prepare('DELETE FROM sessions WHERE token=?').run((req as any).token); res.status(204).end(); });
 
-  app.get('/api/shared-repository', requireAuth, async (_req, res) => res.json({ repository: await readRepository() }));
+  app.get('/api/shared-repository', requireAuth, async (req, res) => {
+    const source = await readRepository(); const user = (req as any).authUser as User;
+    if (user.role !== 'ASESOR' || !user.advisorId) return res.json({ repository: source });
+    const advisor = source.advisors.filter(item => item.id === user.advisorId);
+    const advisorCampaignIds = new Set(advisor.map(item => item.campaignId));
+    const advisorTeamIds = new Set(advisor.map(item => item.teamId).filter(Boolean));
+    const supervisorIds = new Set(advisor.map(item => item.supervisorId).filter(Boolean));
+    return res.json({ repository: {
+      advisors: advisor,
+      campaigns: source.campaigns.filter(item => advisorCampaignIds.has(item.id)),
+      teams: source.teams.filter(item => advisorTeamIds.has(item.id)),
+      users: source.users.filter(item => item.id === user.id || supervisorIds.has(item.id))
+    } });
+  });
   app.post('/api/shared-repository/migrate', requireAuth, async (req, res) => {
+    if ((req as any).authUser.role === 'ASESOR') return res.status(403).json({ error: 'El asesor no puede modificar la dotación.' });
     try { return res.json({ repository: await saveRepository(req.body as SharedRepository) }); }
     catch (error: any) { return res.status(400).json({ error: error.message || 'No fue posible migrar la dotación.' }); }
   });
   app.put('/api/shared-repository/sync', requireAuth, async (req, res) => {
+    if ((req as any).authUser.role === 'ASESOR') return res.status(403).json({ error: 'El asesor no puede modificar la dotación.' });
     try { return res.json({ repository: await saveRepository(req.body as SharedRepository) }); }
     catch (error: any) { return res.status(400).json({ error: error.message || 'No fue posible guardar la dotación.' }); }
   });
   app.post('/api/evaluations', requireAuth, async (req, res) => {
+    if ((req as any).authUser.role === 'ASESOR') return res.status(403).json({ error: 'El asesor no puede crear evaluaciones.' });
     const evaluation = req.body;
     if (!evaluation?.id || !evaluation?.advisorId || !evaluation?.evaluatorId || !['QUALITY', 'D3C'].includes(evaluation?.evaluationType)) return res.status(400).json({ error: 'Evaluación inválida.' });
     try {
@@ -173,32 +220,43 @@ async function startServer() {
       return res.status(201).json({ evaluation });
     } catch (error: any) { console.error('[google-storage] No fue posible guardar la evaluación.', error instanceof Error ? error.message : ''); return res.status(400).json({ error: error.message || 'No fue posible guardar la evaluación.' }); }
   });
-  app.get('/api/feedbacks', requireAuth, async (_req, res) => {
-    try { const remote = googleStorage.enabled ? await googleStorage.loadFeedbacks() : null; if (remote) return res.json({ feedbacks: remote }); }
+  app.get('/api/feedbacks', requireAuth, async (req, res) => {
+    const user = (req as any).authUser as User;
+    const onlyOwn = (feedbacks: any[]) => user.role === 'ASESOR' ? feedbacks.filter(feedback => feedback.advisor_id === user.advisorId) : feedbacks;
+    try { const remote = googleStorage.enabled ? await googleStorage.loadFeedbacks() : null; if (remote) return res.json({ feedbacks: onlyOwn(remote) }); }
     catch (error) { console.error('[google-storage] No fue posible leer feedbacks.', error instanceof Error ? error.message : ''); }
-    res.json({ feedbacks: db.prepare('SELECT * FROM feedbacks ORDER BY updated_at DESC').all() });
+    res.json({ feedbacks: onlyOwn(db.prepare('SELECT * FROM feedbacks ORDER BY updated_at DESC').all() as any[]) });
   });
   app.post('/api/feedbacks', requireAuth, async (req, res) => {
+    if ((req as any).authUser.role === 'ASESOR') return res.status(403).json({ error: 'Un asesor no puede crear feedbacks.' });
     const body = req.body || {}; const evaluation = db.prepare('SELECT * FROM evaluations WHERE id=?').get(body.evaluation_id) as any;
     if (!evaluation) return res.status(400).json({ error: 'La evaluación origen no existe.' });
-    const ev = JSON.parse(evaluation.payload_json); const now = new Date().toISOString(); const feedback = { feedback_id: `fb_${randomBytes(8).toString('hex')}`, evaluation_id: ev.id, advisor_id: ev.advisorId, supervisor_id: ev.supervisorId, evaluator_id: ev.evaluatorId, evaluation_type: ev.evaluationType, feedback_text: String(body.feedback_text || ''), advisor_response: null, supervisor_closure_comment: null, status: 'PENDIENTE', created_at: now, advisor_action_at: null, closed_at: null, updated_at: now };
-    try { if (googleStorage.enabled) await googleStorage.saveFeedback(feedback); db.prepare('INSERT INTO feedbacks (feedback_id,evaluation_id,advisor_id,supervisor_id,evaluator_id,evaluation_type,feedback_text,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(feedback.feedback_id, feedback.evaluation_id, feedback.advisor_id, feedback.supervisor_id, feedback.evaluator_id, feedback.evaluation_type, feedback.feedback_text, feedback.status, now, now); res.status(201).json({ feedback }); }
+    const ev = JSON.parse(evaluation.payload_json); const now = new Date().toISOString(); const feedback = { feedback_id: `fb_${randomBytes(8).toString('hex')}`, evaluation_id: ev.id, advisor_id: ev.advisorId, supervisor_id: ev.supervisorId, evaluator_id: ev.evaluatorId, evaluation_type: ev.evaluationType, feedback_text: String(body.feedback_text || ''), advisor_response: null, advisor_evidence_url: null, supervisor_closure_comment: null, status: 'PENDIENTE', created_at: now, advisor_action_at: null, closed_at: null, updated_at: now };
+    try { if (googleStorage.enabled) await googleStorage.saveFeedback(feedback); db.prepare('INSERT INTO feedbacks (feedback_id,evaluation_id,advisor_id,supervisor_id,evaluator_id,evaluation_type,feedback_text,advisor_evidence_url,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(feedback.feedback_id, feedback.evaluation_id, feedback.advisor_id, feedback.supervisor_id, feedback.evaluator_id, feedback.evaluation_type, feedback.feedback_text, feedback.advisor_evidence_url, feedback.status, now, now); res.status(201).json({ feedback }); }
     catch (error) { console.error('[google-storage] No fue posible guardar feedback.', error instanceof Error ? error.message : ''); res.status(400).json({ error: 'Esta evaluación ya tiene feedback o no fue posible sincronizarlo.' }); }
   });
   app.patch('/api/feedbacks/:id', requireAuth, async (req, res) => {
-    const current = db.prepare('SELECT * FROM feedbacks WHERE feedback_id=?').get(req.params.id) as any; if (!current) return res.status(404).json({ error: 'Feedback no encontrado.' }); const body = req.body || {}; const status = body.status || current.status;
+    const current = db.prepare('SELECT * FROM feedbacks WHERE feedback_id=?').get(req.params.id) as any; if (!current) return res.status(404).json({ error: 'Feedback no encontrado.' }); const body = req.body || {}; const status = body.status || current.status; const user = (req as any).authUser as User;
+    if (user.role === 'ASESOR' && (user.advisorId !== current.advisor_id || !['VALIDADO_ASESOR', 'OBSERVADO_ASESOR'].includes(status))) return res.status(403).json({ error: 'No tienes permiso para cerrar o modificar este feedback.' });
     const valid = (current.status === 'PENDIENTE' && ['VALIDADO_ASESOR','OBSERVADO_ASESOR'].includes(status)) || (['VALIDADO_ASESOR','OBSERVADO_ASESOR'].includes(current.status) && status === 'CERRADO_SUPERVISOR') || status === current.status;
     if (!valid || (status === 'CERRADO_SUPERVISOR' && current.status === 'OBSERVADO_ASESOR' && !String(body.supervisor_closure_comment || current.supervisor_closure_comment || '').trim())) return res.status(400).json({ error: 'Transición de feedback no permitida o falta comentario de cierre.' });
-    const now = new Date().toISOString(); const feedback = { ...current, status, advisor_response: body.advisor_response ?? current.advisor_response, supervisor_closure_comment: body.supervisor_closure_comment ?? current.supervisor_closure_comment, advisor_action_at: ['VALIDADO_ASESOR','OBSERVADO_ASESOR'].includes(status) ? now : current.advisor_action_at, closed_at: status === 'CERRADO_SUPERVISOR' ? now : current.closed_at, updated_at: now };
-    try { if (googleStorage.enabled) await googleStorage.saveFeedback(feedback); db.prepare('UPDATE feedbacks SET status=?, advisor_response=?, supervisor_closure_comment=?, advisor_action_at=?, closed_at=?, updated_at=? WHERE feedback_id=?').run(feedback.status, feedback.advisor_response, feedback.supervisor_closure_comment, feedback.advisor_action_at, feedback.closed_at, feedback.updated_at, req.params.id); res.json({ feedback }); }
+    const now = new Date().toISOString(); const feedback = { ...current, status, advisor_response: body.advisor_response ?? current.advisor_response, advisor_evidence_url: body.advisor_evidence_url ?? current.advisor_evidence_url, supervisor_closure_comment: body.supervisor_closure_comment ?? current.supervisor_closure_comment, advisor_action_at: ['VALIDADO_ASESOR','OBSERVADO_ASESOR'].includes(status) ? now : current.advisor_action_at, closed_at: status === 'CERRADO_SUPERVISOR' ? now : current.closed_at, updated_at: now };
+    try { if (googleStorage.enabled) await googleStorage.saveFeedback(feedback); db.prepare('UPDATE feedbacks SET status=?, advisor_response=?, advisor_evidence_url=?, supervisor_closure_comment=?, advisor_action_at=?, closed_at=?, updated_at=? WHERE feedback_id=?').run(feedback.status, feedback.advisor_response, feedback.advisor_evidence_url, feedback.supervisor_closure_comment, feedback.advisor_action_at, feedback.closed_at, feedback.updated_at, req.params.id); res.json({ feedback }); }
     catch (error) { console.error('[google-storage] No fue posible actualizar feedback.', error instanceof Error ? error.message : ''); res.status(502).json({ error: 'No fue posible sincronizar el feedback.' }); }
   });
-  app.get('/api/platform-state', requireAuth, async (_req, res) => {
-    try { const state = googleStorage.enabled ? await googleStorage.loadPlatformState() : null; if (state !== null) return res.json({ state }); }
+  app.get('/api/platform-state', requireAuth, async (req, res) => {
+    const user = (req as any).authUser as User;
+    const onlyOwn = (state: any) => {
+      if (!state || user.role !== 'ASESOR' || !user.advisorId) return state;
+      const mine = (items: any[] | undefined) => (items || []).filter(item => item.advisorId === user.advisorId);
+      return { ...state, evaluations: mine(state.evaluations), actionPlans: mine(state.actionPlans), advisorInterventions: mine(state.advisorInterventions), operationalMeasurements: mine(state.operationalMeasurements), importHistory: [] };
+    };
+    try { const state = googleStorage.enabled ? await googleStorage.loadPlatformState() : null; if (state !== null) return res.json({ state: onlyOwn(state) }); }
     catch (error) { console.error('[google-storage] No fue posible leer el estado de plataforma.', error instanceof Error ? error.message : ''); }
-    const row = db.prepare('SELECT payload_json FROM app_state WHERE id=?').get('global'); res.json({ state: row ? JSON.parse(String(row.payload_json)) : null });
+    const row = db.prepare('SELECT payload_json FROM app_state WHERE id=?').get('global'); res.json({ state: row ? onlyOwn(JSON.parse(String(row.payload_json))) : null });
   });
   app.put('/api/platform-state', requireAuth, async (req, res) => {
+    if ((req as any).authUser.role === 'ASESOR') return res.status(403).json({ error: 'El asesor no puede sobrescribir el estado global.' });
     const now = new Date().toISOString();
     try { if (googleStorage.enabled) { await googleStorage.savePlatformState(req.body); for (const evaluation of (req.body?.evaluations || [])) if (evaluation?.id && evaluation?.advisorId && evaluation?.evaluatorId && ['QUALITY','D3C'].includes(evaluation?.evaluationType)) await googleStorage.saveEvaluation(evaluation); } }
     catch (error) { console.error('[google-storage] No fue posible guardar el estado de plataforma.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible sincronizar el estado con Google Sheets.' }); }

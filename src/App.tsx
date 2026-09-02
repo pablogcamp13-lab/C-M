@@ -7,6 +7,7 @@ import { NewEvaluationModal } from './components/evaluations/NewEvaluationModal'
 import { QualityEvaluationModal } from './components/evaluations/QualityEvaluationModal';
 import { QualityDashboardView } from './components/dashboard/QualityDashboardView';
 import { HomeView } from './components/dashboard/HomeView';
+import { AdvisorHomeView } from './components/dashboard/AdvisorHomeView';
 import { EvaluationDetailModal } from './components/evaluations/EvaluationDetailModal';
 import { AdvisorsList } from './components/advisors/AdvisorsList';
 import { AdvisorProfileModal } from './components/advisors/AdvisorProfileModal';
@@ -24,7 +25,7 @@ import { LoginScreen } from './components/auth/LoginScreen';
 import { ChevronRight, ShieldCheck, TrendingUp, X } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
-  const { currentSection, setCurrentSection, evaluations, advisors } = useApp();
+  const { currentSection, setCurrentSection, evaluations, advisors, currentUser } = useApp();
 
   // Modals state
   const [isNewEvalModalOpen, setIsNewEvalModalOpen] = useState(false);
@@ -82,7 +83,7 @@ const MainLayout: React.FC = () => {
 
         {/* Dynamic View Router */}
         <main className="flex-1 flex flex-col min-h-0 relative">
-          {currentSection === 'home' && <HomeView />}
+          {currentSection === 'home' && (currentUser.role === 'ASESOR' ? <AdvisorHomeView /> : <HomeView />)}
           
           {currentSection === 'dashboard' && (
             <DashboardView

@@ -34,7 +34,8 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
   onClearInitialEvaluation,
   onNavigateToEvaluation
 }) => {
-  const { actionPlans, advisors, users, addActionPlan, updateActionPlan, deleteActionPlan } = useApp();
+  const { actionPlans, advisors, users, currentUser, addActionPlan, updateActionPlan, deleteActionPlan } = useApp();
+  const isAdvisor = currentUser.role === 'ASESOR';
 
   const leaders = useMemo(() => users.filter(u => u.role !== 'ASESOR'), [users]);
 
@@ -62,6 +63,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
   const [notes, setNotes] = useState<string>('');
 
   const filteredPlans = actionPlans.filter(p => {
+    if (isAdvisor && p.advisorId !== currentUser.advisorId) return false;
     if (filterStatus && p.status !== filterStatus) return false;
     return true;
   });
@@ -140,13 +142,13 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
               </button>
             </div>
 
-            <button
+            {!isAdvisor && <button
               onClick={() => setIsNewModalOpen(true)}
               className="flex items-center gap-1.5 bg-[#FF6B00] hover:bg-[#e05e00] text-white px-3.5 py-2 rounded-lg text-xs font-semibold shadow-xs transition-all cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Crear Plan</span>
-            </button>
+            </button>}
           </div>
         </div>
 
