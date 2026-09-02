@@ -254,18 +254,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     restoreSession();
   }, []);
 
-  // Primera carga autenticada: importa una única vez la dotación existente y, desde
-  // entonces, la fuente de verdad para usuarios/campañas/equipos/asesores es SQLite.
+  // La fuente de verdad de la dotación es el backend/Sheets. Nunca se envían los
+  // datos iniciales del navegador al abrir una sesión nueva.
   useEffect(() => {
     if (!isAuthenticated || rosterHydrated.current) return;
     const hydrate = async () => {
-      const repository = { users, campaigns, teams, advisors };
       try {
-        const migrationKey = `${STORAGE_PREFIX}shared_repository_migrated_v1`;
-        if (currentUser.role !== 'ASESOR' && !localStorage.getItem(migrationKey)) {
-          await sharedRepositoryApi.migrate(repository);
-          localStorage.setItem(migrationKey, 'true');
-        }
         const persisted = await sharedRepositoryApi.load();
         rosterHydrated.current = true;
         setUsers(persisted.users); setCampaigns(persisted.campaigns); setTeams(persisted.teams); setAdvisors(persisted.advisors);

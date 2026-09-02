@@ -1,0 +1,33 @@
+import 'dotenv/config';
+import { randomBytes, scryptSync } from 'node:crypto';
+import XLSX from 'xlsx';
+import { googleStorage } from '../server/googleStorage';
+import type { Advisor, Campaign, User } from '../src/types';
+
+const filePath = process.env.ROSTER_FILE;
+if (!filePath || !googleStorage.enabled) throw new Error('Define ROSTER_FILE y las credenciales de Google.');
+const slug = (value:string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'.').replace(/^\.|\.$/g,'');
+const id = (prefix:string,value:string) => `${prefix}_${slug(value).replaceAll('.','_')}`;
+const hash = (password:string) => { const salt=randomBytes(16).toString('hex'); return `${salt}:${scryptSync(password,salt,64).toString('hex')}`; };
+const dateValue = (value:unknown) => value instanceof Date && !Number.isNaN(value.getTime()) ? `${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}-${String(value.getDate()).padStart(2,'0')}` : '';
+
+const workbook=XLSX.readFile(filePath,{cellDates:true});
+const raw=XLSX.utils.sheet_to_json<Record<string,unknown>>(workbook.Sheets[workbook.SheetNames[0]],{defval:null,raw:true});
+const rows=raw.filter(row=>String(row.DNI||'').trim()&&String(row.ASESORES||'').trim());
+if(!rows.length) throw new Error('El Excel no contiene asesores válidos.');
+const current=await googleStorage.loadRepository(); const auth=await googleStorage.loadUsersForAuthentication();
+if(!current||!auth) throw new Error('No fue posible leer la persistencia actual.');
+const now=new Date().toISOString();
+const campaign:Campaign={id:'camp_bitel',name:'Bitel',client:'Bitel',status:'ACTIVA',products:[],description:'Dotación operativa Bitel.'};
+const supervisorNames=[...new Set(rows.map(row=>String(row.SUPERVISOR||'').trim()).filter(Boolean))];
+const supervisors:User[]=supervisorNames.map(name=>{const userId=id('usr_sup',name);const existing=current.users.find(user=>user.id===userId);return existing||{id:userId,name,username:slug(name),email:`${slug(name)}@bitel.local`,role:'SUPERVISOR',status:'ACTIVO',createdAt:now,mustChangePassword:true};});
+const teams=supervisors.map(user=>({id:id('team_bitel',user.name),campaignId:campaign.id,supervisorId:user.id,name:`Equipo Bitel · ${user.name}`}));
+const advisors=rows.map((row,index)=>{const dni=String(row.DNI).trim();const name=String(row.ASESORES).trim().replace(/\s+/g,' ');const supervisor=supervisors.find(user=>user.name===String(row.SUPERVISOR||'').trim())!;const team=teams.find(item=>item.supervisorId===supervisor.id)!;const terminationDate=dateValue(row['F. CESE']);const managementFactor=Number(row.GESTION);const sph=Number(row.SPH);return {id:`adv_bitel_${dni}`,dni,employeeCode:`BITEL-${dni.slice(-4)}`,name,campaignId:campaign.id,teamId:team.id,supervisorId:supervisor.id,supervisor:supervisor.name,schedule:String(row.HORARIO||''),shift:managementFactor>=1?'COMPLETO':'MANANA',status:terminationDate?'INACTIVO':'ACTIVO',active:!terminationDate,hireDate:dateValue(row['F. INGRESO']),campaignStartDate:dateValue(row['F. CAMPAÑA']),terminationDate:terminationDate||undefined,importedTenureLabel:String(row.ANTIGÜEDAD||'').trim(),hasOperationalBaseline:true,baselineSph:Number.isFinite(sph)?sph:0,baselineDate:'2026-08-31',baselinePeriod:'Agosto 2026',managementFactor,index};}) as Advisor[];
+const preserved=current.users.filter(user=>user.role!=='ASESOR'&&!['usr_sup_demo','usr_eval_demo'].includes(user.id));
+const reserved=new Set(preserved.map(user=>user.username?.toLowerCase()).filter(Boolean));
+const advisorUsers=advisors.map(advisor=>{const existing=current.users.find(user=>user.advisorId===advisor.id);if(existing)return existing;const base=slug(advisor.name);let username=base;let suffix=1;while(reserved.has(username))username=`${base}.${++suffix}`;reserved.add(username);return {id:`usr_${advisor.id}`,name:advisor.name,username,email:`${username}@asesores3c.com`,role:'ASESOR',status:advisor.active?'ACTIVO':'INACTIVO',advisorId:advisor.id,createdAt:now,mustChangePassword:true} as User;});
+const users=[...preserved,...supervisors.filter(user=>!preserved.some(item=>item.id===user.id)),...advisorUsers];
+const hashes=new Map(auth.map(user=>[user.id,user.passwordHash]));
+for(const user of users)if(!hashes.get(user.id))hashes.set(user.id,hash('12345678'));
+await googleStorage.saveRepository({users,campaigns:[campaign],teams,advisors},hashes);
+console.log(JSON.stringify({campaigns:1,teams:teams.length,advisors:advisors.length,users:users.length,preservedPasswords:auth.filter(user=>hashes.get(user.id)===user.passwordHash).length}));

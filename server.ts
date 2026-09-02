@@ -97,7 +97,7 @@ async function readRepository() {
   if (!googleStorage.enabled) return repository();
   try {
     const remote = await googleStorage.loadRepository();
-    if (remote && (remote.users.length || remote.campaigns.length || remote.teams.length || remote.advisors.length)) return remote;
+    if (remote && (remote.users.length || remote.campaigns.length || remote.teams.length || remote.advisors.length)) { persistRepository(remote); return remote; }
     const local = repository();
     await googleStorage.saveRepository(local, passwordHashes());
     console.log('[google-storage] Google Sheets inicializado con la persistencia local existente.');
