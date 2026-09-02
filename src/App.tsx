@@ -20,6 +20,7 @@ import { ImpactAnalysisView } from './components/impact/ImpactAnalysisView';
 import { ReportsExportView } from './components/reports/ReportsExportView';
 import { AdminSettingsView } from './components/admin/AdminSettingsView';
 import { FeedbackView } from './components/feedback/FeedbackView';
+import { DevelopmentView } from './components/development/DevelopmentView';
 import { Evaluation, Advisor } from './types';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { ForcePasswordChange } from './components/auth/ForcePasswordChange';
@@ -101,6 +102,7 @@ const MainLayout: React.FC = () => {
             />
           )}
           {currentSection === 'feedback' && <FeedbackView />}
+          {currentSection === 'development' && <DevelopmentView />}
 
           {currentSection === 'advisors' && (
             <AdvisorsList

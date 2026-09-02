@@ -13,7 +13,9 @@ const SHEETS = {
   ADVISORS: ['id', 'dni', 'employee_code', 'name', 'campaign_id', 'team_id', 'supervisor_id', 'data_json'],
   EVALUATIONS: ['id', 'advisor_id', 'evaluator_id', 'evaluation_type', 'evaluated_at', 'payload_json', 'created_at'],
   FEEDBACKS: ['feedback_id', 'evaluation_id', 'advisor_id', 'supervisor_id', 'evaluator_id', 'evaluation_type', 'feedback_text', 'advisor_response', 'advisor_evidence_url', 'supervisor_closure_comment', 'status', 'created_at', 'advisor_action_at', 'closed_at', 'updated_at'],
-  APP_STATE: ['id', 'payload_json', 'updated_at']
+  APP_STATE: ['id', 'payload_json', 'updated_at'],
+  DEVELOPMENT_CAPSULES: ['id', 'status', 'data_json', 'created_at', 'updated_at'],
+  DEVELOPMENT_ASSIGNMENTS: ['id', 'capsule_id', 'advisor_id', 'status', 'data_json', 'created_at', 'updated_at']
 } as const;
 
 type SheetName = keyof typeof SHEETS;
@@ -114,7 +116,7 @@ class GoogleStorage {
   async saveRepository(repository: SharedRepository, passwordHashes: Map<string, string>) {
     if (!this.enabled) return;
     await Promise.all([
-      this.replace('USERS', repository.users.map(user => ({ id: user.id, name: user.name, email: user.email, username: user.username, role: user.role, status: user.status, team_id: user.teamId, advisor_id: user.advisorId, avatar: user.avatar, created_at: user.createdAt, password_hash: passwordHashes.get(user.id), must_change_password: user.mustChangePassword ? '1' : '0' }))),
+      this.replace('USERS', repository.users.map(user => ({ id: user.id, name: user.name, email: user.email, username: user.username, role: user.role, status: user.status, team_id: user.teamId, advisor_id: user.advisorId, avatar: user.avatar, created_at: user.createdAt, password_hash: passwordHashes.get(user.id), must_change_password: user.mustChangePassword !== false ? '1' : '0' }))),
       this.replace('CAMPAIGNS', repository.campaigns.map(campaign => ({ id: campaign.id, name: campaign.name, client: campaign.client, status: campaign.status, products_json: JSON.stringify(campaign.products || []), description: campaign.description }))),
       this.replace('TEAMS', repository.teams.map(team => ({ id: team.id, campaign_id: team.campaignId, supervisor_id: team.supervisorId, name: team.name }))),
       this.replace('ADVISORS', repository.advisors.map(advisor => ({ id: advisor.id, dni: advisor.dni, employee_code: advisor.employeeCode || '', name: advisor.name, campaign_id: advisor.campaignId, team_id: advisor.teamId, supervisor_id: advisor.supervisorId, data_json: JSON.stringify(advisor) })))
@@ -129,6 +131,8 @@ class GoogleStorage {
   }
   async loadPlatformState() { const rows = await this.rows('APP_STATE'); const row = rows?.find(item => item.id === 'global'); return row?.payload_json ? JSON.parse(row.payload_json) : null; }
   async savePlatformState(state: unknown) { await this.upsert('APP_STATE', 'id', { id: 'global', payload_json: JSON.stringify(state), updated_at: new Date().toISOString() }); }
+  async loadDevelopment() { const [capsules, assignments] = await Promise.all([this.rows('DEVELOPMENT_CAPSULES'), this.rows('DEVELOPMENT_ASSIGNMENTS')]); return { capsules: (capsules || []).map(row => JSON.parse(row.data_json || '{}')), assignments: (assignments || []).map(row => JSON.parse(row.data_json || '{}')) }; }
+  async saveDevelopment(capsules: any[], assignments: any[]) { await Promise.all([this.replace('DEVELOPMENT_CAPSULES', capsules.map(item => ({ id:item.id,status:item.status,data_json:JSON.stringify(item),created_at:item.createdAt,updated_at:item.updatedAt }))),this.replace('DEVELOPMENT_ASSIGNMENTS', assignments.map(item => ({ id:item.id,capsule_id:item.capsuleId,advisor_id:item.advisorId,status:item.status,data_json:JSON.stringify(item),created_at:item.assignedAt,updated_at:item.updatedAt })))]); }
 
   async uploadFile(input: { name: string; mimeType: string; base64: string }) {
     if (!this.enabled) throw new Error('Google Drive no está configurado.');

@@ -86,3 +86,14 @@ export const platformStateApi = {
   async load(): Promise<any | null> { const result = await json<{ state: any | null }>(await fetch('/api/platform-state', { headers: headers() })); return result.state; },
   async save(state: any) { return json(await fetch('/api/platform-state', { method: 'PUT', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(state) })); }
 };
+
+export const developmentApi = {
+  async capsules() { return json<{ capsules: any[] }>(await fetch('/api/development/capsules', { headers: headers() })); },
+  async createCapsule(data: any) { return json<{ capsule: any }>(await fetch('/api/development/capsules', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(data) })); },
+  async updateCapsule(id: string, data: any) { return json<{ capsule: any }>(await fetch(`/api/development/capsules/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(data) })); },
+  async duplicateCapsule(id: string) { return json<{ capsule: any }>(await fetch(`/api/development/capsules/${id}/duplicate`, { method: 'POST', headers: headers() })); },
+  async removeCapsule(id: string) { await fetch(`/api/development/capsules/${id}`, { method: 'DELETE', headers: headers() }); },
+  async assignments() { return json<{ assignments: any[] }>(await fetch('/api/development/assignments', { headers: headers() })); },
+  async assign(data: any) { return json<{ assignments: any[] }>(await fetch('/api/development/assignments', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(data) })); },
+  async updateAssignment(id: string, data: any) { return json<{ assignment: any }>(await fetch(`/api/development/assignments/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(data) })); }
+};

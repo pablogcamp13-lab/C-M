@@ -383,4 +383,5 @@ export type NavigationSection =
   | 'interventions' 
   | 'impact' 
   | 'reports' 
-  | 'admin';
+  | 'admin'
+  | 'development';

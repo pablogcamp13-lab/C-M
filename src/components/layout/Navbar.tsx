@@ -7,6 +7,7 @@ const navigation: Array<{ label: string; section: NavigationSection }> = [
   { label: 'Inicio', section: 'home' }, { label: 'Mejora Continua', section: 'dashboard' },
   { label: 'Calidad', section: 'dashboard_quality' }, { label: 'Evaluaciones', section: 'evaluations' },
   { label: 'Feedback', section: 'feedback' }, { label: 'Planes de Acción', section: 'action_plans' },
+  { label: 'Desarrollo', section: 'development' },
   { label: 'Analítica', section: 'pareto' }, { label: 'Configuración', section: 'admin' }
 ];
 
@@ -15,8 +16,8 @@ export const Navbar: React.FC<{ onOpenNewEvaluation: () => void }> = ({ onOpenNe
   const [open, setOpen] = useState(false);
   const [menu, setMenu] = useState(false);
   const visibleNavigation = currentUser.role === 'ASESOR'
-    ? navigation.filter(item => ['home', 'evaluations', 'feedback', 'action_plans'].includes(item.section))
-    : navigation;
+    ? navigation.filter(item => ['home', 'evaluations', 'feedback', 'action_plans', 'development'].includes(item.section))
+    : navigation.filter(item => item.section !== 'development' || currentUser.role === 'ADMINISTRADOR');
 
   return <header className="cm-navbar">
     <div className="cm-navbar__inner">

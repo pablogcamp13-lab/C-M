@@ -40,7 +40,7 @@ const advisors = rows.map((row, index) => {
     baselineSph: Number.isFinite(sph) ? sph : 0, baselineDate: '2026-08-31', baselinePeriod: 'Agosto 2026', managementFactor, index
   };
 }) as Advisor[];
-const advisorUsers: User[] = advisors.map(advisor => ({ id: `usr_${advisor.id}`, name: advisor.name, username: slug(advisor.name), email: `${slug(advisor.name)}@asesores3c.com`, role: 'ASESOR', status: 'ACTIVO', advisorId: advisor.id, createdAt: now, password: advisor.dni }));
+const advisorUsers: User[] = advisors.map(advisor => ({ id: `usr_${advisor.id}`, name: advisor.name, username: slug(advisor.name), email: `${slug(advisor.name)}@asesores3c.com`, role: 'ASESOR', status: 'ACTIVO', advisorId: advisor.id, createdAt: now, password: '12345678', mustChangePassword: true }));
 const measurements = advisors.map(advisor => ({ id: `opm_aug_2026_${advisor.dni}`, advisorId: advisor.id, dni: advisor.dni, measurementDate: '2026-08-31', periodName: 'Agosto 2026', campaignId: campaign.id, campaignName: campaign.name, connectionTime: 'Pendiente', connectionMinutes: 0, sph: advisor.baselineSph, managementFactor: (advisor as any).managementFactor, source: 'CARGA_EXCEL', comments: 'Dotación Bitel · Agosto 2026', createdAt: now }));
 
 const sqlitePath = process.env.SQLITE_PATH || join(process.cwd(), 'data', 'contact-center.sqlite');
@@ -55,7 +55,7 @@ const repository = { users: [{ id: admin.id, name: admin.name, email: admin.emai
 
 if (googleStorage.enabled) {
   await googleStorage.clearRuntimeData();
-  const hashes = new Map<string, string>([[admin.id, admin.password_hash], ...supervisors.map(supervisor => [supervisor.id, hash('cambiar1234')] as [string, string]), ...advisorUsers.map(user => [user.id, hash(user.password!)] as [string, string])]);
+  const hashes = new Map<string, string>([[admin.id, admin.password_hash], ...supervisors.map(supervisor => [supervisor.id, hash('12345678')] as [string, string]), ...advisorUsers.map(user => [user.id, hash(user.password!)] as [string, string])]);
   await googleStorage.saveRepository(repository, hashes);
   await googleStorage.savePlatformState(state);
 }
@@ -64,7 +64,7 @@ db.exec('BEGIN IMMEDIATE');
 try {
   db.exec('DELETE FROM feedbacks; DELETE FROM evaluations; DELETE FROM sessions; DELETE FROM advisors; DELETE FROM teams; DELETE FROM campaigns; DELETE FROM users; DELETE FROM app_state;');
   db.prepare('INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(admin.id, admin.name, admin.email, admin.username, admin.role, admin.status, admin.team_id, admin.advisor_id, admin.avatar, admin.created_at, admin.password_hash);
-  for (const user of supervisors) db.prepare('INSERT INTO users (id,name,email,username,role,status,created_at,password_hash) VALUES (?,?,?,?,?,?,?,?)').run(user.id, user.name, user.email, user.username, user.role, user.status, user.createdAt, hash('cambiar1234'));
+  for (const user of supervisors) db.prepare('INSERT INTO users (id,name,email,username,role,status,created_at,password_hash) VALUES (?,?,?,?,?,?,?,?)').run(user.id, user.name, user.email, user.username, user.role, user.status, user.createdAt, hash('12345678'));
   for (const user of advisorUsers) db.prepare('INSERT INTO users (id,name,email,username,role,status,advisor_id,created_at,password_hash) VALUES (?,?,?,?,?,?,?,?,?)').run(user.id, user.name, user.email, user.username, user.role, user.status, user.advisorId, user.createdAt, hash(user.password!));
   db.prepare('INSERT INTO campaigns (id,name,client,status,products_json,description) VALUES (?,?,?,?,?,?)').run(campaign.id, campaign.name, campaign.client, campaign.status, JSON.stringify(campaign.products), campaign.description);
   for (const team of teams) db.prepare('INSERT INTO teams (id,campaign_id,supervisor_id,name) VALUES (?,?,?,?)').run(team.id, team.campaignId, team.supervisorId, team.name);

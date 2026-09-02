@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS quality_criteria (id TEXT PRIMARY KEY, criterion_code
 CREATE TABLE IF NOT EXISTS critical_errors (id TEXT PRIMARY KEY, error_code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT NOT NULL, focus TEXT, active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS app_state (id TEXT PRIMARY KEY, payload_json TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS feedbacks (feedback_id TEXT PRIMARY KEY, evaluation_id TEXT NOT NULL UNIQUE REFERENCES evaluations(id), advisor_id TEXT NOT NULL REFERENCES advisors(id), supervisor_id TEXT NOT NULL REFERENCES users(id), evaluator_id TEXT NOT NULL REFERENCES users(id), evaluation_type TEXT NOT NULL CHECK(evaluation_type IN ('QUALITY','D3C')), feedback_text TEXT NOT NULL DEFAULT '', advisor_response TEXT, supervisor_closure_comment TEXT, status TEXT NOT NULL CHECK(status IN ('PENDIENTE','VALIDADO_ASESOR','OBSERVADO_ASESOR','CERRADO_SUPERVISOR')), created_at TEXT NOT NULL, advisor_action_at TEXT, closed_at TEXT, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS development_capsules (id TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('BORRADOR','PUBLICADA','ARCHIVADA')), data_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS development_assignments (id TEXT PRIMARY KEY, capsule_id TEXT NOT NULL REFERENCES development_capsules(id), advisor_id TEXT NOT NULL REFERENCES advisors(id), status TEXT NOT NULL CHECK(status IN ('PENDIENTE','EN_CURSO','COMPLETADA','VENCIDA')), data_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(capsule_id,advisor_id));
 CREATE INDEX IF NOT EXISTS idx_advisors_campaign ON advisors(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_evaluations_advisor_type ON evaluations(advisor_id, evaluation_type);`);
 if (!(db.prepare('PRAGMA table_info(feedbacks)').all() as any[]).some(column => column.name === 'advisor_evidence_url')) db.exec('ALTER TABLE feedbacks ADD COLUMN advisor_evidence_url TEXT');
@@ -75,7 +77,7 @@ function persistRepository(input: SharedRepository) {
     for (const campaign of source.campaigns || []) db.prepare(`INSERT INTO campaigns (id,name,client,status,products_json,description) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,client=excluded.client,status=excluded.status,products_json=excluded.products_json,description=excluded.description`).run(campaign.id, campaign.name, campaign.client, campaign.status, JSON.stringify(campaign.products || []), campaign.description || null);
     for (const user of source.users || []) {
       const existing = db.prepare('SELECT password_hash FROM users WHERE id=?').get(user.id);
-      db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar,must_change_password=excluded.must_change_password`).run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt || now, existing?.password_hash || hashPassword(user.password || INITIAL_PASSWORD), user.mustChangePassword ? 1 : 0);
+      db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar,must_change_password=excluded.must_change_password`).run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt || now, existing?.password_hash || hashPassword(user.password || INITIAL_PASSWORD), user.mustChangePassword !== false ? 1 : 0);
     }
     for (const team of source.teams || []) db.prepare(`INSERT INTO teams (id,campaign_id,supervisor_id,name) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET campaign_id=excluded.campaign_id,supervisor_id=excluded.supervisor_id,name=excluded.name`).run(team.id, team.campaignId, team.supervisorId, team.name);
     for (const advisor of source.advisors || []) db.prepare(`INSERT INTO advisors (id,dni,employee_code,name,campaign_id,team_id,supervisor_id,data_json) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET dni=excluded.dni,employee_code=excluded.employee_code,name=excluded.name,campaign_id=excluded.campaign_id,team_id=excluded.team_id,supervisor_id=excluded.supervisor_id,data_json=excluded.data_json`).run(advisor.id, advisor.dni, advisor.employeeCode || '', advisor.name, advisor.campaignId, advisor.teamId || null, advisor.supervisorId || null, JSON.stringify(advisor));
@@ -323,6 +325,65 @@ async function startServer() {
   });
   app.get('/api/files/:id', requireAuth, async (req, res) => { try { res.json({ file: await googleStorage.fileMetadata(req.params.id) }); } catch { res.status(404).json({ error: 'Archivo no encontrado.' }); } });
   app.delete('/api/files/:id', requireAuth, async (req, res) => { try { await googleStorage.deleteFile(req.params.id); res.status(204).end(); } catch { res.status(404).json({ error: 'Archivo no encontrado.' }); } });
+
+  const developmentAdmin = (req: express.Request, res: express.Response) => (req as any).authUser?.role === 'ADMINISTRADOR' || res.status(403).json({ error: 'Acceso restringido a administración.' });
+  const capsuleRows = () => (db.prepare('SELECT data_json FROM development_capsules ORDER BY updated_at DESC').all() as any[]).map(row => JSON.parse(row.data_json));
+  const assignmentRows = () => (db.prepare('SELECT data_json FROM development_assignments ORDER BY updated_at DESC').all() as any[]).map(row => JSON.parse(row.data_json));
+  const syncDevelopment = async () => { if (googleStorage.enabled) await googleStorage.saveDevelopment(capsuleRows(), assignmentRows()); };
+  const hydrateDevelopment = async () => { if (!googleStorage.enabled) return; const remote = await googleStorage.loadDevelopment(); if (!remote.capsules.length && !remote.assignments.length) return; const insertCapsule=db.prepare('INSERT OR REPLACE INTO development_capsules (id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?)'); const insertAssignment=db.prepare('INSERT OR REPLACE INTO development_assignments (id,capsule_id,advisor_id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?)'); for(const item of remote.capsules)insertCapsule.run(item.id,item.status,JSON.stringify(item),item.createdAt,item.updatedAt); for(const item of remote.assignments)try{insertAssignment.run(item.id,item.capsuleId,item.advisorId,item.status,JSON.stringify(item),item.assignedAt,item.updatedAt);}catch{} };
+  app.get('/api/development/capsules', requireAuth, async (req, res) => {
+    const user = (req as any).authUser as User; if (!['ADMINISTRADOR','ASESOR'].includes(user.role)) return res.status(403).json({ error:'Acceso denegado.' }); try{await hydrateDevelopment();}catch(error){console.error('[google-storage] No fue posible cargar desarrollo.',error instanceof Error?error.message:'');} const capsules = capsuleRows();
+    if (user.role !== 'ASESOR') return res.json({ capsules });
+    const ids = new Set(assignmentRows().filter(item => item.advisorId === user.advisorId).map(item => item.capsuleId));
+    return res.json({ capsules: capsules.filter(item => item.status === 'PUBLICADA' && ids.has(item.id)) });
+  });
+  app.post('/api/development/capsules', requireAuth, async (req, res) => {
+    if (developmentAdmin(req, res) !== true) return; const now = new Date().toISOString(); const body = req.body || {};
+    const capsule = { ...body, id: `cap_${randomBytes(8).toString('hex')}`, status: 'BORRADOR', createdAt: now, updatedAt: now };
+    if (!capsule.title || !capsule.content?.type || !['FORMULARIO','FORO'].includes(capsule.evaluation?.type)) return res.status(400).json({ error: 'Datos de cápsula incompletos.' });
+    db.prepare('INSERT INTO development_capsules (id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?)').run(capsule.id, capsule.status, JSON.stringify(capsule), now, now); await syncDevelopment(); return res.status(201).json({ capsule });
+  });
+  app.patch('/api/development/capsules/:id', requireAuth, async (req, res) => {
+    if (developmentAdmin(req, res) !== true) return; const row = db.prepare('SELECT data_json FROM development_capsules WHERE id=?').get(req.params.id) as any; if (!row) return res.status(404).json({ error: 'Cápsula no encontrada.' });
+    const now = new Date().toISOString(); const capsule = { ...JSON.parse(row.data_json), ...req.body, id: req.params.id, updatedAt: now };
+    db.prepare('UPDATE development_capsules SET status=?,data_json=?,updated_at=? WHERE id=?').run(capsule.status, JSON.stringify(capsule), now, capsule.id); await syncDevelopment(); return res.json({ capsule });
+  });
+  app.post('/api/development/capsules/:id/duplicate', requireAuth, async (req, res) => {
+    if (developmentAdmin(req, res) !== true) return; const row = db.prepare('SELECT data_json FROM development_capsules WHERE id=?').get(req.params.id) as any; if (!row) return res.status(404).json({ error: 'Cápsula no encontrada.' });
+    const now = new Date().toISOString(); const capsule = { ...JSON.parse(row.data_json), id: `cap_${randomBytes(8).toString('hex')}`, title: `${JSON.parse(row.data_json).title} · Copia`, status: 'BORRADOR', createdAt: now, updatedAt: now };
+    db.prepare('INSERT INTO development_capsules (id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?)').run(capsule.id, capsule.status, JSON.stringify(capsule), now, now); await syncDevelopment(); return res.status(201).json({ capsule });
+  });
+  app.delete('/api/development/capsules/:id', requireAuth, async (req, res) => { if (developmentAdmin(req, res) !== true) return; db.prepare('DELETE FROM development_assignments WHERE capsule_id=?').run(req.params.id); db.prepare('DELETE FROM development_capsules WHERE id=?').run(req.params.id); await syncDevelopment(); return res.status(204).end(); });
+  app.get('/api/development/assignments', requireAuth, async (req, res) => { const user = (req as any).authUser as User; if(!['ADMINISTRADOR','ASESOR'].includes(user.role))return res.status(403).json({error:'Acceso denegado.'});try{await hydrateDevelopment();}catch{} const assignments = assignmentRows().map(item=>item.dueAt&&new Date(item.dueAt)<new Date()&&!['COMPLETADA','VENCIDA'].includes(item.status)?{...item,status:'VENCIDA'}:item); return res.json({ assignments: user.role === 'ASESOR' ? assignments.filter(item => item.advisorId === user.advisorId) : assignments }); });
+  app.post('/api/development/assignments', requireAuth, async (req, res) => {
+    if (developmentAdmin(req, res) !== true) return; const body = req.body || {}; const capsule = db.prepare('SELECT id FROM development_capsules WHERE id=? AND status=?').get(body.capsuleId, 'PUBLICADA'); if (!capsule) return res.status(400).json({ error: 'La cápsula debe estar publicada.' });
+    let advisorIds = Array.isArray(body.advisorIds) ? body.advisorIds : []; if (body.campaignId) advisorIds = (db.prepare('SELECT id FROM advisors WHERE campaign_id=?').all(body.campaignId) as any[]).map(row => row.id); if(body.groupId)advisorIds=(db.prepare('SELECT id FROM advisors WHERE team_id=?').all(body.groupId) as any[]).map(row=>row.id); const now = new Date().toISOString(); const created: any[] = [];
+    for (const advisorId of [...new Set(advisorIds)] as string[]) { const assignment = { id: `asg_${randomBytes(8).toString('hex')}`, capsuleId: body.capsuleId, advisorId, campaignId: body.campaignId || null, groupId: body.groupId || null, origin: body.origin || 'Manual', originId: body.originId || null, gap: body.gap || '', assignedAt: now, dueAt: body.dueAt || null, status: 'PENDIENTE', progress: 0, result: null, attempts: 0, duration: 0, forumPost: null, evidence: null, updatedAt: now }; try { db.prepare('INSERT INTO development_assignments (id,capsule_id,advisor_id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').run(assignment.id, assignment.capsuleId, advisorId, assignment.status, JSON.stringify(assignment), now, now); created.push(assignment); } catch {} }
+    await syncDevelopment(); return res.status(201).json({ assignments: created });
+  });
+  app.patch('/api/development/assignments/:id', requireAuth, async (req, res) => {
+    const row = db.prepare('SELECT data_json FROM development_assignments WHERE id=?').get(req.params.id) as any; if (!row) return res.status(404).json({ error: 'Asignación no encontrada.' }); const current = JSON.parse(row.data_json); const user = (req as any).authUser as User;
+    if (user.role === 'ASESOR' && user.advisorId !== current.advisorId) return res.status(403).json({ error: 'No puedes modificar esta asignación.' }); if (user.role !== 'ASESOR' && user.role !== 'ADMINISTRADOR') return res.status(403).json({ error: 'Acceso denegado.' });
+    let changes: Record<string, unknown> = req.body || {};
+    if (user.role === 'ASESOR') {
+      changes = {};
+      if (req.body?.contentViewed) Object.assign(changes, { contentViewed: true, status: current.status === 'COMPLETADA' ? current.status : 'EN_CURSO', progress: Math.max(current.progress || 0, 50) });
+      if (Number.isFinite(Number(req.body?.duration))) changes.duration = Math.max(0, Number(req.body.duration));
+      if (typeof req.body?.evidence === 'string') changes.evidence = req.body.evidence.slice(0, 2000);
+      if (typeof req.body?.answer === 'string') {
+        const capsuleRow = db.prepare('SELECT data_json FROM development_capsules WHERE id=?').get(current.capsuleId) as any;
+        if (!capsuleRow) return res.status(404).json({ error: 'Cápsula no encontrada.' });
+        const capsule = JSON.parse(capsuleRow.data_json); const evaluation = capsule.evaluation || {}; const answer = req.body.answer.trim(); const attempts = (current.attempts || 0) + 1;
+        if (evaluation.attempts && attempts > evaluation.attempts) return res.status(400).json({ error: 'No quedan intentos disponibles.' });
+        const normalize = (value: string) => value.split(',').map(item => item.trim().toLowerCase()).filter(Boolean).sort().join('|');
+        const result = evaluation.type === 'FORMULARIO' && evaluation.correctAnswer ? (normalize(answer) === normalize(evaluation.correctAnswer) ? Number(evaluation.score || 100) : 0) : 100;
+        const completed = evaluation.type === 'FORO' ? (evaluation.requiredResponse === false || answer.length >= Number(evaluation.minChars || 1)) : result >= Number(evaluation.minimumScore || 0);
+        Object.assign(changes, { status: completed ? 'COMPLETADA' : 'EN_CURSO', progress: completed ? 100 : 60, result, attempts, forumPost: evaluation.type === 'FORO' ? answer : current.forumPost, contentViewed: true });
+      }
+    }
+    const updatedAt = new Date().toISOString(); const assignment = { ...current, ...changes, id: current.id, advisorId: current.advisorId, capsuleId: current.capsuleId, updatedAt };
+    db.prepare('UPDATE development_assignments SET status=?,data_json=?,updated_at=? WHERE id=?').run(assignment.status, JSON.stringify(assignment), updatedAt, assignment.id); await syncDevelopment(); return res.json({ assignment });
+  });
 
   // Health checks independientes de autenticación, datos y servicios externos.
   app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));

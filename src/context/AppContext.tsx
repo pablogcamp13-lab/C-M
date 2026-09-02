@@ -476,7 +476,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newUser: User = {
       ...userData,
       id: `usr_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      password: '12345678', mustChangePassword: true
     };
     setUsers(prev => [newUser, ...prev]);
     return newUser;
@@ -511,7 +512,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           id: `usr_adv_${adv.id}`,
           name: adv.name,
           username,
-          password: adv.dni,
+          password: '12345678', mustChangePassword: true,
           email,
           role: 'ASESOR',
           status: 'ACTIVO',
@@ -633,7 +634,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: `usr_adv_${newAdvisor.id}`,
       name: newAdvisor.name,
       username: cleanUsername,
-      password: newAdvisor.dni,
+      password: '12345678', mustChangePassword: true,
       email: `${cleanUsername}@asesores3c.com`,
       role: 'ASESOR',
       status: 'ACTIVO',
@@ -851,7 +852,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           id: `usr_adv_${newAdvisor.id}`,
           name: newAdvisor.name,
           username,
-          password: newAdvisor.dni,
+          password: '12345678', mustChangePassword: true,
           email: `${username}@asesores3c.com`,
           role: 'ASESOR',
           status: 'ACTIVO',
