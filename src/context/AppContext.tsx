@@ -305,7 +305,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     platformStateHydrated.current = false;
     setCurrentUser(user); setIsAuthenticated(true);
   };
-  const changePassword = async (password: string) => { setCurrentUser(await authApi.changePassword(password)); };
+  const changePassword = async (password: string) => {
+    const updated = await authApi.changePassword(password);
+    setCurrentUser(updated);
+    setUsers(prev => prev.map(user => user.id === updated.id ? { ...user, ...updated, mustChangePassword: false } : user));
+  };
 
   const logout = async () => {
     await authApi.logout();
