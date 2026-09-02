@@ -378,10 +378,10 @@ export const AdminSettingsView: React.FC = () => {
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-2.5">
                               <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${
-                                user.role === 'ADMINISTRADOR' ? 'bg-purple-100 text-purple-800' :
-                                user.role === 'SUPERVISOR' ? 'bg-sky-100 text-sky-800' :
-                                user.role === 'FORMADOR' ? 'bg-amber-100 text-amber-800' :
-                                user.role === 'ASESOR' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
+                                user.role === 'ADMINISTRADOR' ? 'border border-purple-400/35 bg-purple-500/15 text-purple-200' :
+                                user.role === 'SUPERVISOR' ? 'border border-sky-400/35 bg-sky-500/15 text-sky-200' :
+                                user.role === 'FORMADOR' ? 'border border-amber-400/35 bg-amber-500/15 text-amber-200' :
+                                user.role === 'ASESOR' ? 'border border-emerald-400/35 bg-emerald-500/15 text-emerald-200' : 'border border-slate-400/35 bg-slate-500/15 text-slate-200'
                               }`}>
                                 {user.name.charAt(0).toUpperCase()}
                               </div>
@@ -418,10 +418,10 @@ export const AdminSettingsView: React.FC = () => {
                           {/* Rol */}
                           <td className="py-3 px-4">
                             <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              user.role === 'ADMINISTRADOR' ? 'bg-purple-100 text-purple-800' :
-                              user.role === 'SUPERVISOR' ? 'bg-sky-100 text-sky-800' :
-                              user.role === 'FORMADOR' ? 'bg-amber-100 text-amber-800' :
-                              user.role === 'ASESOR' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
+                              user.role === 'ADMINISTRADOR' ? 'border border-purple-400/35 bg-purple-500/15 text-purple-200' :
+                              user.role === 'SUPERVISOR' ? 'border border-sky-400/35 bg-sky-500/15 text-sky-200' :
+                              user.role === 'FORMADOR' ? 'border border-amber-400/35 bg-amber-500/15 text-amber-200' :
+                              user.role === 'ASESOR' ? 'border border-emerald-400/35 bg-emerald-500/15 text-emerald-200' : 'border border-slate-400/35 bg-slate-500/15 text-slate-200'
                             }`}>
                               <ShieldCheck className="w-3 h-3" />
                               <span>{user.role}</span>
@@ -448,9 +448,7 @@ export const AdminSettingsView: React.FC = () => {
 
                           {/* Estado */}
                           <td className="py-3 px-4">
-                            <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              user.status === 'ACTIVO' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
-                            }`}>
+                            <span className={`cm-badge ${user.status === 'ACTIVO' ? 'cm-badge--success' : 'text-[var(--cm-text-secondary)]'}`}>
                               {user.status}
                             </span>
                           </td>
