@@ -1,0 +1,16 @@
+export const QUALITY_ATTRIBUTES = [
+  { id: 'q_1_1', code: '1.1', criterion: 'C1', name: 'Conexión y verificación', weight: .4, focus: 'Usuario Final', noApplies: false, expected: 'Se identifica con nombre, apellido y Bitel en los primeros 15 segundos; verifica titularidad, genera gancho de apertura y adapta el trato al cliente.', failures: 'No menciona Bitel o su nombre; pide permiso de forma sumisa; continúa con tercero sin verificar titular; saludo plano sin gancho.', exclusion: 'Siempre evaluable.' },
+  { id: 'q_1_2', code: '1.2', criterion: 'C1', name: 'Sondeo — hábitos y punto de dolor', weight: .6, focus: 'Negocio', critical: true, noApplies: true, expected: 'Realiza al menos 2 preguntas abiertas; identifica uso real, apps, insatisfacción y emoción. No asume la necesidad.', failures: 'No realiza sondeo; asume necesidad; hace sólo una pregunta o cerradas; no entiende emoción o punto de dolor.', exclusion: 'No aplica si el cliente no permite continuar o corta antes del sondeo.' },
+  { id: 'q_2_1', code: '2.1', criterion: 'C2', name: 'Ofrecimiento y condiciones', weight: 1, focus: 'Negocio / Cumplimiento', critical: true, noApplies: true, expected: 'Presenta el plan con seguridad y ligado al sondeo; informa GB, precio, bono, cargo fijo, pago anticipado, días gratuitos, recibo y BiPay correctamente.', failures: 'Oferta no adecuada; lectura mecánica; monto incorrecto; omite días gratuitos, bloqueo o pago; precio BiPay sin condición; beneficios distorsionados.', exclusion: 'No aplica en llamada consultiva o atípica sin ofrecimiento de plan.' },
+  { id: 'q_3_1', code: '3.1', criterion: 'C3', name: 'Manejo de objeciones y cierre', weight: .4, focus: 'Negocio', noApplies: true, expected: 'Indaga antes de rebatir; máximo 3 rebates; responde con beneficio concreto y cierra con pregunta de decisión.', failures: 'Acepta negativa al primer intento sin rebatir; ofrece descuentos no autorizados como gancho.', exclusion: 'No aplica si el cliente corta antes del ofrecimiento.' },
+  { id: 'q_3_2', code: '3.2', criterion: 'C3', name: 'Consentimiento y validaciones', weight: .6, focus: 'Cumplimiento', critical: true, noApplies: true, expected: 'Valida RENIEC (DNI y fecha de nacimiento), elegibilidad, lee contrato de voz completo y obtiene la palabra ACEPTO antes de migrar.', failures: 'Migra sin validar; acepta sí/ok/dale en vez de ACEPTO; omite o abrevia contrato; procesa con tercero no autorizado.', exclusion: 'No aplica si no hubo venta o no se ejecutó migración.' },
+  { id: 'q_4_1', code: '4.1', criterion: 'C4', name: 'Cumplimiento transversal', weight: 1, focus: 'Usuario Final', noApplies: false, expected: 'Lenguaje claro, trato cordial, informa fechas/ciclo/desistimiento, tipifica correctamente y se despide según resultado.', failures: 'Tecnicismos sin explicar; habla rápido sin comprensión; tono frío; omite información o desistimiento; tipificación errónea.', exclusion: 'Siempre evaluable.' }
+] as const;
+
+export const QUALITY_CRITICAL_ERRORS = [
+  { id: 'ce_respect', name: 'Falta de respeto al cliente' },
+  { id: 'ce_false_info', name: 'Engaño / información falsa de la migración' },
+  { id: 'ce_churn_hook', name: 'Inducir baja como gancho de migración' }
+] as const;
+
+export const QUALITY_WEIGHTS = { C1: .30, C2: .30, C3: .30, C4: .10 } as const;

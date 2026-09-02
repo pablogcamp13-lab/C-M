@@ -1,0 +1,14 @@
+node_modules/
+data/*.sqlite
+build/
+dist/
+coverage/
+logs/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+*-credentials.json
+credentials*.json
+service-account*.json
