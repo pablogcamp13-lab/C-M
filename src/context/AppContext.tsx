@@ -275,7 +275,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (!localStorage.getItem(stateMigrationKey)) localStorage.setItem(stateMigrationKey, 'true');
         const state = persistedState || await platformStateApi.load();
         if (state) {
-          setEvaluations(state.evaluations?.length ? state.evaluations : INITIAL_EVALUATIONS); setActionPlans(state.actionPlans || []); setInterventions(state.interventions || INITIAL_INTERVENTIONS);
+          setEvaluations(Array.isArray(state.evaluations) ? state.evaluations : INITIAL_EVALUATIONS); setActionPlans(state.actionPlans || []); setInterventions(state.interventions || INITIAL_INTERVENTIONS);
           setAdvisorInterventions(state.advisorInterventions || []); setOperationalMeasurements(state.operationalMeasurements || []); setImportHistory(state.importHistory || []); setConfig(state.config || DEFAULT_METHODOLOGY_CONFIG);
         }
         platformStateHydrated.current = true;

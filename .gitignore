@@ -1,5 +1,5 @@
 node_modules/
-data/*.sqlite
+data/
 build/
 dist/
 coverage/

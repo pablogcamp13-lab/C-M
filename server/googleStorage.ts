@@ -22,6 +22,7 @@ const configured = () => Boolean(process.env.GOOGLE_SHEET_ID && process.env.GOOG
 const clean = (value: unknown) => value == null ? '' : String(value);
 
 class GoogleStorage {
+  private bootstrapPromise?: Promise<boolean>;
   get enabled() { return configured(); }
   private auth() {
     if (!this.enabled) throw new Error('Google Storage no está configurado.');
@@ -35,9 +36,16 @@ class GoogleStorage {
 
   async bootstrap() {
     if (!this.enabled) return false;
+    if (this.bootstrapPromise) return this.bootstrapPromise;
+    this.bootstrapPromise = this.bootstrapSheets();
+    try { return await this.bootstrapPromise; }
+    catch (error) { this.bootstrapPromise = undefined; throw error; }
+  }
+
+  private async bootstrapSheets() {
     const sheets = this.sheets();
     const spreadsheetId = process.env.GOOGLE_SHEET_ID!;
-    const current = await sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets.properties' });
+    const current = await sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets(properties(title))' });
     const names = new Set(current.data.sheets?.map(sheet => sheet.properties?.title).filter(Boolean));
     const missing = (Object.keys(SHEETS) as SheetName[]).filter(name => !names.has(name));
     if (missing.length) await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: missing.map(title => ({ addSheet: { properties: { title } } })) } });
@@ -101,6 +109,9 @@ class GoogleStorage {
   async saveEvaluation(evaluation: any) { await this.upsert('EVALUATIONS', 'id', { id: evaluation.id, advisor_id: evaluation.advisorId, evaluator_id: evaluation.evaluatorId, evaluation_type: evaluation.evaluationType, evaluated_at: `${evaluation.date}T${evaluation.time || '00:00'}:00`, payload_json: JSON.stringify(evaluation), created_at: evaluation.createdAt || new Date().toISOString() }); }
   async loadFeedbacks() { return this.rows('FEEDBACKS'); }
   async saveFeedback(feedback: Row) { await this.upsert('FEEDBACKS', 'feedback_id', feedback); }
+  async clearRuntimeData() {
+    await Promise.all([this.replace('EVALUATIONS', []), this.replace('FEEDBACKS', []), this.replace('APP_STATE', [])]);
+  }
   async loadPlatformState() { const rows = await this.rows('APP_STATE'); const row = rows?.find(item => item.id === 'global'); return row?.payload_json ? JSON.parse(row.payload_json) : null; }
   async savePlatformState(state: unknown) { await this.upsert('APP_STATE', 'id', { id: 'global', payload_json: JSON.stringify(state), updated_at: new Date().toISOString() }); }
 
