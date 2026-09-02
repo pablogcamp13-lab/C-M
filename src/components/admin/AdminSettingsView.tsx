@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useApp, formatAdvisorUsername } from '../../context/AppContext';
 import { FiltersBar } from '../common/FiltersBar';
 import { UserRole, User, Campaign, Team } from '../../types';
+import { adminUsersApi } from '../../api/sharedRepository';
 import { 
   Settings, 
   Save, 
@@ -168,6 +169,22 @@ export const AdminSettingsView: React.FC = () => {
   const handleSimulateUser = (user: User) => {
     setCurrentUser(user);
     showNotification(`Sesión cambiada a: ${user.name} (${user.role}). Ahora ves la plataforma desde su perspectiva.`);
+  };
+  const handleEditUser = async (user: User) => {
+    const name = window.prompt('Nombre del usuario', user.name); if (name === null) return;
+    const email = window.prompt('Correo electrónico', user.email); if (email === null) return;
+    try { const result = await adminUsersApi.update(user.id, { name, email, status: user.status, role: user.role, advisorId: user.advisorId, teamId: user.teamId }); updateUser(user.id, result.user); showNotification('Usuario actualizado.'); }
+    catch (error) { alert(error instanceof Error ? error.message : 'No fue posible actualizar el usuario.'); }
+  };
+  const handleResetPassword = async (user: User) => {
+    if (!window.confirm(`¿Restablecer la contraseña de ${user.name} a 12345678?`)) return;
+    try { await adminUsersApi.resetPassword(user.id); updateUser(user.id, { mustChangePassword: true }); showNotification('Contraseña restablecida. Se solicitará el cambio al ingresar.'); }
+    catch (error) { alert(error instanceof Error ? error.message : 'No fue posible restablecer la contraseña.'); }
+  };
+  const handleDeleteUser = async (user: User) => {
+    if (!window.confirm(`¿Eliminar usuario ${user.name}?`)) return;
+    try { await adminUsersApi.remove(user.id); deleteUser(user.id); showNotification('Usuario eliminado.'); }
+    catch (error) { alert(error instanceof Error ? error.message : 'No fue posible eliminar el usuario.'); }
   };
 
   // Save new campaign
@@ -443,6 +460,8 @@ export const AdminSettingsView: React.FC = () => {
 
                           {/* Acciones */}
                           <td className="py-3 px-4 text-right space-x-1">
+                            <button onClick={() => void handleEditUser(user)} className="text-[10px] px-2 py-1 text-[#031E3C] hover:bg-sky-50 rounded" title="Editar usuario">Editar</button>
+                            <button onClick={() => void handleResetPassword(user)} className="text-[10px] px-2 py-1 text-sky-700 hover:bg-sky-50 rounded" title="Restablecer contraseña">Resetear clave</button>
                             {!isCurrent && (
                               <button
                                 onClick={() => handleSimulateUser(user)}
@@ -456,11 +475,7 @@ export const AdminSettingsView: React.FC = () => {
 
                             {users.length > 1 && (
                               <button
-                                onClick={() => {
-                                  if (window.confirm(`¿Eliminar usuario ${user.name}?`)) {
-                                    deleteUser(user.id);
-                                  }
-                                }}
+                                onClick={() => void handleDeleteUser(user)}
                                 className="text-[10px] p-1 text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
                                 title="Eliminar usuario"
                               >

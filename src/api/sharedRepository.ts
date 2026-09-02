@@ -37,7 +37,17 @@ export const authApi = {
   async logout() {
     await fetch('/api/auth/logout', { method: 'POST', headers: headers() });
     sessionStorage.removeItem(TOKEN_KEY);
+  },
+  async changePassword(password: string): Promise<User> {
+    const result = await json<{ user: User }>(await fetch('/api/auth/change-password', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify({ password }) }));
+    return result.user;
   }
+};
+
+export const adminUsersApi = {
+  async update(id: string, data: Partial<User>) { return json<{ user: User }>(await fetch(`/api/admin/users/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(data) })); },
+  async resetPassword(id: string) { return json<{ ok: true }>(await fetch(`/api/admin/users/${id}/reset-password`, { method: 'POST', headers: headers() })); },
+  async remove(id: string) { await json(await fetch(`/api/admin/users/${id}`, { method: 'DELETE', headers: headers() })); }
 };
 
 export const sharedRepositoryApi = {

@@ -4,10 +4,10 @@ import { Readable } from 'node:stream';
 import type { Advisor, Campaign, Team, User } from '../src/types';
 
 export type SharedRepository = { users: User[]; campaigns: Campaign[]; teams: Team[]; advisors: Advisor[] };
-export type AuthUserRecord = { id: string; name: string; email: string; username?: string; role: User['role']; status: User['status']; teamId?: string; advisorId?: string; advisorDni?: string; avatar?: string; createdAt: string; passwordHash: string };
+export type AuthUserRecord = { id: string; name: string; email: string; username?: string; role: User['role']; status: User['status']; teamId?: string; advisorId?: string; advisorDni?: string; avatar?: string; createdAt: string; passwordHash: string; mustChangePassword: boolean };
 
 const SHEETS = {
-  USERS: ['id', 'name', 'email', 'username', 'role', 'status', 'team_id', 'advisor_id', 'avatar', 'created_at', 'password_hash'],
+  USERS: ['id', 'name', 'email', 'username', 'role', 'status', 'team_id', 'advisor_id', 'avatar', 'created_at', 'password_hash', 'must_change_password'],
   CAMPAIGNS: ['id', 'name', 'client', 'status', 'products_json', 'description'],
   TEAMS: ['id', 'campaign_id', 'supervisor_id', 'name'],
   ADVISORS: ['id', 'dni', 'employee_code', 'name', 'campaign_id', 'team_id', 'supervisor_id', 'data_json'],
@@ -105,16 +105,16 @@ class GoogleStorage {
       id: row.id!, name: row.name!, email: row.email!, username: row.username || undefined,
       role: row.role as User['role'], status: row.status as User['status'], teamId: row.team_id || undefined,
       advisorId: row.advisor_id || undefined, advisorDni: row.advisor_id ? advisorDnis.get(row.advisor_id) || undefined : undefined,
-      avatar: row.avatar || undefined, createdAt: row.created_at!, passwordHash: row.password_hash!
+      avatar: row.avatar || undefined, createdAt: row.created_at!, passwordHash: row.password_hash!, mustChangePassword: row.must_change_password !== '0'
     }));
   }
 
-  async updateUserPasswordHash(id: string, passwordHash: string) { await this.upsert('USERS', 'id', { id, password_hash: passwordHash }); }
+  async updateUserPasswordHash(id: string, passwordHash: string, mustChangePassword = false) { await this.upsert('USERS', 'id', { id, password_hash: passwordHash, must_change_password: mustChangePassword ? '1' : '0' }); }
 
   async saveRepository(repository: SharedRepository, passwordHashes: Map<string, string>) {
     if (!this.enabled) return;
     await Promise.all([
-      this.replace('USERS', repository.users.map(user => ({ id: user.id, name: user.name, email: user.email, username: user.username, role: user.role, status: user.status, team_id: user.teamId, advisor_id: user.advisorId, avatar: user.avatar, created_at: user.createdAt, password_hash: passwordHashes.get(user.id) }))),
+      this.replace('USERS', repository.users.map(user => ({ id: user.id, name: user.name, email: user.email, username: user.username, role: user.role, status: user.status, team_id: user.teamId, advisor_id: user.advisorId, avatar: user.avatar, created_at: user.createdAt, password_hash: passwordHashes.get(user.id), must_change_password: user.mustChangePassword ? '1' : '0' }))),
       this.replace('CAMPAIGNS', repository.campaigns.map(campaign => ({ id: campaign.id, name: campaign.name, client: campaign.client, status: campaign.status, products_json: JSON.stringify(campaign.products || []), description: campaign.description }))),
       this.replace('TEAMS', repository.teams.map(team => ({ id: team.id, campaign_id: team.campaignId, supervisor_id: team.supervisorId, name: team.name }))),
       this.replace('ADVISORS', repository.advisors.map(advisor => ({ id: advisor.id, dni: advisor.dni, employee_code: advisor.employeeCode || '', name: advisor.name, campaign_id: advisor.campaignId, team_id: advisor.teamId, supervisor_id: advisor.supervisorId, data_json: JSON.stringify(advisor) })))

@@ -18,7 +18,7 @@ const sqlitePath = process.env.SQLITE_PATH || join(process.cwd(), 'data', 'conta
 mkdirSync(path.dirname(sqlitePath), { recursive: true });
 const db = new DatabaseSync(sqlitePath);
 db.exec(`PRAGMA foreign_keys = ON;
-CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, username TEXT UNIQUE, role TEXT NOT NULL, status TEXT NOT NULL, team_id TEXT, advisor_id TEXT UNIQUE, avatar TEXT, created_at TEXT NOT NULL, password_hash TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, username TEXT UNIQUE, role TEXT NOT NULL, status TEXT NOT NULL, team_id TEXT, advisor_id TEXT UNIQUE, avatar TEXT, created_at TEXT NOT NULL, password_hash TEXT NOT NULL, must_change_password INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS campaigns (id TEXT PRIMARY KEY, name TEXT NOT NULL, client TEXT NOT NULL, status TEXT NOT NULL, products_json TEXT NOT NULL, description TEXT);
 CREATE TABLE IF NOT EXISTS teams (id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL REFERENCES campaigns(id), supervisor_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS advisors (id TEXT PRIMARY KEY, dni TEXT NOT NULL UNIQUE, employee_code TEXT NOT NULL, name TEXT NOT NULL, campaign_id TEXT NOT NULL REFERENCES campaigns(id), team_id TEXT, supervisor_id TEXT, data_json TEXT NOT NULL);
@@ -31,12 +31,14 @@ CREATE TABLE IF NOT EXISTS feedbacks (feedback_id TEXT PRIMARY KEY, evaluation_i
 CREATE INDEX IF NOT EXISTS idx_advisors_campaign ON advisors(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_evaluations_advisor_type ON evaluations(advisor_id, evaluation_type);`);
 if (!(db.prepare('PRAGMA table_info(feedbacks)').all() as any[]).some(column => column.name === 'advisor_evidence_url')) db.exec('ALTER TABLE feedbacks ADD COLUMN advisor_evidence_url TEXT');
+if (!(db.prepare('PRAGMA table_info(users)').all() as any[]).some(column => column.name === 'must_change_password')) db.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 1');
 
 if (isProduction && !process.env.INITIAL_ADMIN_PASSWORD) throw new Error('INITIAL_ADMIN_PASSWORD es obligatoria en producción.');
-const DEFAULT_ADMIN_PASSWORD = process.env.INITIAL_ADMIN_PASSWORD || 'admin1234';
+const INITIAL_PASSWORD = '12345678';
+const DEFAULT_ADMIN_PASSWORD = process.env.INITIAL_ADMIN_PASSWORD || INITIAL_PASSWORD;
 const hashPassword = (password: string) => { const salt = randomBytes(16).toString('hex'); return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`; };
 const validPassword = (password: string, stored: string) => { const [salt, hash] = stored.split(':'); if (!salt || !hash) return false; const derived = scryptSync(password, salt, 64); return timingSafeEqual(derived, Buffer.from(hash, 'hex')); };
-const publicUser = (row: any): User => ({ id: row.id, name: row.name, email: row.email, username: row.username || undefined, role: row.role, status: row.status, teamId: row.team_id || undefined, advisorId: row.advisor_id || undefined, avatar: row.avatar || undefined, createdAt: row.created_at });
+const publicUser = (row: any): User => ({ id: row.id, name: row.name, email: row.email, username: row.username || undefined, role: row.role, status: row.status, teamId: row.team_id || undefined, advisorId: row.advisor_id || undefined, avatar: row.avatar || undefined, createdAt: row.created_at, mustChangePassword: Boolean(row.must_change_password) });
 
 function seedDatabase() {
   const count = db.prepare('SELECT COUNT(*) AS total FROM users').get().total as number;
@@ -73,7 +75,7 @@ function persistRepository(input: SharedRepository) {
     for (const campaign of source.campaigns || []) db.prepare(`INSERT INTO campaigns (id,name,client,status,products_json,description) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,client=excluded.client,status=excluded.status,products_json=excluded.products_json,description=excluded.description`).run(campaign.id, campaign.name, campaign.client, campaign.status, JSON.stringify(campaign.products || []), campaign.description || null);
     for (const user of source.users || []) {
       const existing = db.prepare('SELECT password_hash FROM users WHERE id=?').get(user.id);
-      db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar`).run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt || now, existing?.password_hash || hashPassword(user.password || (user.role === 'ASESOR' ? user.password || 'cambiar1234' : DEFAULT_ADMIN_PASSWORD)));
+      db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar,must_change_password=excluded.must_change_password`).run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt || now, existing?.password_hash || hashPassword(user.password || INITIAL_PASSWORD), user.mustChangePassword ? 1 : 0);
     }
     for (const team of source.teams || []) db.prepare(`INSERT INTO teams (id,campaign_id,supervisor_id,name) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET campaign_id=excluded.campaign_id,supervisor_id=excluded.supervisor_id,name=excluded.name`).run(team.id, team.campaignId, team.supervisorId, team.name);
     for (const advisor of source.advisors || []) db.prepare(`INSERT INTO advisors (id,dni,employee_code,name,campaign_id,team_id,supervisor_id,data_json) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET dni=excluded.dni,employee_code=excluded.employee_code,name=excluded.name,campaign_id=excluded.campaign_id,team_id=excluded.team_id,supervisor_id=excluded.supervisor_id,data_json=excluded.data_json`).run(advisor.id, advisor.dni, advisor.employeeCode || '', advisor.name, advisor.campaignId, advisor.teamId || null, advisor.supervisorId || null, JSON.stringify(advisor));
@@ -126,12 +128,12 @@ async function syncAuthUsersFromGoogle() {
   if (!googleStorage.enabled || Date.now() - lastGoogleAuthSync < 60_000) return;
   const users = await googleStorage.loadUsersForAuthentication();
   if (!users?.length) return;
-  const upsert = db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar,created_at=excluded.created_at,password_hash=excluded.password_hash`);
+  const upsert = db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash,must_change_password)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar,created_at=excluded.created_at,password_hash=excluded.password_hash,must_change_password=excluded.must_change_password`);
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const user of users) {
-      upsert.run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt, user.passwordHash);
+      upsert.run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt, user.passwordHash, user.mustChangePassword ? 1 : 0);
       if (user.advisorId && user.advisorDni) { advisorDnisForAuth.set(user.advisorId, user.advisorDni); advisorUsersByDni.set(user.advisorDni, user.id); }
     }
     db.exec('COMMIT'); lastGoogleAuthSync = Date.now();
@@ -170,12 +172,11 @@ async function startServer() {
     const identityText = String(identity).trim(); const passwordText = String(password);
     let user = db.prepare('SELECT * FROM users WHERE lower(email)=lower(?) OR lower(username)=lower(?)').get(identityText, identityText) as any;
     if (!user && advisorUsersByDni.has(identityText)) user = db.prepare('SELECT * FROM users WHERE id=?').get(advisorUsersByDni.get(identityText)) as any;
-    const advisorDni = user?.advisor_id ? advisorDnisForAuth.get(user.advisor_id) || (db.prepare('SELECT dni FROM advisors WHERE id=?').get(user.advisor_id) as any)?.dni : undefined;
-    const validAdvisorInitialPassword = user?.role === 'ASESOR' && Boolean(advisorDni) && passwordText === advisorDni;
-    if (!user || user.status !== 'ACTIVO' || (!validPassword(passwordText, String(user.password_hash)) && !validAdvisorInitialPassword)) return res.status(401).json({ error: 'Credenciales inválidas.' });
-    if (validAdvisorInitialPassword && !validPassword(passwordText, String(user.password_hash))) {
+    const validInitialPassword = Boolean(user?.must_change_password) && passwordText === INITIAL_PASSWORD;
+    if (!user || user.status !== 'ACTIVO' || (!validPassword(passwordText, String(user.password_hash)) && !validInitialPassword)) return res.status(401).json({ error: 'Credenciales inválidas.' });
+    if (validInitialPassword && !validPassword(passwordText, String(user.password_hash))) {
       const passwordHash = hashPassword(passwordText); db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(passwordHash, user.id);
-      try { if (googleStorage.enabled) await googleStorage.updateUserPasswordHash(user.id, passwordHash); } catch (error) { console.error('[google-storage] No fue posible actualizar la clave inicial del asesor.', error instanceof Error ? error.message : ''); }
+      try { if (googleStorage.enabled) await googleStorage.updateUserPasswordHash(user.id, passwordHash, true); } catch (error) { console.error('[google-storage] No fue posible actualizar la clave inicial.', error instanceof Error ? error.message : ''); }
       user = { ...user, password_hash: passwordHash };
     }
     const token = randomBytes(32).toString('hex');
@@ -184,7 +185,39 @@ async function startServer() {
     return res.json({ token, user: publicUser(user), expiresAt });
   });
   app.get('/api/auth/me', requireAuth, (req, res) => res.json({ user: (req as any).authUser }));
+  app.post('/api/auth/change-password', requireAuth, async (req, res) => {
+    const { password } = req.body || {}; if (typeof password !== 'string' || password.length < 8) return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres.' });
+    const user = (req as any).authUser as User; const passwordHash = hashPassword(password);
+    db.prepare('UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?').run(passwordHash, user.id);
+    try { if (googleStorage.enabled) await googleStorage.updateUserPasswordHash(user.id, passwordHash, false); }
+    catch (error) { console.error('[google-storage] No fue posible guardar la contraseña.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible sincronizar la contraseña.' }); }
+    res.json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)) });
+  });
   app.post('/api/auth/logout', requireAuth, (req, res) => { db.prepare('DELETE FROM sessions WHERE token=?').run((req as any).token); res.status(204).end(); });
+  const requireAdmin = (req: express.Request, res: express.Response) => (req as any).authUser?.role === 'ADMINISTRADOR' || res.status(403).json({ error: 'Acceso restringido a administración.' });
+  app.patch('/api/admin/users/:id', requireAuth, async (req, res) => {
+    if (requireAdmin(req, res) !== true) return;
+    const current = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id) as any; if (!current) return res.status(404).json({ error: 'Usuario no encontrado.' });
+    const body = req.body || {}; const next = { name: String(body.name ?? current.name).trim(), email: String(body.email ?? current.email).trim(), username: String((body.username ?? current.username) || '').trim() || null, role: body.role ?? current.role, status: body.status ?? current.status, teamId: body.teamId ?? current.team_id, advisorId: body.advisorId ?? current.advisor_id };
+    if (!next.name || !next.email) return res.status(400).json({ error: 'Nombre y correo son obligatorios.' });
+    try { db.prepare('UPDATE users SET name=?,email=?,username=?,role=?,status=?,team_id=?,advisor_id=? WHERE id=?').run(next.name, next.email, next.username, next.role, next.status, next.teamId || null, next.advisorId || null, current.id); if (googleStorage.enabled) await googleStorage.saveRepository(repository(), passwordHashes()); return res.json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(current.id)) }); }
+    catch { return res.status(400).json({ error: 'No fue posible actualizar el usuario.' }); }
+  });
+  app.post('/api/admin/users/:id/reset-password', requireAuth, async (req, res) => {
+    if (requireAdmin(req, res) !== true) return;
+    const user = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id) as any; if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+    const passwordHash = hashPassword(INITIAL_PASSWORD); db.prepare('UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?').run(passwordHash, user.id);
+    try { if (googleStorage.enabled) await googleStorage.updateUserPasswordHash(user.id, passwordHash, true); return res.json({ ok: true }); }
+    catch { return res.status(502).json({ error: 'No fue posible sincronizar el reseteo.' }); }
+  });
+  app.delete('/api/admin/users/:id', requireAuth, async (req, res) => {
+    if (requireAdmin(req, res) !== true) return;
+    const actor = (req as any).authUser as User; if (actor.id === req.params.id) return res.status(400).json({ error: 'No puedes eliminar tu propia cuenta.' });
+    const user = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id) as any; if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+    db.prepare('DELETE FROM sessions WHERE user_id=?').run(user.id); db.prepare('DELETE FROM users WHERE id=?').run(user.id);
+    try { if (googleStorage.enabled) await googleStorage.saveRepository(repository(), passwordHashes()); return res.status(204).end(); }
+    catch { return res.status(502).json({ error: 'No fue posible sincronizar la eliminación.' }); }
+  });
 
   app.get('/api/shared-repository', requireAuth, async (req, res) => {
     const source = await readRepository(); const user = (req as any).authUser as User;

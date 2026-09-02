@@ -12,6 +12,7 @@ export interface User {
   advisorId?: string; // Linked advisor for ASESOR role
   username?: string; // e.g. "nombre.apellido"
   password?: string; // e.g. DNI for advisors
+  mustChangePassword?: boolean;
 }
 
 export interface Campaign {

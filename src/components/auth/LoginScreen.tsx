@@ -5,7 +5,7 @@ import { useApp } from '../../context/AppContext';
 export const LoginScreen: React.FC = () => {
   const { login } = useApp();
   const [identity, setIdentity] = useState('admin@consultoria3c.com');
-  const [password, setPassword] = useState('admin1234');
+  const [password, setPassword] = useState('12345678');
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState('');

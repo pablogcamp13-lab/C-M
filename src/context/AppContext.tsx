@@ -51,6 +51,7 @@ interface AppContextType {
   isAuthReady: boolean;
   isAuthenticated: boolean;
   login: (identity: string, password: string) => Promise<void>;
+  changePassword: (password: string) => Promise<void>;
   logout: () => Promise<void>;
   setCurrentUser: (user: User) => void;
   setUserRole: (role: UserRole) => void;
@@ -304,6 +305,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     platformStateHydrated.current = false;
     setCurrentUser(user); setIsAuthenticated(true);
   };
+  const changePassword = async (password: string) => { setCurrentUser(await authApi.changePassword(password)); };
 
   const logout = async () => {
     await authApi.logout();
@@ -1037,7 +1039,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         currentUser,
         isAuthReady,
         isAuthenticated,
-        login,
+      login,
+      changePassword,
         logout,
         setCurrentUser,
         setUserRole,

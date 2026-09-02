@@ -22,6 +22,7 @@ import { AdminSettingsView } from './components/admin/AdminSettingsView';
 import { FeedbackView } from './components/feedback/FeedbackView';
 import { Evaluation, Advisor } from './types';
 import { LoginScreen } from './components/auth/LoginScreen';
+import { ForcePasswordChange } from './components/auth/ForcePasswordChange';
 import { ChevronRight, ShieldCheck, TrendingUp, X } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
@@ -143,7 +144,7 @@ const MainLayout: React.FC = () => {
 
         </main>
 
-      </div>
+      </div>{currentUser.mustChangePassword && <ForcePasswordChange />}
 
       {/* Global Modals */}
       {isNewEvalModalOpen && (
