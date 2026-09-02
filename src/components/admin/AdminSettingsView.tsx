@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useApp, formatAdvisorUsername } from '../../context/AppContext';
 import { FiltersBar } from '../common/FiltersBar';
 import { UserRole, User, Campaign, Team } from '../../types';
@@ -354,7 +355,7 @@ export const AdminSettingsView: React.FC = () => {
             </div>
 
             {/* Users Table */}
-            <div className="bg-white border border-[#E5E8EC] rounded-xl shadow-2xs overflow-hidden">
+            <div className="cm-admin-users bg-white border border-[#E5E8EC] rounded-xl shadow-2xs overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-xs text-left border-collapse">
                   <thead className="bg-[#F7F8FA] text-[11px] font-bold text-[#667085] uppercase border-b border-[#E5E8EC]">
@@ -372,7 +373,7 @@ export const AdminSettingsView: React.FC = () => {
                       const linkedAdvisor = advisors.find(a => a.id === user.advisorId);
                       const isCurrent = currentUser?.id === user.id;
                       const displayUsername = user.username || formatAdvisorUsername(user.name);
-                      const displayPassword = user.password || (linkedAdvisor ? linkedAdvisor.dni : '••••••');
+                      const displayPassword = user.mustChangePassword ? '12345678 · cambio pendiente' : 'Contraseña configurada';
 
                       return (
                         <tr key={user.id} className={`hover:bg-[#F7F8FA]/70 transition-colors ${isCurrent ? 'bg-orange-50/40' : ''}`}>
@@ -679,9 +680,9 @@ export const AdminSettingsView: React.FC = () => {
       {/* ========================================================================= */}
       {/* MODAL CREAR USUARIO                                                       */}
       {/* ========================================================================= */}
-      {isUserModalOpen && (
-        <div className="fixed inset-0 z-50 bg-[#031E3C]/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="cm-modal max-w-md w-full p-6">
+      {isUserModalOpen && createPortal(
+        <div className="fixed inset-0 z-[200] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center overflow-y-auto p-4">
+          <div className="cm-modal my-auto max-w-md w-full p-6">
             <h3 className="font-bold text-base text-[#031E3C] mb-1 flex items-center gap-2">
               <UserPlus className="w-5 h-5 text-[#FF6B00]" />
               <span>Crear Nuevo Usuario</span>
@@ -788,8 +789,7 @@ export const AdminSettingsView: React.FC = () => {
 
             </form>
           </div>
-        </div>
-      )}
+        </div>, document.body)}
 
       {/* ========================================================================= */}
       {/* MODAL CREAR CAMPAÑA                                                       */}
