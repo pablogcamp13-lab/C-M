@@ -656,10 +656,10 @@ Responde en formato JSON estricto con el esquema solicitado.`;
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, { setHeaders: (res, filePath) => res.setHeader('Cache-Control', filePath.endsWith('index.html') ? 'no-store' : 'public, max-age=31536000, immutable') }));
     app.get("*", (req, res, next) => {
       if (req.path === '/api' || req.path.startsWith('/api/')) return next();
-      res.sendFile(path.join(distPath, "index.html"));
+      res.setHeader('Cache-Control', 'no-store'); res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
