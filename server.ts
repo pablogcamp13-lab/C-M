@@ -349,12 +349,30 @@ async function startServer() {
   const capsuleRows = () => (db.prepare('SELECT data_json FROM development_capsules ORDER BY updated_at DESC').all() as any[]).map(row => JSON.parse(row.data_json));
   const assignmentRows = () => (db.prepare('SELECT data_json FROM development_assignments ORDER BY updated_at DESC').all() as any[]).map(row => JSON.parse(row.data_json));
   const syncDevelopment = async () => { if (googleStorage.enabled) await googleStorage.saveDevelopment(capsuleRows(), assignmentRows()); };
-  const hydrateDevelopment = async () => { if (!googleStorage.enabled) return; const remote = await googleStorage.loadDevelopment(); if (!remote.capsules.length && !remote.assignments.length) return; const insertCapsule=db.prepare('INSERT OR REPLACE INTO development_capsules (id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?)'); const insertAssignment=db.prepare('INSERT OR REPLACE INTO development_assignments (id,capsule_id,advisor_id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?)'); for(const item of remote.capsules)insertCapsule.run(item.id,item.status,JSON.stringify(item),item.createdAt,item.updatedAt); for(const item of remote.assignments)try{insertAssignment.run(item.id,item.capsuleId,item.advisorId,item.status,JSON.stringify(item),item.assignedAt,item.updatedAt);}catch{} };
+  const hydrateDevelopment = async () => { if (!googleStorage.enabled) return; await readRepository(); const remote = await googleStorage.loadDevelopment(); if (!remote.capsules.length && !remote.assignments.length) return; const insertCapsule=db.prepare('INSERT OR REPLACE INTO development_capsules (id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?)'); const insertAssignment=db.prepare('INSERT OR REPLACE INTO development_assignments (id,capsule_id,advisor_id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?)'); for(const item of remote.capsules)insertCapsule.run(item.id,item.status,JSON.stringify(item),item.createdAt,item.updatedAt); for(const item of remote.assignments)try{insertAssignment.run(item.id,item.capsuleId,item.advisorId,item.status,JSON.stringify(item),item.assignedAt,item.updatedAt);}catch{} };
   app.get('/api/development/capsules', requireAuth, async (req, res) => {
     const user = (req as any).authUser as User; if (!['ADMINISTRADOR','ASESOR'].includes(user.role)) return res.status(403).json({ error:'Acceso denegado.' }); try{await hydrateDevelopment();}catch(error){console.error('[google-storage] No fue posible cargar desarrollo.',error instanceof Error?error.message:'');} const capsules = capsuleRows();
     if (user.role !== 'ASESOR') return res.json({ capsules });
     const ids = new Set(assignmentRows().filter(item => item.advisorId === user.advisorId).map(item => item.capsuleId));
     return res.json({ capsules: capsules.filter(item => item.status === 'PUBLICADA' && ids.has(item.id)) });
+  });
+  app.get('/api/development/capsules/:id/forum', requireAuth, async (req, res) => {
+    const user = (req as any).authUser as User;
+    if (!['ADMINISTRADOR', 'ASESOR'].includes(user.role)) return res.status(403).json({ error: 'Acceso denegado.' });
+    try { await hydrateDevelopment(); } catch {}
+    const capsuleRow = db.prepare('SELECT data_json FROM development_capsules WHERE id=?').get(req.params.id) as any;
+    if (!capsuleRow) return res.status(404).json({ error: 'Cápsula no encontrada.' });
+    const capsule = JSON.parse(capsuleRow.data_json);
+    if (capsule.evaluation?.type !== 'FORO') return res.status(400).json({ error: 'Esta cápsula no contiene un foro.' });
+    const assignments = assignmentRows().filter(item => item.capsuleId === req.params.id);
+    if (user.role === 'ASESOR' && (!user.advisorId || !assignments.some(item => item.advisorId === user.advisorId))) return res.status(403).json({ error: 'No tienes esta cápsula asignada.' });
+    const advisorName = db.prepare('SELECT name FROM advisors WHERE id=?');
+    const posts = assignments.flatMap(item => {
+      const saved = Array.isArray(item.forumPosts) ? item.forumPosts : [];
+      const legacy = !saved.length && item.forumPost ? [{ id: `legacy_${item.id}`, advisorId: item.advisorId, text: item.forumPost, createdAt: item.updatedAt || item.assignedAt }] : [];
+      return [...saved, ...legacy].map(post => ({ ...post, advisorName: (advisorName.get(post.advisorId || item.advisorId) as any)?.name || 'Asesor' }));
+    }).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    return res.json({ posts });
   });
   app.post('/api/development/capsules', requireAuth, async (req, res) => {
     if (developmentAdmin(req, res) !== true) return; const now = new Date().toISOString(); const body = req.body || {};
@@ -376,8 +394,9 @@ async function startServer() {
   app.get('/api/development/assignments', requireAuth, async (req, res) => { const user = (req as any).authUser as User; if(!['ADMINISTRADOR','ASESOR'].includes(user.role))return res.status(403).json({error:'Acceso denegado.'});try{await hydrateDevelopment();}catch{} const assignments = assignmentRows().map(item=>item.dueAt&&new Date(item.dueAt)<new Date()&&!['COMPLETADA','VENCIDA'].includes(item.status)?{...item,status:'VENCIDA'}:item); return res.json({ assignments: user.role === 'ASESOR' ? assignments.filter(item => item.advisorId === user.advisorId) : assignments }); });
   app.post('/api/development/assignments', requireAuth, async (req, res) => {
     if (developmentAdmin(req, res) !== true) return; const body = req.body || {}; const capsule = db.prepare('SELECT id FROM development_capsules WHERE id=? AND status=?').get(body.capsuleId, 'PUBLICADA'); if (!capsule) return res.status(400).json({ error: 'La cápsula debe estar publicada.' });
-    let advisorIds = Array.isArray(body.advisorIds) ? body.advisorIds : []; if (body.campaignId) advisorIds = (db.prepare('SELECT id FROM advisors WHERE campaign_id=?').all(body.campaignId) as any[]).map(row => row.id); if(body.groupId)advisorIds=(db.prepare('SELECT id FROM advisors WHERE team_id=?').all(body.groupId) as any[]).map(row=>row.id); const now = new Date().toISOString(); const created: any[] = [];
-    for (const advisorId of [...new Set(advisorIds)] as string[]) { const assignment = { id: `asg_${randomBytes(8).toString('hex')}`, capsuleId: body.capsuleId, advisorId, campaignId: body.campaignId || null, groupId: body.groupId || null, origin: body.origin || 'Manual', originId: body.originId || null, gap: body.gap || '', assignedAt: now, dueAt: body.dueAt || null, status: 'PENDIENTE', progress: 0, result: null, attempts: 0, duration: 0, forumPost: null, evidence: null, updatedAt: now }; try { db.prepare('INSERT INTO development_assignments (id,capsule_id,advisor_id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').run(assignment.id, assignment.capsuleId, advisorId, assignment.status, JSON.stringify(assignment), now, now); created.push(assignment); } catch {} }
+    const directory = await readRepository();
+    const advisorIds = new Set<string>(Array.isArray(body.advisorIds) ? body.advisorIds : []); if (body.campaignId) directory.advisors.filter(advisor => advisor.campaignId === body.campaignId && advisor.active !== false && advisor.status !== 'INACTIVO').forEach(advisor => advisorIds.add(advisor.id)); if(body.groupId)directory.advisors.filter(advisor => advisor.teamId === body.groupId && advisor.active !== false && advisor.status !== 'INACTIVO').forEach(advisor=>advisorIds.add(advisor.id)); const now = new Date().toISOString(); const created: any[] = [];
+    for (const advisorId of advisorIds) { const assignment = { id: `asg_${randomBytes(8).toString('hex')}`, capsuleId: body.capsuleId, advisorId, campaignId: body.campaignId || null, groupId: body.groupId || null, origin: body.origin || 'Manual', originId: body.originId || null, gap: body.gap || '', assignedAt: now, dueAt: body.dueAt || null, status: 'PENDIENTE', progress: 0, result: null, attempts: 0, duration: 0, forumPost: null, evidence: null, updatedAt: now }; try { db.prepare('INSERT INTO development_assignments (id,capsule_id,advisor_id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').run(assignment.id, assignment.capsuleId, advisorId, assignment.status, JSON.stringify(assignment), now, now); created.push(assignment); } catch {} }
     await syncDevelopment(); return res.status(201).json({ assignments: created });
   });
   app.patch('/api/development/assignments/:id', requireAuth, async (req, res) => {
@@ -393,11 +412,13 @@ async function startServer() {
         const capsuleRow = db.prepare('SELECT data_json FROM development_capsules WHERE id=?').get(current.capsuleId) as any;
         if (!capsuleRow) return res.status(404).json({ error: 'Cápsula no encontrada.' });
         const capsule = JSON.parse(capsuleRow.data_json); const evaluation = capsule.evaluation || {}; const answer = req.body.answer.trim(); const attempts = (current.attempts || 0) + 1;
-        if (evaluation.attempts && attempts > evaluation.attempts) return res.status(400).json({ error: 'No quedan intentos disponibles.' });
+        if (evaluation.type === 'FORMULARIO' && evaluation.attempts && attempts > evaluation.attempts) return res.status(400).json({ error: 'No quedan intentos disponibles.' });
+        if (evaluation.type === 'FORO' && answer.length < Number(evaluation.minChars || 1)) return res.status(400).json({ error: `La respuesta debe tener al menos ${Number(evaluation.minChars || 1)} caracteres.` });
         const normalize = (value: string) => value.split(',').map(item => item.trim().toLowerCase()).filter(Boolean).sort().join('|');
         const result = evaluation.type === 'FORMULARIO' && evaluation.correctAnswer ? (normalize(answer) === normalize(evaluation.correctAnswer) ? Number(evaluation.score || 100) : 0) : 100;
         const completed = evaluation.type === 'FORO' ? (evaluation.requiredResponse === false || answer.length >= Number(evaluation.minChars || 1)) : result >= Number(evaluation.minimumScore || 0);
-        Object.assign(changes, { status: completed ? 'COMPLETADA' : 'EN_CURSO', progress: completed ? 100 : 60, result, attempts, forumPost: evaluation.type === 'FORO' ? answer : current.forumPost, contentViewed: true });
+        const forumPosts = evaluation.type === 'FORO' ? [...(Array.isArray(current.forumPosts) ? current.forumPosts : []), { id: `post_${randomBytes(8).toString('hex')}`, advisorId: current.advisorId, text: answer, createdAt: new Date().toISOString() }] : current.forumPosts;
+        Object.assign(changes, { status: completed ? 'COMPLETADA' : 'EN_CURSO', progress: completed ? 100 : 60, result, attempts, forumPost: evaluation.type === 'FORO' ? answer : current.forumPost, forumPosts, contentViewed: true });
       }
     }
     const updatedAt = new Date().toISOString(); const assignment = { ...current, ...changes, id: current.id, advisorId: current.advisorId, capsuleId: current.capsuleId, updatedAt };
