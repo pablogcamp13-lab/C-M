@@ -127,6 +127,21 @@ class GoogleStorage {
   }
 
   async saveEvaluation(evaluation: any) { await this.upsert('EVALUATIONS', 'id', { id: evaluation.id, advisor_id: evaluation.advisorId, evaluator_id: evaluation.evaluatorId, evaluation_type: evaluation.evaluationType, evaluated_at: `${evaluation.date}T${evaluation.time || '00:00'}:00`, payload_json: JSON.stringify(evaluation), created_at: evaluation.createdAt || new Date().toISOString() }); }
+  async deduplicateEvaluations() {
+    const rows = await this.rows('EVALUATIONS') || [];
+    const seen = new Set<string>();
+    const unique = rows.filter(row => {
+      try {
+        const item = JSON.parse(row.payload_json || '{}');
+        const key = [item.advisorId, item.evaluationType, item.date, item.time, item.callId || item.recordingCode || item.id].join('|');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      } catch { return true; }
+    });
+    if (unique.length !== rows.length) await this.replace('EVALUATIONS', unique);
+    return rows.length - unique.length;
+  }
   async loadFeedbacks() { return this.rows('FEEDBACKS'); }
   async saveFeedback(feedback: Row) { await this.upsert('FEEDBACKS', 'feedback_id', feedback); }
   async clearRuntimeData() {

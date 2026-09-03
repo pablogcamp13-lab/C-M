@@ -52,6 +52,23 @@ const evaluationIdentity = (item: any) => [item?.advisorId, item?.evaluationType
 const uniqueEvaluations = (items: any[] = []) => { const seen = new Set<string>(); return items.filter(item => { const key=evaluationIdentity(item); if(seen.has(key)) return false; seen.add(key); return true; }); };
 const normalizePlatformState = (state: any) => state ? { ...state, evaluations: uniqueEvaluations(state.evaluations || []) } : state;
 
+async function cleanupEvaluationDuplicates() {
+  const rows = db.prepare('SELECT id,payload_json FROM evaluations ORDER BY created_at DESC').all() as any[];
+  const seen = new Set<string>(); const duplicateIds: string[] = [];
+  for (const row of rows) {
+    try { const key=evaluationIdentity(JSON.parse(row.payload_json)); if(seen.has(key)) duplicateIds.push(row.id); else seen.add(key); } catch {}
+  }
+  if (duplicateIds.length) {
+    const remove=db.prepare('DELETE FROM evaluations WHERE id=?'); db.exec('BEGIN IMMEDIATE'); try { duplicateIds.forEach(id=>remove.run(id)); db.exec('COMMIT'); } catch(error) { db.exec('ROLLBACK'); throw error; }
+  }
+  const stateRow=db.prepare('SELECT payload_json FROM app_state WHERE id=?').get('global') as any;
+  let stateRemoved=0;
+  if(stateRow?.payload_json){const state=JSON.parse(stateRow.payload_json);const before=state.evaluations?.length||0;const normalized=normalizePlatformState(state);stateRemoved=before-(normalized.evaluations?.length||0);if(stateRemoved)db.prepare('UPDATE app_state SET payload_json=?,updated_at=? WHERE id=?').run(JSON.stringify(normalized),new Date().toISOString(),'global');}
+  let remoteRemoved=0;
+  if(googleStorage.enabled){remoteRemoved=await googleStorage.deduplicateEvaluations();const remoteState=await googleStorage.loadPlatformState();if(remoteState){const normalized=normalizePlatformState(remoteState);if((normalized.evaluations?.length||0)!==(remoteState.evaluations?.length||0))await googleStorage.savePlatformState(normalized);}}
+  const total=duplicateIds.length+stateRemoved+remoteRemoved;if(total)console.log(`[evaluations] Duplicados exactos eliminados: ${total}.`);
+}
+
 function seedDatabase() {
   const count = db.prepare('SELECT COUNT(*) AS total FROM users').get().total as number;
   const now = new Date().toISOString();
@@ -165,6 +182,7 @@ function getGeminiClient(): GoogleGenAI {
 
 async function startServer() {
   const app = express();
+  try { await cleanupEvaluationDuplicates(); } catch (error) { console.error('[evaluations] No fue posible completar la limpieza de duplicados.', error instanceof Error ? error.message : ''); }
 
   // Increase payload size for base64 audio files
   app.use(express.json({ limit: "50mb" }));
