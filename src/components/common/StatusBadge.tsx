@@ -72,8 +72,8 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
     icon = <CheckCircle2 className="w-3 h-3 text-[#039855]" />;
     text = label || 'Venta';
   } else if (norm.includes('NO_VENTA') || norm === 'FALSE') {
-    styles = 'bg-[#F2F4F7] text-[#667085] border-[#E5E8EC]';
-    icon = <XCircle className="w-3 h-3 text-[#98A2B3]" />;
+    styles = 'bg-[#102640] text-[#D7E6F5] border-[#365575]';
+    icon = <XCircle className="w-3 h-3 text-[#AFC5D9]" />;
     text = label || 'No Venta';
   } else if (norm.includes('REEVALUACION') || norm.includes('REEVALUACIÓN')) {
     styles = 'bg-[#F8F9FA] text-[#031E3C] border-[#D0D5DD]';
@@ -97,4 +97,3 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
     </span>
   );
 };
-
