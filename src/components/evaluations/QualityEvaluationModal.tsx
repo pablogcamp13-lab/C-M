@@ -180,7 +180,8 @@ export const QualityEvaluationModal: React.FC<{
             : "NO_CRITICO"),
         }) as EvaluationItem,
     );
-    const saved = addEvaluation({
+    try {
+      const saved = await addEvaluation({
       advisorId: advisor.id,
       evaluatorId,
       campaignId: advisor.campaignId,
@@ -195,9 +196,6 @@ export const QualityEvaluationModal: React.FC<{
       type: evaluationType,
       evaluationType: "QUALITY",
       qualityStatus: "FINALIZED",
-      source: "MANUAL",
-      validationStatus: "VALIDADO",
-      validatedAt: new Date().toISOString(),
       qualityCriticalErrorIds: critical,
       qualityCriticalErrorSnapshot: criticalErrors.filter((error) => critical.includes(error.id)),
       sale: false,
@@ -213,9 +211,14 @@ export const QualityEvaluationModal: React.FC<{
       audioMimeType: audio?.type,
       audioDurationSeconds: audio?.duration,
       items,
-    });
-    onSuccess?.(saved);
-    onClose();
+      });
+      onSuccess?.(saved);
+      onClose();
+    } catch (error: any) {
+      setAudioError(error.message || "No fue posible guardar la evaluación.");
+      savingRef.current = false;
+      setIsSaving(false);
+    }
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/65 p-2 sm:p-4 backdrop-blur-sm">

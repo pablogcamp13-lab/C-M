@@ -2,7 +2,5 @@
   "name": "Remix Plataforma 3C - Evaluación Contact Center",
   "description": "Sistema integral de evaluación, diagnóstico 3C (Conectar, Clarificar, Convertir), análisis Pareto, seguimiento de brechas y medición de impacto comercial.",
   "requestFramePermissions": [],
-  "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
+  "majorCapabilities": []
 }

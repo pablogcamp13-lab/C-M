@@ -201,34 +201,6 @@ export interface EvaluationItem {
   classification?: 'CRITICO_USUARIO_FINAL' | 'CRITICO_NEGOCIO' | 'CRITICO_COMPLIANCE' | 'NO_CRITICO';
 }
 
-export interface AiAlert {
-  id: string;
-  severity: 'ALTA' | 'MEDIA' | 'BAJA' | 'INFO';
-  title: string;
-  pillar?: DimensionId;
-  description: string;
-  timestamp?: string;
-  recommendation?: string;
-}
-
-export interface AiEvaluationAnalysis {
-  callDescription: string;
-  keyMoments?: {
-    minute: string;
-    description: string;
-    sentiment: 'POSITIVO' | 'NEUTRO' | 'CRITICO';
-  }[];
-  alerts: AiAlert[];
-  methodologySummary: {
-    connectObservations: string;
-    clarifyObservations: string;
-    convertObservations: string;
-  };
-  suggestedConclusions: string;
-  detectedSaleLikelihood?: 'ALTA' | 'MEDIA' | 'BAJA' | 'NULA';
-  analyzedAt: string;
-}
-
 export interface Evaluation {
   id: string;
   advisorId: string;
@@ -246,9 +218,6 @@ export interface Evaluation {
   qualityCriticalErrorIds?: string[];
   qualityCriticalErrorSnapshot?: QualityCriticalError[];
   qualityStatus?: 'DRAFT' | 'FINALIZED';
-  source?: 'MANUAL' | 'SPEECH_ANALYTICS';
-  validationStatus?: 'AUTOMATICO_PENDIENTE' | 'VALIDADO' | 'AJUSTADO_VALIDADO';
-  validatedAt?: string;
   technicalScore?: number | null;
   qualityResult?: 'APROBADA' | 'REPROBADA';
   criticalReason?: string;
@@ -264,11 +233,6 @@ export interface Evaluation {
   audioDurationSeconds?: number;
   audioMimeType?: string;
   
-  // AI 3C Analysis
-  aiAnalysis?: AiEvaluationAnalysis;
-  aiAlerts?: AiAlert[];
-  aiCallDescription?: string;
-
   // Calculated 3C scores (null if all criteria in dimension are 'NO_APLICA')
   scoreConnect: number | null;
   scoreClarify: number | null;

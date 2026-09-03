@@ -12,10 +12,6 @@ import {
   FileAudio, 
   AlertCircle, 
   ListTodo,
-  Sparkles,
-  ShieldAlert,
-  MessageSquareText,
-  PlayCircle,
   ChevronDown
 } from 'lucide-react';
 
@@ -31,24 +27,9 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   onOpenNewActionPlan 
 }) => {
   const { advisors, users } = useApp();
-  const [seekToSeconds, setSeekToSeconds] = useState<number | null>(null);
   const [expandedCriterion, setExpandedCriterion] = useState<string | null>(null);
 
   if (!evaluation) return null;
-
-  const parseTimestampToSeconds = (ts?: string): number | null => {
-    if (!ts) return null;
-    const clean = ts.replace(/[^0-9:]/g, '');
-    const parts = clean.split(':');
-    if (parts.length === 2) {
-      const mins = parseInt(parts[0], 10);
-      const secs = parseInt(parts[1], 10);
-      if (!isNaN(mins) && !isNaN(secs)) {
-        return mins * 60 + secs;
-      }
-    }
-    return null;
-  };
 
   const advisor = advisors.find(a => a.id === evaluation.advisorId);
   const evaluator = users.find(u => u.id === evaluation.evaluatorId);
@@ -135,10 +116,6 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
                     label={evaluation.sale ? 'Venta Concretada' : (evaluation.saleResult || 'No Venta')}
                   />
                 </div>
-                <div>
-                  <span className="text-[var(--cm-text-secondary)] block text-[11px]">Origen / validación:</span>
-                  <span className="font-medium text-[var(--cm-text)]">{evaluation.source === 'SPEECH_ANALYTICS' ? 'Speech Analytics' : 'Manual'} · {evaluation.validationStatus === 'AUTOMATICO_PENDIENTE' ? 'Automático pendiente' : evaluation.validationStatus === 'AJUSTADO_VALIDADO' ? 'Ajustado y validado' : 'Validado'}</span>
-                </div>
               </div>
             </div>
 
@@ -203,130 +180,12 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
                 audioUrl={evaluation.audioUrl}
                 audioFileName={evaluation.audioFileName || `${evaluation.recordingCode}.mp3`}
                 audioDurationSeconds={evaluation.audioDurationSeconds || 380}
-                seekToSeconds={seekToSeconds}
                 readOnly={true}
               />
             </div>
           )}
 
-          {/* AI 3C Analysis Panel (if present) */}
-          {(evaluation.aiAnalysis || evaluation.aiAlerts || evaluation.aiCallDescription) && (
-            <div className="bg-gradient-to-br from-[#031E3C] to-[#0A2E5C] text-white rounded-xl p-4 sm:p-5 shadow-sm border border-[#0B2B50] space-y-4">
-              <div className="flex items-center justify-between border-b border-[#0B2B50] pb-2.5">
-                <div className="flex items-center gap-2">
-                  <div className="p-1 rounded-md bg-[#FF6B00] text-white">
-                    <Sparkles className="w-4 h-4" />
-                  </div>
-                  <h4 className="font-bold text-xs sm:text-sm text-white uppercase tracking-wider font-heading">
-                    Auditoría de Audio con IA · Metodología 3C
-                  </h4>
-                </div>
-                <span className="text-[10px] bg-teal-500/20 text-teal-300 font-semibold px-2 py-0.5 rounded-full border border-teal-500/30">
-                  Gemini 3.7 Flash
-                </span>
-              </div>
-
-              {/* Call Description */}
-              {(evaluation.aiAnalysis?.callDescription || evaluation.aiCallDescription) && (
-                <div className="space-y-1.5 bg-slate-950/60 p-3 rounded-lg border border-slate-800/80">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-teal-400 flex items-center gap-1 font-heading">
-                    <MessageSquareText className="w-3 h-3" />
-                    Descripción General de la Interacción
-                  </span>
-                  <p className="text-xs text-slate-200 leading-relaxed font-sans">
-                    {evaluation.aiAnalysis?.callDescription || evaluation.aiCallDescription}
-                  </p>
-                </div>
-              )}
-
-              {/* 3C Alerts */}
-              {(evaluation.aiAnalysis?.alerts || evaluation.aiAlerts) && (
-                <div className="space-y-2">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1 font-heading">
-                    <ShieldAlert className="w-3 h-3" />
-                    Alertas Críticas 3C ({(evaluation.aiAnalysis?.alerts || evaluation.aiAlerts || []).length})
-                  </span>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {(evaluation.aiAnalysis?.alerts || evaluation.aiAlerts || []).map((alert, idx) => {
-                      const seconds = parseTimestampToSeconds(alert.timestamp);
-                      return (
-                        <div
-                          key={alert.id || idx}
-                          className={`p-2.5 rounded-lg border text-xs space-y-1 ${
-                            alert.severity === 'ALTA'
-                              ? 'bg-rose-950/40 border-rose-700/60 text-rose-100'
-                              : alert.severity === 'MEDIA'
-                              ? 'bg-amber-950/40 border-amber-700/60 text-amber-100'
-                              : 'bg-blue-950/40 border-blue-700/60 text-blue-100'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded uppercase ${
-                                alert.severity === 'ALTA' ? 'bg-rose-600 text-white' :
-                                alert.severity === 'MEDIA' ? 'bg-amber-600 text-white' :
-                                'bg-blue-600 text-white'
-                              }`}>
-                                {alert.severity}
-                              </span>
-                              <span className="text-[9px] font-bold text-slate-300 bg-slate-800 px-1.5 py-0.2 rounded">
-                                {alert.pillar || '3C'}
-                              </span>
-                            </div>
-
-                            {alert.timestamp && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (seconds !== null) setSeekToSeconds(seconds);
-                                }}
-                                className="text-[10px] text-teal-300 hover:text-teal-100 font-mono font-bold flex items-center gap-1 bg-slate-800/80 px-1.5 py-0.5 rounded cursor-pointer transition-colors"
-                              >
-                                <PlayCircle className="w-3 h-3" />
-                                Min {alert.timestamp}
-                              </button>
-                            )}
-                          </div>
-
-                          <h5 className="font-bold text-white text-[11px]">
-                            {alert.title}
-                          </h5>
-                          <p className="text-[10px] text-slate-300 leading-snug">
-                            {alert.description}
-                          </p>
-                          {alert.recommendation && (
-                            <p className="text-[10px] text-teal-300 bg-slate-950/50 p-1 rounded">
-                              <strong>Acción:</strong> {alert.recommendation}
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Dimension Summaries if available */}
-              {evaluation.aiAnalysis?.methodologySummary && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs pt-1">
-                  <div className="bg-blue-950/30 border border-blue-800/40 rounded-lg p-2 space-y-0.5">
-                    <span className="text-[9px] font-bold uppercase text-blue-400 block font-heading">1. Conectar</span>
-                    <p className="text-[10px] text-slate-300 leading-snug">{evaluation.aiAnalysis.methodologySummary.connectObservations}</p>
-                  </div>
-                  <div className="bg-amber-950/30 border border-amber-800/40 rounded-lg p-2 space-y-0.5">
-                    <span className="text-[9px] font-bold uppercase text-amber-400 block font-heading">2. Clarificar</span>
-                    <p className="text-[10px] text-slate-300 leading-snug">{evaluation.aiAnalysis.methodologySummary.clarifyObservations}</p>
-                  </div>
-                  <div className="bg-emerald-950/30 border border-emerald-800/40 rounded-lg p-2 space-y-0.5">
-                    <span className="text-[9px] font-bold uppercase text-emerald-400 block font-heading">3. Convertir</span>
-                    <p className="text-[10px] text-slate-300 leading-snug">{evaluation.aiAnalysis.methodologySummary.convertObservations}</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Criteria Evaluation Breakdown */}
+          {/* Criteria Evaluation Breakdown */}          {/* Criteria Evaluation Breakdown */}
           <div className="cm-card rounded-xl p-4 sm:p-5 space-y-4">
             <h4 className="font-bold text-xs sm:text-sm text-[var(--cm-text)] uppercase tracking-wider font-heading border-b border-[var(--cm-border)] pb-2">
               Desglose Criterio por Criterio

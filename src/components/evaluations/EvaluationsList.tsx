@@ -10,8 +10,7 @@ import {
   ArrowUpDown, 
   Phone, 
   Calendar,
-  AlertCircle,
-  Sparkles
+  AlertCircle
 } from 'lucide-react';
 
 interface EvaluationsListProps {
@@ -163,11 +162,6 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                             <span>{supervisor?.name || 'Supervisor'}</span>
                             <span className="text-slate-300">·</span>
                             <span className="font-mono text-[10px] text-slate-500">{ev.callId}</span>
-                            {(ev.aiAnalysis || ev.aiAlerts) && (
-                              <span className="bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-bold px-1.5 py-0.2 rounded flex items-center gap-0.5" title="Auditada con IA 3C (Gemini)">
-                                <Sparkles className="w-2.5 h-2.5 text-[#FF6B00]" /> IA 3C
-                              </span>
-                            )}
                           </div>
                         </td>
 
@@ -179,7 +173,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                           </div>
                         </td>
 
-                        <td className="py-3 px-3"><span className="cm-badge">{ev.evaluationType === 'QUALITY' ? 'Calidad' : 'Mejora Continua'}</span><span className="mt-1 block text-[9px] text-[var(--cm-text-secondary)]">{ev.source === 'SPEECH_ANALYTICS' ? 'Speech Analytics' : 'Manual'} · {ev.validationStatus === 'AUTOMATICO_PENDIENTE' ? 'Automático pendiente' : ev.validationStatus === 'AJUSTADO_VALIDADO' ? 'Ajustado y validado' : 'Validado'}</span></td>
+                        <td className="py-3 px-3"><span className="cm-badge">{ev.evaluationType === 'QUALITY' ? 'Calidad' : 'Mejora Continua'}</span></td>
 
                         {/* 3. Score 3C (Numeric Badge) */}
                         <td className="py-3 px-3 text-center">

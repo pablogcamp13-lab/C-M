@@ -89,7 +89,7 @@ interface AppContextType {
   addTeam: (team: Omit<Team, 'id'>) => Team;
 
   // Mutators
-  addEvaluation: (evalData: Omit<Evaluation, 'id' | 'createdAt' | 'scoreConnect' | 'scoreClarify' | 'scoreConvert' | 'scoreTotal' | 'primaryGap' | 'secondaryGap' | 'strongestPillar' | 'recommendation'>) => Evaluation;
+  addEvaluation: (evalData: Omit<Evaluation, 'id' | 'createdAt' | 'scoreConnect' | 'scoreClarify' | 'scoreConvert' | 'scoreTotal' | 'primaryGap' | 'secondaryGap' | 'strongestPillar' | 'recommendation'>) => Promise<Evaluation>;
   updateEvaluation: (id: string, evalData: Partial<Evaluation>) => void;
   deleteEvaluation: (id: string) => void;
 
@@ -527,9 +527,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Mutators
-  const addEvaluation = (
+  const addEvaluation = async (
     evalData: Omit<Evaluation, 'id' | 'createdAt' | 'scoreConnect' | 'scoreClarify' | 'scoreConvert' | 'scoreTotal' | 'primaryGap' | 'secondaryGap' | 'strongestPillar' | 'recommendation'>
-  ): Evaluation => {
+  ): Promise<Evaluation> => {
     const submissionKey = evaluationIdentity(evalData);
     if (recentEvaluation.current?.key === submissionKey && Date.now() - recentEvaluation.current.createdAt < 30000) return recentEvaluation.current.evaluation;
     const quality = evalData.evaluationType === 'QUALITY';
@@ -566,9 +566,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       recommendation: summary.recommendation
     };
 
+    await evaluationsApi.create(newEval);
     recentEvaluation.current = { key: submissionKey, evaluation: newEval, createdAt: Date.now() };
     setEvaluations(prev => [newEval, ...prev.filter(item => evaluationIdentity(item) !== submissionKey)]);
-    void evaluationsApi.create(newEval).catch(error => console.error('No fue posible persistir la evaluación', error));
     return newEval;
   };
 

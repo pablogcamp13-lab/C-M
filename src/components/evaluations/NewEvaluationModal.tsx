@@ -5,8 +5,6 @@ import {
   DimensionId, 
   EvaluationItem, 
   Evaluation,
-  AiEvaluationAnalysis,
-  AiAlert,
   ComplianceStatus
 } from '../../types';
 import { 
@@ -17,9 +15,8 @@ import {
 import { 
   X, 
   Save, 
-  Sparkles, 
+  Sparkles,
   CheckCircle2, 
-  AlertTriangle, 
   ChevronDown, 
   ChevronUp, 
   HelpCircle,
@@ -30,14 +27,8 @@ import {
   Music,
   Upload,
   Plus,
-  Loader2,
-  ShieldAlert,
-  Bot,
   Check,
-  PlayCircle,
-  TrendingUp,
-  MessageSquareText,
-  Volume2
+  MessageSquareText
 } from 'lucide-react';
 import { calculateEvaluationSummary } from '../../utils/calculations';
 import { AudioPlayer } from '../common/AudioPlayer';
@@ -85,12 +76,7 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
   const [audioDurationSeconds, setAudioDurationSeconds] = useState<number>(380);
   const [currentPlaybackSeconds, setCurrentPlaybackSeconds] = useState<number>(0);
   const [formattedTimestamp, setFormattedTimestamp] = useState<string>('00:00');
-  const [seekToSeconds, setSeekToSeconds] = useState<number | null>(null);
-
-  // AI 3C Analysis State
-  const [isAnalyzingAi, setIsAnalyzingAi] = useState<boolean>(false);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [aiAnalysis, setAiAnalysis] = useState<AiEvaluationAnalysis | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // A criterion starts unanswered. It only enters the score after the evaluator
   // records a result; "No aplica" is explicitly excluded from the denominator.
@@ -190,29 +176,6 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
     }));
   };
 
-  const parseTimestampToSeconds = (ts?: string): number | null => {
-    if (!ts) return null;
-    const clean = ts.replace(/[^0-9:]/g, '');
-    const parts = clean.split(':');
-    if (parts.length === 2) {
-      const mins = parseInt(parts[0], 10);
-      const secs = parseInt(parts[1], 10);
-      if (!isNaN(mins) && !isNaN(secs)) {
-        return mins * 60 + secs;
-      }
-    }
-    return null;
-  };
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = error => reject(error);
-    });
-  };
-
   const handleAudioUpload = (file: File, objectUrl: string, durationSeconds: number) => {
     setAudioFile(file);
     setAudioUrl(objectUrl);
@@ -231,76 +194,6 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
     setAudioUrl('');
     setAudioFileName('');
     setAudioFileSize(0);
-  };
-
-  const handleAnalyzeAudioWithAi = async () => {
-    try {
-      setIsAnalyzingAi(true);
-      setAiError(null);
-
-      let audioBase64 = '';
-      if (audioFile) {
-        audioBase64 = await fileToBase64(audioFile);
-      }
-
-      const campaignObj = campaigns.find(c => c.id === selectedCampaignId);
-
-      const criteriaPayload = currentItemsList.map(item => {
-        const cDef = CRITERIA_DEFINITIONS.find(c => c.id === item.criterionId);
-        return {
-          id: item.criterionId,
-          name: cDef?.name || item.criterionId,
-          dimension: item.dimension,
-          level: item.level,
-          percentage: item.percentage,
-          finding: item.finding,
-          evidence: item.evidence
-        };
-      });
-
-      const response = await fetch('/api/analyze-audio-3c', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          audioBase64: audioBase64 || undefined,
-          audioMimeType: audioFile?.type || 'audio/mp3',
-          audioFileName: audioFileName || 'Grabacion_Llamada.mp3',
-          audioDurationSeconds: audioDurationSeconds,
-          advisorName: selectedAdvisor?.name || 'Asesor',
-          campaignName: campaignObj?.name || 'Portabilidad Bitel',
-          productOffered: product,
-          evaluationType: evalType,
-          saleResult: sale ? 'Venta Concretada' : saleResult,
-          criteriaScores: criteriaPayload,
-          currentComments: comments
-        })
-      });
-
-      if (!response.ok) {
-        const errJson = await response.json().catch(() => ({}));
-        throw new Error(errJson.error || `Error ${response.status}: Fallo en el análisis con IA`);
-      }
-
-      const result = await response.json();
-      if (result.success && result.data) {
-        const analysisData: AiEvaluationAnalysis = result.data;
-        setAiAnalysis(analysisData);
-
-        // If comments are empty, populate with suggested conclusions
-        if (!comments.trim() && analysisData.suggestedConclusions) {
-          setComments(analysisData.suggestedConclusions);
-        }
-      } else {
-        throw new Error(result.error || 'Respuesta inválida del servidor');
-      }
-    } catch (err: any) {
-      console.error('Error analyzing with AI:', err);
-      setAiError(err.message || 'Error al conectar con el servicio de análisis de audio 3C');
-    } finally {
-      setIsAnalyzingAi(false);
-    }
   };
 
   const handleInsertTimestampToCriterion = (criterionId: string) => {
@@ -323,11 +216,12 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
     if (!selectedAdvisor || savingRef.current) return;
     savingRef.current = true;
     setIsSaving(true);
+    setSaveError(null);
 
     let persistedAudioUrl = audioUrl;
     if (audioFile) {
       try { persistedAudioUrl = (await filesApi.upload(audioFile)).url || audioUrl; }
-      catch (error: any) { setAiError(error.message || 'No fue posible guardar el audio en Google Drive.'); savingRef.current = false; setIsSaving(false); return; }
+      catch (error: any) { setSaveError(error.message || 'No fue posible guardar el audio.'); savingRef.current = false; setIsSaving(false); return; }
     }
 
     const evaluationToSave = {
@@ -349,15 +243,18 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
       audioFileName: audioFileName || undefined,
       audioFileSize: audioFileSize || undefined,
       audioDurationSeconds: audioDurationSeconds || undefined,
-      aiAnalysis: aiAnalysis || undefined,
-      aiAlerts: aiAnalysis?.alerts || undefined,
-      aiCallDescription: aiAnalysis?.callDescription || undefined,
       items: currentItemsList
     };
 
-    const result = addEvaluation(evaluationToSave);
-    setSavedEvaluation(result);
-    if (onSuccess) onSuccess(result);
+    try {
+      const result = await addEvaluation(evaluationToSave);
+      setSavedEvaluation(result);
+      if (onSuccess) onSuccess(result);
+    } catch (error: any) {
+      setSaveError(error.message || 'No fue posible guardar el registro de Mejora Continua.');
+      savingRef.current = false;
+      setIsSaving(false);
+    }
   };
 
   // If already saved, show Instant Result Screen (Section 8)
@@ -754,7 +651,6 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
               audioUrl={audioUrl}
               audioFileName={audioFileName}
               audioDurationSeconds={audioDurationSeconds}
-              seekToSeconds={seekToSeconds}
               onAudioUpload={handleAudioUpload}
               onRemoveAudio={handleRemoveAudio}
               onTimeUpdate={(seconds, formatted) => {
@@ -1001,256 +897,12 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
             })}
           </div>
 
-          {/* 3. ANÁLISIS INTELIGENTE DE AUDIO CON IA (METODOLOGÍA 3C) */}
-          <div className="bg-gradient-to-br from-[#031E3C] to-[#0A2E5C] text-white rounded-xl p-4 sm:p-5 shadow-md border border-[#0B2B50] space-y-4">
-            
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#0B2B50] pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-[#FF6B00] to-amber-500 text-white flex items-center justify-center shadow-xs">
-                  <Sparkles className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-white font-heading flex items-center gap-2">
-                    3. Análisis de Audio con IA · Metodología 3C
-                    <span className="text-[10px] bg-teal-500/20 text-teal-300 font-semibold px-2 py-0.5 rounded-full border border-teal-500/30 font-sans">
-                      Gemini 3.7 Flash
-                    </span>
-                  </h4>
-                  <p className="text-[11px] text-slate-300">
-                    Audita la grabación con IA para extraer la descripción de la llamada, alertas críticas por pilar (C1, C2, C3) y conclusiones automáticas.
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleAnalyzeAudioWithAi}
-                disabled={isAnalyzingAi}
-                className={`px-4 py-2.5 text-xs font-bold rounded-lg shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                  isAnalyzingAi
-                    ? 'bg-slate-700 text-slate-300 cursor-not-allowed'
-                    : 'bg-[#FF6B00] hover:bg-[#e05e00] text-white hover:shadow-md active:scale-98'
-                }`}
-              >
-                {isAnalyzingAi ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-white" />
-                    <span>Analizando Audio...</span>
-                  </>
-                ) : aiAnalysis ? (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    <span>Re-analizar con IA 3C</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    <span>Analizar Audio con IA</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            {/* Error banner if any */}
-            {aiError && (
-              <div className="bg-rose-950/60 border border-rose-800 text-rose-200 rounded-lg p-3 text-xs flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <strong className="font-semibold block">Error durante el análisis:</strong>
-                  <p className="text-[11px] text-rose-300">{aiError}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Loading State */}
-            {isAnalyzingAi && (
-              <div className="bg-slate-900/80 border border-teal-500/30 rounded-xl p-5 text-center space-y-3 animate-pulse">
-                <div className="flex items-center justify-center gap-2 text-teal-400 text-xs font-bold">
-                  <Bot className="w-5 h-5 animate-bounce" />
-                  <span>Escuchando audio y evaluando los 9 criterios de la Metodología 3C...</span>
-                </div>
-                <p className="text-[11px] text-slate-400 max-w-md mx-auto">
-                  Analizando fluidez verbal y tono (C1 Conectar), dominio de planes y BiPay (C2 Clarificar), y rebatimiento de objeciones y cierre comercial (C3 Convertir).
-                </p>
-              </div>
-            )}
-
-            {/* Results */}
-            {aiAnalysis && !isAnalyzingAi && (
-              <div className="space-y-4 pt-1">
-                
-                {/* 1. Descripción de la llamada */}
-                <div className="bg-slate-900/90 rounded-xl p-4 border border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-teal-400 flex items-center gap-1.5 font-heading">
-                      <MessageSquareText className="w-3.5 h-3.5" />
-                      Descripción General de la Llamada
-                    </span>
-                    {aiAnalysis.detectedSaleLikelihood && (
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                        aiAnalysis.detectedSaleLikelihood === 'ALTA' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' :
-                        aiAnalysis.detectedSaleLikelihood === 'MEDIA' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' :
-                        'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                      }`}>
-                        Probabilidad Comercial: {aiAnalysis.detectedSaleLikelihood}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-200 leading-relaxed font-sans bg-slate-950/60 p-3 rounded-lg border border-slate-800/80">
-                    {aiAnalysis.callDescription}
-                  </p>
-                </div>
-
-                {/* 2. Alertas Críticas 3C */}
-                <div className="bg-slate-900/90 rounded-xl p-4 border border-slate-800 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1.5 font-heading">
-                      <ShieldAlert className="w-3.5 h-3.5" />
-                      Alertas y Oportunidades 3C ({aiAnalysis.alerts?.length || 0})
-                    </span>
-                    <span className="text-[10px] text-slate-400">
-                      Haz clic en el minuto para reproducir en el punto exacto
-                    </span>
-                  </div>
-
-                  {aiAnalysis.alerts && aiAnalysis.alerts.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                      {aiAnalysis.alerts.map((alert, idx) => {
-                        const seconds = parseTimestampToSeconds(alert.timestamp);
-                        return (
-                          <div
-                            key={alert.id || idx}
-                            className={`p-3 rounded-lg border text-xs space-y-1.5 transition-all ${
-                              alert.severity === 'ALTA'
-                                ? 'bg-rose-950/40 border-rose-700/60 text-rose-100'
-                                : alert.severity === 'MEDIA'
-                                ? 'bg-amber-950/40 border-amber-700/60 text-amber-100'
-                                : 'bg-blue-950/40 border-blue-700/60 text-blue-100'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-1">
-                              <div className="flex items-center gap-1.5">
-                                <span className={`text-[9px] font-black px-1.5 py-0.2 rounded uppercase ${
-                                  alert.severity === 'ALTA' ? 'bg-rose-600 text-white' :
-                                  alert.severity === 'MEDIA' ? 'bg-amber-600 text-white' :
-                                  'bg-blue-600 text-white'
-                                }`}>
-                                  {alert.severity}
-                                </span>
-                                <span className="text-[9px] font-bold text-slate-300 bg-slate-800/90 px-1.5 py-0.2 rounded border border-slate-700">
-                                  {alert.pillar || '3C'}
-                                </span>
-                              </div>
-
-                              {alert.timestamp && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (seconds !== null) {
-                                      setSeekToSeconds(seconds);
-                                    }
-                                  }}
-                                  className="text-[10px] text-teal-300 hover:text-teal-100 font-mono font-bold flex items-center gap-1 bg-slate-800/80 hover:bg-slate-700 px-2 py-0.5 rounded cursor-pointer transition-colors border border-slate-700"
-                                  title="Saltar y escuchar en la grabación"
-                                >
-                                  <PlayCircle className="w-3 h-3 text-teal-400" />
-                                  Min {alert.timestamp}
-                                </button>
-                              )}
-                            </div>
-
-                            <h5 className="font-bold text-xs text-white">
-                              {alert.title}
-                            </h5>
-
-                            <p className="text-[11px] text-slate-300 leading-snug">
-                              {alert.description}
-                            </p>
-
-                            {alert.recommendation && (
-                              <div className="text-[10px] text-teal-300 bg-slate-950/60 p-1.5 rounded border border-teal-500/20 flex items-start gap-1">
-                                <strong className="text-teal-400 font-semibold shrink-0">Acción:</strong>
-                                <span>{alert.recommendation}</span>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="text-center py-3 text-xs text-emerald-400 bg-emerald-950/20 border border-emerald-800/40 rounded-lg">
-                      ✓ No se detectaron desviaciones críticas en la llamada.
-                    </div>
-                  )}
-                </div>
-
-                {/* 3. Diagnóstico por Pilares */}
-                {aiAnalysis.methodologySummary && (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
-                    <div className="bg-blue-950/30 border border-blue-800/50 rounded-lg p-2.5 space-y-1">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400 block font-heading">
-                        1. Conectar (C1)
-                      </span>
-                      <p className="text-[11px] text-slate-300 leading-snug">
-                        {aiAnalysis.methodologySummary.connectObservations}
-                      </p>
-                    </div>
-
-                    <div className="bg-amber-950/30 border border-amber-800/50 rounded-lg p-2.5 space-y-1">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 block font-heading">
-                        2. Clarificar (C2)
-                      </span>
-                      <p className="text-[11px] text-slate-300 leading-snug">
-                        {aiAnalysis.methodologySummary.clarifyObservations}
-                      </p>
-                    </div>
-
-                    <div className="bg-emerald-950/30 border border-emerald-800/50 rounded-lg p-2.5 space-y-1">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 block font-heading">
-                        3. Convertir (C3)
-                      </span>
-                      <p className="text-[11px] text-slate-300 leading-snug">
-                        {aiAnalysis.methodologySummary.convertObservations}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Botón para aplicar conclusiones */}
-                {aiAnalysis.suggestedConclusions && (
-                  <div className="flex items-center justify-end">
-                    <button
-                      type="button"
-                      onClick={() => setComments(aiAnalysis.suggestedConclusions)}
-                      className="text-[11px] font-semibold text-teal-300 hover:text-teal-100 flex items-center gap-1.5 hover:underline bg-slate-800/80 hover:bg-slate-800 px-3 py-1.5 rounded-lg border border-teal-500/30 cursor-pointer transition-colors"
-                    >
-                      <Check className="w-3.5 h-3.5 text-teal-400" />
-                      Aplicar Conclusiones de la IA al campo de Observaciones
-                    </button>
-                  </div>
-                )}
-
-              </div>
-            )}
-
-          </div>
-
           {/* Evaluator conclusions */}
           <div className="bg-[#F6F7F9] border border-[#E5E8EC] rounded-xl p-4 space-y-2">
             <div className="flex items-center justify-between">
               <label className="block text-xs font-bold uppercase tracking-wider text-[#031E3C] font-heading">
-                4. Conclusiones y Observaciones Generales del Evaluador
+                3. Conclusiones y Observaciones Generales del Evaluador
               </label>
-              {aiAnalysis?.suggestedConclusions && comments !== aiAnalysis.suggestedConclusions && (
-                <button
-                  type="button"
-                  onClick={() => setComments(aiAnalysis.suggestedConclusions)}
-                  className="text-[10px] text-[#FF6B00] hover:text-[#e05e00] font-semibold flex items-center gap-1 hover:underline cursor-pointer"
-                >
-                  <Sparkles className="w-3 h-3" />
-                  Rellenar con síntesis IA
-                </button>
-              )}
             </div>
             <textarea
               rows={2}
@@ -1260,6 +912,13 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
               className="w-full bg-white border border-[#E5E8EC] rounded-lg p-2.5 text-xs text-[#031E3C] focus:outline-none focus:ring-1 focus:ring-[#FF6B00]"
             />
           </div>
+
+          {saveError && (
+            <div role="alert" className="rounded-xl border border-rose-500/50 bg-rose-950/35 px-4 py-3 text-xs text-rose-200">
+              <strong className="block">No se pudo guardar el registro.</strong>
+              <span>{saveError}</span>
+            </div>
+          )}
 
           {/* Live Preview Floating Footer Bar */}
           <div className="sticky bottom-0 bg-white text-[#102A2E] rounded-xl p-4 border border-[#E2E9E9] shadow-lg flex flex-col sm:flex-row items-center justify-between gap-4">
