@@ -338,9 +338,18 @@ async function startServer() {
       const visibleEvaluations = mine(state.evaluations).filter((item: any) => !item.validationStatus || ['VALIDADO','AJUSTADO_VALIDADO'].includes(item.validationStatus));
       return { ...state, evaluations: visibleEvaluations, actionPlans: mine(state.actionPlans), advisorInterventions: mine(state.advisorInterventions), operationalMeasurements: mine(state.operationalMeasurements), importHistory: [] };
     };
-    try { const state = googleStorage.enabled ? await googleStorage.loadPlatformState() : null; if (state !== null) return res.json({ state: onlyOwn(normalizePlatformState(state)) }); }
+    try {
+      if (googleStorage.enabled) {
+        const [state, storedEvaluations] = await Promise.all([googleStorage.loadPlatformState(), googleStorage.loadEvaluations()]);
+        const consolidated = normalizePlatformState({ ...(state || {}), evaluations: uniqueEvaluations([...(storedEvaluations || []), ...(state?.evaluations || [])]) });
+        return res.json({ state: onlyOwn(consolidated) });
+      }
+    }
     catch (error) { console.error('[google-storage] No fue posible leer el estado de plataforma.', error instanceof Error ? error.message : ''); }
-    const row = db.prepare('SELECT payload_json FROM app_state WHERE id=?').get('global'); res.json({ state: row ? onlyOwn(normalizePlatformState(JSON.parse(String(row.payload_json)))) : null });
+    const row = db.prepare('SELECT payload_json FROM app_state WHERE id=?').get('global') as any;
+    const state = row ? JSON.parse(String(row.payload_json)) : {};
+    const storedEvaluations = (db.prepare('SELECT payload_json FROM evaluations ORDER BY created_at DESC').all() as any[]).flatMap(item => { try { return [JSON.parse(item.payload_json)]; } catch { return []; } });
+    res.json({ state: onlyOwn(normalizePlatformState({ ...state, evaluations: uniqueEvaluations([...storedEvaluations, ...(state.evaluations || [])]) })) });
   });
   app.put('/api/platform-state', requireAuth, async (req, res) => {
     if (['ASESOR','SUPERVISOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'Este rol no puede sobrescribir el estado global.' });

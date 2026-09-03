@@ -127,6 +127,10 @@ class GoogleStorage {
   }
 
   async saveEvaluation(evaluation: any) { await this.upsert('EVALUATIONS', 'id', { id: evaluation.id, advisor_id: evaluation.advisorId, evaluator_id: evaluation.evaluatorId, evaluation_type: evaluation.evaluationType, evaluated_at: `${evaluation.date}T${evaluation.time || '00:00'}:00`, payload_json: JSON.stringify(evaluation), created_at: evaluation.createdAt || new Date().toISOString() }); }
+  async loadEvaluations() {
+    const rows = await this.rows('EVALUATIONS') || [];
+    return rows.flatMap(row => { try { return [JSON.parse(row.payload_json || '{}')]; } catch { return []; } });
+  }
   async deduplicateEvaluations() {
     const rows = await this.rows('EVALUATIONS') || [];
     const seen = new Set<string>();
