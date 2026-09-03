@@ -85,6 +85,7 @@ interface AppContextType {
 
   // Campaign & Team management
   addCampaign: (campaign: Omit<Campaign, 'id'>) => Campaign;
+  updateCampaign: (id: string, data: Partial<Campaign>) => void;
   addTeam: (team: Omit<Team, 'id'>) => Team;
 
   // Mutators
@@ -534,6 +535,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setCampaigns(prev => [...prev, newCamp]);
     return newCamp;
+  };
+
+  const updateCampaign = (id: string, data: Partial<Campaign>) => {
+    setCampaigns(prev => prev.map(campaign => campaign.id === id ? { ...campaign, ...data, id } : campaign));
   };
 
   const addTeam = (team: Omit<Team, 'id'>): Team => {
@@ -1065,6 +1070,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteUser,
         createUsersForAdvisorsWithoutAccount,
         addCampaign,
+        updateCampaign,
         addTeam,
         addEvaluation,
         updateEvaluation,

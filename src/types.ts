@@ -22,6 +22,22 @@ export interface Campaign {
   status: 'ACTIVA' | 'INACTIVA';
   products: string[];
   description?: string;
+  qualityGuidelines?: QualityGuideline[];
+}
+
+export interface QualityGuideline {
+  id: string;
+  code: string;
+  criterion: 'C1' | 'C2' | 'C3' | 'C4';
+  name: string;
+  weight: number;
+  focus: string;
+  critical: boolean;
+  noApplies: boolean;
+  expected: string;
+  failures: string;
+  exclusion: string;
+  active: boolean;
 }
 
 export interface Team {
@@ -165,6 +181,7 @@ export interface EvaluationItem {
   recommendedAction: string;
   timestamp?: string; // e.g. "01:24"
   timestampSeconds?: number; // e.g. 84
+  qualityGuideline?: QualityGuideline; // Snapshot histórico de la pauta aplicada
 }
 
 export interface AiAlert {

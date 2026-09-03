@@ -8,7 +8,7 @@ export type AuthUserRecord = { id: string; name: string; email: string; username
 
 const SHEETS = {
   USERS: ['id', 'name', 'email', 'username', 'role', 'status', 'team_id', 'advisor_id', 'avatar', 'created_at', 'password_hash', 'must_change_password'],
-  CAMPAIGNS: ['id', 'name', 'client', 'status', 'products_json', 'description'],
+  CAMPAIGNS: ['id', 'name', 'client', 'status', 'products_json', 'description', 'quality_guidelines_json'],
   TEAMS: ['id', 'campaign_id', 'supervisor_id', 'name'],
   ADVISORS: ['id', 'dni', 'employee_code', 'name', 'campaign_id', 'team_id', 'supervisor_id', 'data_json'],
   EVALUATIONS: ['id', 'advisor_id', 'evaluator_id', 'evaluation_type', 'evaluated_at', 'payload_json', 'created_at'],
@@ -55,7 +55,8 @@ class GoogleStorage {
     for (const name of Object.keys(SHEETS) as SheetName[]) {
       const range = `${this.quote(name)}!A1:ZZ1`;
       const existing = await sheets.spreadsheets.values.get({ spreadsheetId, range });
-      if (!existing.data.values?.[0]?.length) await sheets.spreadsheets.values.update({ spreadsheetId, range: `${this.quote(name)}!A1`, valueInputOption: 'RAW', requestBody: { values: [SHEETS[name] as unknown as string[]] } });
+      const currentHeaders = existing.data.values?.[0] || [];
+      if (!currentHeaders.length || (SHEETS[name] as readonly string[]).some(header => !currentHeaders.includes(header))) await sheets.spreadsheets.values.update({ spreadsheetId, range: `${this.quote(name)}!A1`, valueInputOption: 'RAW', requestBody: { values: [SHEETS[name] as unknown as string[]] } });
     }
     return true;
   }
@@ -93,7 +94,7 @@ class GoogleStorage {
     if (![users, campaigns, teams, advisors].every(Boolean)) return null;
     return {
       users: users!.map(row => ({ id: row.id!, name: row.name!, email: row.email!, username: row.username || undefined, role: row.role as User['role'], status: row.status as User['status'], teamId: row.team_id || undefined, advisorId: row.advisor_id || undefined, avatar: row.avatar || undefined, createdAt: row.created_at!, password: undefined, mustChangePassword: row.must_change_password !== '0' })),
-      campaigns: campaigns!.map(row => ({ id: row.id!, name: row.name!, client: row.client!, status: row.status as Campaign['status'], products: JSON.parse(row.products_json || '[]'), description: row.description || undefined })),
+      campaigns: campaigns!.map(row => ({ id: row.id!, name: row.name!, client: row.client!, status: row.status as Campaign['status'], products: JSON.parse(row.products_json || '[]'), description: row.description || undefined, qualityGuidelines: JSON.parse(row.quality_guidelines_json || '[]') })),
       teams: teams!.map(row => ({ id: row.id!, campaignId: row.campaign_id!, supervisorId: row.supervisor_id!, name: row.name! })),
       advisors: advisors!.map(row => JSON.parse(row.data_json || '{}') as Advisor)
     };
@@ -117,7 +118,7 @@ class GoogleStorage {
     if (!this.enabled) return;
     await Promise.all([
       this.replace('USERS', repository.users.map(user => ({ id: user.id, name: user.name, email: user.email, username: user.username, role: user.role, status: user.status, team_id: user.teamId, advisor_id: user.advisorId, avatar: user.avatar, created_at: user.createdAt, password_hash: passwordHashes.get(user.id), must_change_password: user.mustChangePassword !== false ? '1' : '0' }))),
-      this.replace('CAMPAIGNS', repository.campaigns.map(campaign => ({ id: campaign.id, name: campaign.name, client: campaign.client, status: campaign.status, products_json: JSON.stringify(campaign.products || []), description: campaign.description }))),
+      this.replace('CAMPAIGNS', repository.campaigns.map(campaign => ({ id: campaign.id, name: campaign.name, client: campaign.client, status: campaign.status, products_json: JSON.stringify(campaign.products || []), description: campaign.description, quality_guidelines_json: JSON.stringify(campaign.qualityGuidelines || []) }))),
       this.replace('TEAMS', repository.teams.map(team => ({ id: team.id, campaign_id: team.campaignId, supervisor_id: team.supervisorId, name: team.name }))),
       this.replace('ADVISORS', repository.advisors.map(advisor => ({ id: advisor.id, dni: advisor.dni, employee_code: advisor.employeeCode || '', name: advisor.name, campaign_id: advisor.campaignId, team_id: advisor.teamId, supervisor_id: advisor.supervisorId, data_json: JSON.stringify(advisor) })))
     ]);

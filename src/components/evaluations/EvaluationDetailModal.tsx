@@ -323,7 +323,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
 
             <div className="space-y-3">
               {evaluation.items.map((item, idx) => {
-                const qualityDef = isQuality ? QUALITY_ATTRIBUTES.find(c => c.id === item.criterionId) : undefined;
+                const qualityDef = isQuality ? item.qualityGuideline || QUALITY_ATTRIBUTES.find(c => c.id === item.criterionId) : undefined;
                 const critDef = !isQuality ? CRITERIA_DEFINITIONS.find(c => c.id === item.criterionId) : undefined;
                 const compliance = getItemCompliance(item);
                 const dimensionId = critDef?.dimensionId;
