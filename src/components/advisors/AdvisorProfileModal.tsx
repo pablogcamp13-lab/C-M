@@ -29,7 +29,8 @@ import {
   Briefcase,
   FileSpreadsheet,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  Pencil
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -63,10 +64,12 @@ export const AdvisorProfileModal: React.FC<AdvisorProfileModalProps> = ({
 }) => {
   if (!advisorId) return null;
 
-  const { advisors, users, teams, evaluations, actionPlans, config, operationalMeasurements, addOperationalMeasurement, deleteAdvisor } = useApp();
+  const { advisors, users, campaigns, teams, evaluations, actionPlans, config, operationalMeasurements, addOperationalMeasurement, updateAdvisor, deleteAdvisor } = useApp();
   const [activeTab, setActiveTab] = useState<'3C' | 'OPERATIONAL'>('3C');
   const [showAddMeasurement, setShowAddMeasurement] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showEditAdvisor, setShowEditAdvisor] = useState(false);
+  const [editDraft, setEditDraft] = useState<Partial<Advisor>>({});
 
   // New Measurement Form State
   const [newPeriodName, setNewPeriodName] = useState('');
@@ -81,6 +84,30 @@ export const AdvisorProfileModal: React.FC<AdvisorProfileModalProps> = ({
 
   const supervisor = users.find(u => u.id === advisor.supervisorId);
   const team = teams.find(t => t.id === advisor.teamId);
+  const campaign = campaigns.find(item => item.id === advisor.campaignId);
+  const activeSupervisors = users.filter(user => user.role === 'SUPERVISOR' && user.status === 'ACTIVO');
+  const campaignTeams = teams.filter(item => !editDraft.campaignId || item.campaignId === editDraft.campaignId);
+
+  const openAdvisorEditor = () => {
+    setEditDraft({ ...advisor });
+    setShowEditAdvisor(true);
+  };
+
+  const handleSaveAdvisor = (event: React.FormEvent) => {
+    event.preventDefault();
+    const selectedSupervisor = users.find(user => user.id === editDraft.supervisorId);
+    updateAdvisor(advisor.id, {
+      ...editDraft,
+      name: editDraft.name?.trim() || advisor.name,
+      dni: editDraft.dni?.trim() || advisor.dni,
+      employeeCode: editDraft.employeeCode?.trim() || advisor.employeeCode,
+      supervisor: selectedSupervisor?.name || editDraft.supervisor || '',
+      baselineSph: Number(editDraft.baselineSph) || 0,
+      hireDatePending: !editDraft.hireDate,
+      campaignStartDatePending: !editDraft.campaignStartDate
+    });
+    setShowEditAdvisor(false);
+  };
 
   const dualTenure = calculateDualAdvisorTenure(advisor);
 
@@ -167,7 +194,7 @@ export const AdvisorProfileModal: React.FC<AdvisorProfileModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-      <div className="cm-modal max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95">
+      <div className="cm-modal cm-advisor-profile max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95">
         
         {/* Header */}
         <div className="bg-[#031E3C] text-white px-6 py-5 flex items-center justify-between border-b border-slate-800">
@@ -200,11 +227,24 @@ export const AdvisorProfileModal: React.FC<AdvisorProfileModalProps> = ({
                 <span>Supervisor: <strong className="text-white">{advisor.supervisor || supervisor?.name || 'Supervisor'}</strong></span>
                 <span>·</span>
                 <span>Horario: <strong className="text-white">{advisor.schedule || 'Completo'}</strong></span>
+                <span>·</span>
+                <span>Cuartil: <strong className="text-white">{advisor.quartile || 'Pendiente'}</strong></span>
+                <span>·</span>
+                <span>Campaña: <strong className="text-white">{campaign?.name || 'Sin campaña'}</strong></span>
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={openAdvisorEditor}
+              className="text-slate-300 hover:text-cyan-300 p-1.5 rounded-lg hover:bg-cyan-500/15 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
+              title="Editar datos del asesor"
+            >
+              <Pencil className="w-4 h-4" />
+              <span className="hidden sm:inline">Editar</span>
+            </button>
             <button
               type="button"
               onClick={() => setShowDeleteConfirm(true)}
@@ -824,6 +864,98 @@ export const AdvisorProfileModal: React.FC<AdvisorProfileModalProps> = ({
         </div>
 
       </div>
+
+      {showEditAdvisor && (
+        <div className="fixed inset-0 z-60 bg-slate-950/55 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Editar asesor">
+          <form onSubmit={handleSaveAdvisor} className="cm-modal w-full max-w-2xl max-h-[90vh] overflow-y-auto p-5 sm:p-6 space-y-5">
+            <div className="flex items-start justify-between gap-4 border-b border-[var(--cm-border)] pb-4">
+              <div>
+                <h4 className="font-bold text-lg text-white">Editar datos del asesor</h4>
+                <p className="text-xs text-[var(--cm-text-secondary)] mt-1">Los cambios se guardarán en la dotación y se reflejarán en toda la plataforma.</p>
+              </div>
+              <button type="button" onClick={() => setShowEditAdvisor(false)} className="p-1.5 text-[var(--cm-text-secondary)] hover:text-white rounded-lg hover:bg-white/10">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <label className="sm:col-span-2 font-semibold text-[var(--cm-text-secondary)]">
+                Nombre completo
+                <input required className="cm-input mt-1.5 px-3 py-2.5" value={editDraft.name || ''} onChange={e => setEditDraft(prev => ({ ...prev, name: e.target.value }))} />
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                DNI
+                <input required className="cm-input mt-1.5 px-3 py-2.5" value={editDraft.dni || ''} onChange={e => setEditDraft(prev => ({ ...prev, dni: e.target.value }))} />
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                Código de empleado
+                <input className="cm-input mt-1.5 px-3 py-2.5" value={editDraft.employeeCode || ''} onChange={e => setEditDraft(prev => ({ ...prev, employeeCode: e.target.value }))} />
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                Campaña
+                <select className="cm-select mt-1.5 px-3 py-2.5" value={editDraft.campaignId || ''} onChange={e => setEditDraft(prev => ({ ...prev, campaignId: e.target.value, teamId: '' }))}>
+                  <option value="">Sin campaña</option>
+                  {campaigns.filter(item => item.status === 'ACTIVA').map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                Equipo
+                <select className="cm-select mt-1.5 px-3 py-2.5" value={editDraft.teamId || ''} onChange={e => setEditDraft(prev => ({ ...prev, teamId: e.target.value }))}>
+                  <option value="">Sin equipo</option>
+                  {campaignTeams.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                Supervisor
+                <select className="cm-select mt-1.5 px-3 py-2.5" value={editDraft.supervisorId || ''} onChange={e => setEditDraft(prev => ({ ...prev, supervisorId: e.target.value }))}>
+                  <option value="">Sin supervisor</option>
+                  {activeSupervisors.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                Cuartil
+                <select className="cm-select mt-1.5 px-3 py-2.5" value={editDraft.quartile || ''} onChange={e => setEditDraft(prev => ({ ...prev, quartile: e.target.value }))}>
+                  <option value="">Sin cuartil</option>
+                  {['Q1', 'Q2', 'Q3', 'Q4'].map(value => <option key={value} value={value}>{value}</option>)}
+                </select>
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                Fecha de ingreso
+                <input type="date" className="cm-input mt-1.5 px-3 py-2.5" value={editDraft.hireDate || ''} onChange={e => setEditDraft(prev => ({ ...prev, hireDate: e.target.value }))} />
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                Fecha de inicio en campaña
+                <input type="date" className="cm-input mt-1.5 px-3 py-2.5" value={editDraft.campaignStartDate || ''} onChange={e => setEditDraft(prev => ({ ...prev, campaignStartDate: e.target.value }))} />
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                Horario
+                <input className="cm-input mt-1.5 px-3 py-2.5" placeholder="09:00 - 18:00" value={editDraft.schedule || ''} onChange={e => setEditDraft(prev => ({ ...prev, schedule: e.target.value }))} />
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                SPH operacional
+                <input type="number" min="0" step="0.01" className="cm-input mt-1.5 px-3 py-2.5" value={editDraft.baselineSph ?? ''} onChange={e => setEditDraft(prev => ({ ...prev, baselineSph: e.target.value === '' ? undefined : Number(e.target.value) }))} />
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                Estado
+                <select className="cm-select mt-1.5 px-3 py-2.5" value={editDraft.status || 'ACTIVO'} onChange={e => setEditDraft(prev => ({ ...prev, status: e.target.value as Advisor['status'], active: e.target.value === 'ACTIVO' }))}>
+                  <option value="ACTIVO">Activo</option>
+                  <option value="EN_CAPACITACION">En capacitación</option>
+                  <option value="INACTIVO">Inactivo</option>
+                </select>
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                Antigüedad importada
+                <input className="cm-input mt-1.5 px-3 py-2.5" value={editDraft.importedTenureLabel || ''} onChange={e => setEditDraft(prev => ({ ...prev, importedTenureLabel: e.target.value }))} />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-[var(--cm-border)] pt-4">
+              <button type="button" onClick={() => setShowEditAdvisor(false)} className="cm-button-secondary rounded-lg px-4 py-2 text-xs font-semibold">Cancelar</button>
+              <button type="submit" className="cm-button-primary rounded-lg px-4 py-2 text-xs font-bold flex items-center gap-1.5"><Save className="w-4 h-4" />Guardar cambios</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
