@@ -48,6 +48,9 @@ const DEFAULT_ADMIN_PASSWORD = process.env.INITIAL_ADMIN_PASSWORD || INITIAL_PAS
 const hashPassword = (password: string) => { const salt = randomBytes(16).toString('hex'); return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`; };
 const validPassword = (password: string, stored: string) => { const [salt, hash] = stored.split(':'); if (!salt || !hash) return false; const derived = scryptSync(password, salt, 64); return timingSafeEqual(derived, Buffer.from(hash, 'hex')); };
 const publicUser = (row: any): User => ({ id: row.id, name: row.name, email: row.email, username: row.username || undefined, role: row.role, status: row.status, teamId: row.team_id || undefined, advisorId: row.advisor_id || undefined, avatar: row.avatar || undefined, createdAt: row.created_at, mustChangePassword: Boolean(row.must_change_password) });
+const evaluationIdentity = (item: any) => [item?.advisorId, item?.evaluationType, item?.date, item?.time, item?.callId || item?.recordingCode || item?.id].join('|');
+const uniqueEvaluations = (items: any[] = []) => { const seen = new Set<string>(); return items.filter(item => { const key=evaluationIdentity(item); if(seen.has(key)) return false; seen.add(key); return true; }); };
+const normalizePlatformState = (state: any) => state ? { ...state, evaluations: uniqueEvaluations(state.evaluations || []) } : state;
 
 function seedDatabase() {
   const count = db.prepare('SELECT COUNT(*) AS total FROM users').get().total as number;
@@ -269,9 +272,12 @@ async function startServer() {
     if (!['ADMINISTRADOR','CONSULTOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'Solo Calidad o Administración puede crear evaluaciones.' });
     const evaluation = req.body;
     if (!evaluation?.id || !evaluation?.advisorId || !evaluation?.evaluatorId || !['QUALITY', 'D3C'].includes(evaluation?.evaluationType)) return res.status(400).json({ error: 'Evaluación inválida.' });
+    const evaluatedAt = `${evaluation.date}T${evaluation.time || '00:00'}:00`;
+    const duplicate = (db.prepare('SELECT payload_json FROM evaluations WHERE advisor_id=? AND evaluation_type=? AND evaluated_at=?').all(evaluation.advisorId,evaluation.evaluationType,evaluatedAt) as any[]).map(row=>JSON.parse(row.payload_json)).find(item=>evaluationIdentity(item)===evaluationIdentity(evaluation));
+    if (duplicate) return res.status(200).json({ evaluation: duplicate, deduplicated: true });
     try {
       if (googleStorage.enabled) await googleStorage.saveEvaluation(evaluation);
-      db.prepare(`INSERT INTO evaluations (id,advisor_id,evaluator_id,evaluation_type,evaluated_at,payload_json,created_at) VALUES (?,?,?,?,?,?,?)`).run(evaluation.id, evaluation.advisorId, evaluation.evaluatorId, evaluation.evaluationType, `${evaluation.date}T${evaluation.time || '00:00'}:00`, JSON.stringify(evaluation), evaluation.createdAt || new Date().toISOString());
+      db.prepare(`INSERT INTO evaluations (id,advisor_id,evaluator_id,evaluation_type,evaluated_at,payload_json,created_at) VALUES (?,?,?,?,?,?,?)`).run(evaluation.id, evaluation.advisorId, evaluation.evaluatorId, evaluation.evaluationType, evaluatedAt, JSON.stringify(evaluation), evaluation.createdAt || new Date().toISOString());
       return res.status(201).json({ evaluation });
     } catch (error: any) { console.error('[google-storage] No fue posible guardar la evaluación.', error instanceof Error ? error.message : ''); return res.status(400).json({ error: error.message || 'No fue posible guardar la evaluación.' }); }
   });
@@ -309,17 +315,18 @@ async function startServer() {
       const visibleEvaluations = mine(state.evaluations).filter((item: any) => !item.validationStatus || ['VALIDADO','AJUSTADO_VALIDADO'].includes(item.validationStatus));
       return { ...state, evaluations: visibleEvaluations, actionPlans: mine(state.actionPlans), advisorInterventions: mine(state.advisorInterventions), operationalMeasurements: mine(state.operationalMeasurements), importHistory: [] };
     };
-    try { const state = googleStorage.enabled ? await googleStorage.loadPlatformState() : null; if (state !== null) return res.json({ state: onlyOwn(state) }); }
+    try { const state = googleStorage.enabled ? await googleStorage.loadPlatformState() : null; if (state !== null) return res.json({ state: onlyOwn(normalizePlatformState(state)) }); }
     catch (error) { console.error('[google-storage] No fue posible leer el estado de plataforma.', error instanceof Error ? error.message : ''); }
-    const row = db.prepare('SELECT payload_json FROM app_state WHERE id=?').get('global'); res.json({ state: row ? onlyOwn(JSON.parse(String(row.payload_json))) : null });
+    const row = db.prepare('SELECT payload_json FROM app_state WHERE id=?').get('global'); res.json({ state: row ? onlyOwn(normalizePlatformState(JSON.parse(String(row.payload_json)))) : null });
   });
   app.put('/api/platform-state', requireAuth, async (req, res) => {
     if (['ASESOR','SUPERVISOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'Este rol no puede sobrescribir el estado global.' });
     const now = new Date().toISOString();
-    try { if (googleStorage.enabled) { await googleStorage.savePlatformState(req.body); for (const evaluation of (req.body?.evaluations || [])) if (evaluation?.id && evaluation?.advisorId && evaluation?.evaluatorId && ['QUALITY','D3C'].includes(evaluation?.evaluationType)) await googleStorage.saveEvaluation(evaluation); } }
+    const normalizedState = normalizePlatformState(req.body);
+    try { if (googleStorage.enabled) { await googleStorage.savePlatformState(normalizedState); for (const evaluation of (normalizedState?.evaluations || [])) if (evaluation?.id && evaluation?.advisorId && evaluation?.evaluatorId && ['QUALITY','D3C'].includes(evaluation?.evaluationType)) await googleStorage.saveEvaluation(evaluation); } }
     catch (error) { console.error('[google-storage] No fue posible guardar el estado de plataforma.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible sincronizar el estado con Google Sheets.' }); }
-    db.prepare(`INSERT INTO app_state (id,payload_json,updated_at) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,updated_at=excluded.updated_at`).run('global', JSON.stringify(req.body), now);
-    for (const evaluation of (req.body?.evaluations || [])) { if (!evaluation?.id || !evaluation?.advisorId || !evaluation?.evaluatorId || !['QUALITY','D3C'].includes(evaluation?.evaluationType)) continue; try { db.prepare(`INSERT OR IGNORE INTO evaluations (id,advisor_id,evaluator_id,evaluation_type,evaluated_at,payload_json,created_at) VALUES (?,?,?,?,?,?,?)`).run(evaluation.id, evaluation.advisorId, evaluation.evaluatorId, evaluation.evaluationType, `${evaluation.date}T${evaluation.time || '00:00'}:00`, JSON.stringify(evaluation), evaluation.createdAt || now); } catch {} }
+    db.prepare(`INSERT INTO app_state (id,payload_json,updated_at) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,updated_at=excluded.updated_at`).run('global', JSON.stringify(normalizedState), now);
+    for (const evaluation of (normalizedState?.evaluations || [])) { if (!evaluation?.id || !evaluation?.advisorId || !evaluation?.evaluatorId || !['QUALITY','D3C'].includes(evaluation?.evaluationType)) continue; try { db.prepare(`INSERT OR IGNORE INTO evaluations (id,advisor_id,evaluator_id,evaluation_type,evaluated_at,payload_json,created_at) VALUES (?,?,?,?,?,?,?)`).run(evaluation.id, evaluation.advisorId, evaluation.evaluatorId, evaluation.evaluationType, `${evaluation.date}T${evaluation.time || '00:00'}:00`, JSON.stringify(evaluation), evaluation.createdAt || now); } catch {} }
     res.json({ ok: true });
   });
 

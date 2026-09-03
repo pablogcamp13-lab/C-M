@@ -155,6 +155,12 @@ const initialFilters: FilterState = {
   searchQuery: ''
 };
 
+const evaluationIdentity = (evaluation: Partial<Evaluation>) => [evaluation.advisorId, evaluation.evaluationType, evaluation.date, evaluation.time, evaluation.callId || evaluation.recordingCode || evaluation.id].join('|');
+const uniqueEvaluations = (items: Evaluation[]) => {
+  const seen = new Set<string>();
+  return items.filter(item => { const key = evaluationIdentity(item); if (seen.has(key)) return false; seen.add(key); return true; });
+};
+
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -214,6 +220,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const rosterHydrated = useRef(false);
   const platformStateHydrated = useRef(false);
+  const recentEvaluation = useRef<{ key: string; evaluation: Evaluation; createdAt: number } | null>(null);
 
   // La sesión se mantiene sólo por pestaña; el token nunca se guarda en localStorage.
   useEffect(() => {
@@ -238,7 +245,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const persistedState = await platformStateApi.load();
         const state = persistedState;
         if (state) {
-          setEvaluations(Array.isArray(state.evaluations) ? state.evaluations : []); setActionPlans(state.actionPlans || []); setInterventions(state.interventions || []);
+          setEvaluations(Array.isArray(state.evaluations) ? uniqueEvaluations(state.evaluations) : []); setActionPlans(state.actionPlans || []); setInterventions(state.interventions || []);
           setAdvisorInterventions(state.advisorInterventions || []); setOperationalMeasurements(state.operationalMeasurements || []); setImportHistory(state.importHistory || []); setConfig(state.config || DEFAULT_METHODOLOGY_CONFIG);
         }
         platformStateHydrated.current = true;
@@ -523,6 +530,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addEvaluation = (
     evalData: Omit<Evaluation, 'id' | 'createdAt' | 'scoreConnect' | 'scoreClarify' | 'scoreConvert' | 'scoreTotal' | 'primaryGap' | 'secondaryGap' | 'strongestPillar' | 'recommendation'>
   ): Evaluation => {
+    const submissionKey = evaluationIdentity(evalData);
+    if (recentEvaluation.current?.key === submissionKey && Date.now() - recentEvaluation.current.createdAt < 30000) return recentEvaluation.current.evaluation;
     const quality = evalData.evaluationType === 'QUALITY';
     const qualityScore = (criterion: string) => {
       const entries = evalData.items.filter(item => item.dimension === criterion && item.compliance !== 'NO_APLICA');
@@ -557,7 +566,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       recommendation: summary.recommendation
     };
 
-    setEvaluations(prev => [newEval, ...prev]);
+    recentEvaluation.current = { key: submissionKey, evaluation: newEval, createdAt: Date.now() };
+    setEvaluations(prev => [newEval, ...prev.filter(item => evaluationIdentity(item) !== submissionKey)]);
     void evaluationsApi.create(newEval).catch(error => console.error('No fue posible persistir la evaluación', error));
     return newEval;
   };

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import { 
   EvaluationType, 
@@ -115,6 +115,8 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
 
   // Result screen modal step
   const [savedEvaluation, setSavedEvaluation] = useState<Evaluation | null>(null);
+  const savingRef = useRef(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const selectedAdvisor = advisors.find(a => a.id === selectedAdvisorId);
   const selectedSupervisor = users.find(u => u.id === selectedAdvisor?.supervisorId);
@@ -318,13 +320,14 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!selectedAdvisor) return;
+    if (!selectedAdvisor || savingRef.current) return;
+    savingRef.current = true;
+    setIsSaving(true);
 
     let persistedAudioUrl = audioUrl;
     if (audioFile) {
       try { persistedAudioUrl = (await filesApi.upload(audioFile)).url || audioUrl; }
-      catch (error: any) { setAiError(error.message || 'No fue posible guardar el audio en Google Drive.'); return; }
+      catch (error: any) { setAiError(error.message || 'No fue posible guardar el audio en Google Drive.'); savingRef.current = false; setIsSaving(false); return; }
     }
 
     const evaluationToSave = {
@@ -1287,11 +1290,11 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
                 <Save className="w-4 h-4" /><span>{draftSaved ? 'Borrador guardado' : 'Guardar borrador'}</span>
               </button>
               <button
-                type="submit" disabled={!selectedAdvisor || !d3cScore.answered}
+                type="submit" disabled={!selectedAdvisor || !d3cScore.answered || isSaving}
                 className="w-1/2 sm:w-auto flex items-center justify-center gap-2 px-5 py-2 text-xs font-bold text-white bg-[#008B88] hover:bg-[#006B6B] rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-50"
               >
                 <Save className="w-4 h-4" />
-                <span>Guardar y finalizar</span>
+                <span>{isSaving ? 'Guardando…' : 'Guardar y finalizar'}</span>
               </button>
             </div>
 

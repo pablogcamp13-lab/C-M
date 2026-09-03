@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CalendarDays,
@@ -38,6 +38,8 @@ export const QualityEvaluationModal: React.FC<{
   onClose: () => void;
   onSuccess?: (value: Evaluation) => void;
 }> = ({ onClose, onSuccess }) => {
+  const savingRef = useRef(false);
+  const [isSaving, setIsSaving] = useState(false);
   const { advisors, campaigns, users, teams, currentUser, addEvaluation } =
     useApp();
   const selectableAdvisors = advisors.filter(
@@ -128,7 +130,9 @@ export const QualityEvaluationModal: React.FC<{
     setDraftSaved(false);
   };
   const finalize = async () => {
-    if (!advisor) return;
+    if (!advisor || savingRef.current) return;
+    savingRef.current = true;
+    setIsSaving(true);
     let persistedAudioUrl = audio?.url;
     if (audio?.file) {
       try {
@@ -138,6 +142,8 @@ export const QualityEvaluationModal: React.FC<{
         setAudioError(
           error.message || "No fue posible guardar el audio en Google Drive.",
         );
+        savingRef.current = false;
+        setIsSaving(false);
         return;
       }
     }
@@ -657,11 +663,11 @@ export const QualityEvaluationModal: React.FC<{
             <button
               type="button"
               onClick={finalize}
-              disabled={!advisor || !summary.answered}
+              disabled={!advisor || !summary.answered || isSaving}
               className="inline-flex items-center gap-2 rounded-lg bg-[#008B88] px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
             >
               <CheckCircle2 className="h-4 w-4" />
-              Guardar y finalizar
+              {isSaving ? "Guardando…" : "Guardar y finalizar"}
             </button>
           </div>
         </footer>
