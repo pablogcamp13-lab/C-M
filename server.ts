@@ -132,9 +132,22 @@ async function saveRepository(input: SharedRepository) {
   return persisted;
 }
 
-function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+async function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
-  const session = token && db.prepare('SELECT s.*, u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires_at>?').get(token, new Date().toISOString());
+  let session = token && db.prepare('SELECT s.*, u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?').get(token);
+  if (!session && token && googleStorage.enabled) {
+    try {
+      const remoteSession = await googleStorage.loadSession(token);
+      if (remoteSession?.user_id) {
+        await syncAuthUsersFromGoogle();
+        const user = db.prepare('SELECT * FROM users WHERE id=? AND status=?').get(remoteSession.user_id, 'ACTIVO') as any;
+        if (user) {
+          db.prepare('INSERT OR REPLACE INTO sessions (token,user_id,expires_at,created_at) VALUES (?,?,?,?)').run(token, user.id, '9999-12-31T23:59:59.999Z', remoteSession.created_at || new Date().toISOString());
+          session = { ...user, token, user_id: user.id };
+        }
+      }
+    } catch (error) { console.error('[google-storage] No fue posible restaurar la sesión.', error instanceof Error ? error.message : ''); }
+  }
   if (!session) return res.status(401).json({ error: 'Sesión no válida o expirada.' });
   (req as any).authUser = publicUser(session); (req as any).token = token; next();
 }
@@ -186,9 +199,11 @@ async function startServer() {
       user = { ...user, password_hash: passwordHash };
     }
     const token = randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString();
-    db.prepare('INSERT INTO sessions (token,user_id,expires_at,created_at) VALUES (?,?,?,?)').run(token, user.id, expiresAt, new Date().toISOString());
-    return res.json({ token, user: publicUser(user), expiresAt });
+    const createdAt = new Date().toISOString(); const expiresAt = '9999-12-31T23:59:59.999Z';
+    db.prepare('INSERT INTO sessions (token,user_id,expires_at,created_at) VALUES (?,?,?,?)').run(token, user.id, expiresAt, createdAt);
+    try { if (googleStorage.enabled) await googleStorage.saveSession(token, user.id, createdAt); }
+    catch (error) { console.error('[google-storage] No fue posible persistir la sesión.', error instanceof Error ? error.message : ''); }
+    return res.json({ token, user: publicUser(user) });
   });
   app.get('/api/auth/me', requireAuth, (req, res) => res.json({ user: (req as any).authUser }));
   app.post('/api/auth/change-password', requireAuth, async (req, res) => {
@@ -199,7 +214,12 @@ async function startServer() {
     catch (error) { console.error('[google-storage] No fue posible guardar la contraseña.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible sincronizar la contraseña.' }); }
     res.json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)) });
   });
-  app.post('/api/auth/logout', requireAuth, (req, res) => { db.prepare('DELETE FROM sessions WHERE token=?').run((req as any).token); res.status(204).end(); });
+  app.post('/api/auth/logout', requireAuth, async (req, res) => {
+    const token = (req as any).token; db.prepare('DELETE FROM sessions WHERE token=?').run(token);
+    try { if (googleStorage.enabled) await googleStorage.deleteSession(token); }
+    catch (error) { console.error('[google-storage] No fue posible eliminar la sesión persistente.', error instanceof Error ? error.message : ''); }
+    res.status(204).end();
+  });
   const requireAdmin = (req: express.Request, res: express.Response) => (req as any).authUser?.role === 'ADMINISTRADOR' || res.status(403).json({ error: 'Acceso restringido a administración.' });
   app.post('/api/admin/users', requireAuth, async (req, res) => {
     if (requireAdmin(req, res) !== true) return;

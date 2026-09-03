@@ -17,7 +17,8 @@ const SHEETS = {
   DEVELOPMENT_CAPSULES: ['id', 'status', 'data_json', 'created_at', 'updated_at'],
   DEVELOPMENT_ASSIGNMENTS: ['id', 'capsule_id', 'advisor_id', 'status', 'data_json', 'created_at', 'updated_at'],
   QUALITY_ALERTS: ['id', 'status', 'advisor_id', 'supervisor_id', 'campaign_id', 'data_json', 'created_at', 'updated_at'],
-  CALIBRATIONS: ['id', 'status', 'evaluation_id', 'campaign_id', 'data_json', 'created_at', 'updated_at']
+  CALIBRATIONS: ['id', 'status', 'evaluation_id', 'campaign_id', 'data_json', 'created_at', 'updated_at'],
+  SESSIONS: ['token', 'user_id', 'created_at']
 } as const;
 
 type SheetName = keyof typeof SHEETS;
@@ -115,6 +116,9 @@ class GoogleStorage {
   }
 
   async updateUserPasswordHash(id: string, passwordHash: string, mustChangePassword = false) { await this.upsert('USERS', 'id', { id, password_hash: passwordHash, must_change_password: mustChangePassword ? '1' : '0' }); }
+  async loadSession(token: string) { return (await this.rows('SESSIONS') || []).find(row => row.token === token) || null; }
+  async saveSession(token: string, userId: string, createdAt: string) { await this.upsert('SESSIONS', 'token', { token, user_id: userId, created_at: createdAt }); }
+  async deleteSession(token: string) { await this.replace('SESSIONS', (await this.rows('SESSIONS') || []).filter(row => row.token !== token)); }
 
   async saveRepository(repository: SharedRepository, passwordHashes: Map<string, string>) {
     if (!this.enabled) return;
