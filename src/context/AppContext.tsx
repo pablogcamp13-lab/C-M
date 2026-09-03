@@ -569,6 +569,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await evaluationsApi.create(newEval);
     recentEvaluation.current = { key: submissionKey, evaluation: newEval, createdAt: Date.now() };
     setEvaluations(prev => [newEval, ...prev.filter(item => evaluationIdentity(item) !== submissionKey)]);
+    window.dispatchEvent(new Event('cm:data-changed'));
     return newEval;
   };
 

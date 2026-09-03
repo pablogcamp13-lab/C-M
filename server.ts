@@ -291,19 +291,42 @@ async function startServer() {
   app.post('/api/feedbacks', requireAuth, async (req, res) => {
     if ((req as any).authUser.role === 'ASESOR') return res.status(403).json({ error: 'Un asesor no puede crear feedbacks.' });
     const body = req.body || {}; const evaluation = db.prepare('SELECT * FROM evaluations WHERE id=?').get(body.evaluation_id) as any;
-    if (!evaluation) return res.status(400).json({ error: 'La evaluación origen no existe.' });
-    const ev = JSON.parse(evaluation.payload_json); const now = new Date().toISOString(); const feedback = { feedback_id: `fb_${randomBytes(8).toString('hex')}`, evaluation_id: ev.id, advisor_id: ev.advisorId, supervisor_id: ev.supervisorId, evaluator_id: ev.evaluatorId, evaluation_type: ev.evaluationType, feedback_text: String(body.feedback_text || ''), advisor_response: null, advisor_evidence_url: null, supervisor_closure_comment: null, status: 'PENDIENTE', created_at: now, advisor_action_at: null, closed_at: null, updated_at: now };
-    try { if (googleStorage.enabled) await googleStorage.saveFeedback(feedback); db.prepare('INSERT INTO feedbacks (feedback_id,evaluation_id,advisor_id,supervisor_id,evaluator_id,evaluation_type,feedback_text,advisor_evidence_url,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(feedback.feedback_id, feedback.evaluation_id, feedback.advisor_id, feedback.supervisor_id, feedback.evaluator_id, feedback.evaluation_type, feedback.feedback_text, feedback.advisor_evidence_url, feedback.status, now, now); res.status(201).json({ feedback }); }
+    let ev = evaluation ? JSON.parse(evaluation.payload_json) : null;
+    if (!ev && googleStorage.enabled) {
+      try { ev = (await googleStorage.loadPlatformState())?.evaluations?.find((item: any) => item.id === body.evaluation_id); }
+      catch (error) { console.error('[google-storage] No fue posible recuperar la evaluación origen.', error instanceof Error ? error.message : ''); }
+    }
+    if (!ev) return res.status(400).json({ error: 'La evaluación origen no existe.' });
+    const now = new Date().toISOString(); const feedback = { feedback_id: `fb_${randomBytes(8).toString('hex')}`, evaluation_id: ev.id, advisor_id: ev.advisorId, supervisor_id: ev.supervisorId, evaluator_id: ev.evaluatorId, evaluation_type: ev.evaluationType, feedback_text: String(body.feedback_text || ''), advisor_response: null, advisor_evidence_url: null, supervisor_closure_comment: null, status: 'PENDIENTE', created_at: now, advisor_action_at: null, closed_at: null, updated_at: now };
+    try {
+      if (googleStorage.enabled) {
+        const existing = (await googleStorage.loadFeedbacks()).find((item: any) => item.evaluation_id === ev.id);
+        if (existing) return res.status(409).json({ error: 'Esta evaluación ya tiene feedback.' });
+        await googleStorage.saveFeedback(feedback);
+      }
+      try { db.prepare('INSERT INTO feedbacks (feedback_id,evaluation_id,advisor_id,supervisor_id,evaluator_id,evaluation_type,feedback_text,advisor_evidence_url,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(feedback.feedback_id, feedback.evaluation_id, feedback.advisor_id, feedback.supervisor_id, feedback.evaluator_id, feedback.evaluation_type, feedback.feedback_text, feedback.advisor_evidence_url, feedback.status, now, now); } catch (localError) { if (!googleStorage.enabled) throw localError; }
+      res.status(201).json({ feedback });
+    }
     catch (error) { console.error('[google-storage] No fue posible guardar feedback.', error instanceof Error ? error.message : ''); res.status(400).json({ error: 'Esta evaluación ya tiene feedback o no fue posible sincronizarlo.' }); }
   });
   app.patch('/api/feedbacks/:id', requireAuth, async (req, res) => {
-    const current = db.prepare('SELECT * FROM feedbacks WHERE feedback_id=?').get(req.params.id) as any; if (!current) return res.status(404).json({ error: 'Feedback no encontrado.' }); const body = req.body || {}; const status = body.status || current.status; const user = (req as any).authUser as User;
+    let current = db.prepare('SELECT * FROM feedbacks WHERE feedback_id=?').get(req.params.id) as any;
+    if (!current && googleStorage.enabled) {
+      try { current = (await googleStorage.loadFeedbacks()).find((feedback: any) => feedback.feedback_id === req.params.id); }
+      catch (error) { console.error('[google-storage] No fue posible recuperar el feedback.', error instanceof Error ? error.message : ''); }
+    }
+    if (!current) return res.status(404).json({ error: 'Feedback no encontrado.' });
+    const body = req.body || {}; const status = body.status || current.status; const user = (req as any).authUser as User;
     if (user.role === 'ASESOR' && (user.advisorId !== current.advisor_id || !['VALIDADO_ASESOR', 'OBSERVADO_ASESOR'].includes(status))) return res.status(403).json({ error: 'No tienes permiso para cerrar o modificar este feedback.' });
     if (user.role === 'SUPERVISOR' && current.supervisor_id !== user.id) return res.status(403).json({ error: 'Este feedback no pertenece a tu equipo.' });
     const valid = (current.status === 'PENDIENTE' && ['VALIDADO_ASESOR','OBSERVADO_ASESOR'].includes(status)) || (['VALIDADO_ASESOR','OBSERVADO_ASESOR'].includes(current.status) && status === 'CERRADO_SUPERVISOR') || status === current.status;
     if (!valid || (status === 'CERRADO_SUPERVISOR' && current.status === 'OBSERVADO_ASESOR' && !String(body.supervisor_closure_comment || current.supervisor_closure_comment || '').trim())) return res.status(400).json({ error: 'Transición de feedback no permitida o falta comentario de cierre.' });
     const now = new Date().toISOString(); const feedback = { ...current, status, advisor_response: body.advisor_response ?? current.advisor_response, advisor_evidence_url: body.advisor_evidence_url ?? current.advisor_evidence_url, supervisor_closure_comment: body.supervisor_closure_comment ?? current.supervisor_closure_comment, advisor_action_at: ['VALIDADO_ASESOR','OBSERVADO_ASESOR'].includes(status) ? now : current.advisor_action_at, closed_at: status === 'CERRADO_SUPERVISOR' ? now : current.closed_at, updated_at: now };
-    try { if (googleStorage.enabled) await googleStorage.saveFeedback(feedback); db.prepare('UPDATE feedbacks SET status=?, advisor_response=?, advisor_evidence_url=?, supervisor_closure_comment=?, advisor_action_at=?, closed_at=?, updated_at=? WHERE feedback_id=?').run(feedback.status, feedback.advisor_response, feedback.advisor_evidence_url, feedback.supervisor_closure_comment, feedback.advisor_action_at, feedback.closed_at, feedback.updated_at, req.params.id); res.json({ feedback }); }
+    try {
+      if (googleStorage.enabled) await googleStorage.saveFeedback(feedback);
+      db.prepare('UPDATE feedbacks SET status=?, advisor_response=?, advisor_evidence_url=?, supervisor_closure_comment=?, advisor_action_at=?, closed_at=?, updated_at=? WHERE feedback_id=?').run(feedback.status, feedback.advisor_response, feedback.advisor_evidence_url, feedback.supervisor_closure_comment, feedback.advisor_action_at, feedback.closed_at, feedback.updated_at, req.params.id);
+      res.json({ feedback });
+    }
     catch (error) { console.error('[google-storage] No fue posible actualizar feedback.', error instanceof Error ? error.message : ''); res.status(502).json({ error: 'No fue posible sincronizar el feedback.' }); }
   });
   app.get('/api/platform-state', requireAuth, async (req, res) => {
