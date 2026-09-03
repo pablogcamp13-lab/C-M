@@ -349,7 +349,25 @@ async function startServer() {
   const capsuleRows = () => (db.prepare('SELECT data_json FROM development_capsules ORDER BY updated_at DESC').all() as any[]).map(row => JSON.parse(row.data_json));
   const assignmentRows = () => (db.prepare('SELECT data_json FROM development_assignments ORDER BY updated_at DESC').all() as any[]).map(row => JSON.parse(row.data_json));
   const syncDevelopment = async () => { if (googleStorage.enabled) await googleStorage.saveDevelopment(capsuleRows(), assignmentRows()); };
-  const hydrateDevelopment = async () => { if (!googleStorage.enabled) return; await readRepository(); const remote = await googleStorage.loadDevelopment(); if (!remote.capsules.length && !remote.assignments.length) return; const insertCapsule=db.prepare('INSERT OR REPLACE INTO development_capsules (id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?)'); const insertAssignment=db.prepare('INSERT OR REPLACE INTO development_assignments (id,capsule_id,advisor_id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?)'); for(const item of remote.capsules)insertCapsule.run(item.id,item.status,JSON.stringify(item),item.createdAt,item.updatedAt); for(const item of remote.assignments)try{insertAssignment.run(item.id,item.capsuleId,item.advisorId,item.status,JSON.stringify(item),item.assignedAt,item.updatedAt);}catch{} };
+  let developmentHydration: Promise<void> | null = null;
+  const hydrateDevelopment = async () => {
+    if (!googleStorage.enabled) return;
+    if (developmentHydration) return developmentHydration;
+    developmentHydration = (async () => {
+      await readRepository();
+      const remote = await googleStorage.loadDevelopment();
+      if (!remote.capsules.length && !remote.assignments.length) return;
+      const insertCapsule = db.prepare(`INSERT INTO development_capsules (id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,data_json=excluded.data_json,updated_at=excluded.updated_at`);
+      const insertAssignment = db.prepare(`INSERT INTO development_assignments (id,capsule_id,advisor_id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,data_json=excluded.data_json,updated_at=excluded.updated_at`);
+      for (const item of remote.capsules) insertCapsule.run(item.id, item.status, JSON.stringify(item), item.createdAt, item.updatedAt);
+      for (const item of remote.assignments) {
+        try { insertAssignment.run(item.id, item.capsuleId, item.advisorId, item.status, JSON.stringify(item), item.assignedAt, item.updatedAt); }
+        catch (error) { console.error('[development] No fue posible hidratar una asignación.', item.id, error instanceof Error ? error.message : ''); }
+      }
+    })();
+    try { await developmentHydration; }
+    finally { developmentHydration = null; }
+  };
   app.get('/api/development/capsules', requireAuth, async (req, res) => {
     const user = (req as any).authUser as User; if (!['ADMINISTRADOR','ASESOR'].includes(user.role)) return res.status(403).json({ error:'Acceso denegado.' }); try{await hydrateDevelopment();}catch(error){console.error('[google-storage] No fue posible cargar desarrollo.',error instanceof Error?error.message:'');} const capsules = capsuleRows();
     if (user.role !== 'ASESOR') return res.json({ capsules });
