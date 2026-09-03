@@ -4,9 +4,9 @@ import { useApp } from '../../context/AppContext';
 import type { NavigationSection } from '../../types';
 
 const navigation: Array<{ label: string; section: NavigationSection }> = [
-  { label: 'Inicio', section: 'home' }, { label: 'Mejora Continua', section: 'dashboard' },
+  { label: 'Inicio', section: 'home' }, { label: 'MC', section: 'dashboard' },
   { label: 'Calidad', section: 'dashboard_quality' }, { label: 'Evaluaciones', section: 'evaluations' },
-  { label: 'Feedback', section: 'feedback' }, { label: 'Planes de Acción', section: 'action_plans' },
+  { label: 'Feedback', section: 'feedback' }, { label: 'PDA', section: 'action_plans' },
   { label: 'Alertas', section: 'quality_alerts' }, { label: 'Calibraciones', section: 'calibrations' },
   { label: 'Desarrollo', section: 'development' },
   { label: 'Analítica', section: 'pareto' }, { label: 'Configuración', section: 'admin' }

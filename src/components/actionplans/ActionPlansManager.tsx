@@ -112,7 +112,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1">
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-[#031E3C] tracking-tight font-heading">
-              Planes de Acción 3C
+              PDA
             </h2>
             <p className="text-xs text-[#667085] mt-0.5 font-medium">
               Compromisos de mejora, microentrenamientos y seguimiento

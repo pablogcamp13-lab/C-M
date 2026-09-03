@@ -35,7 +35,7 @@ export const Sidebar: React.FC = () => {
     {
       groupName: 'ANÁLISIS',
       items: [
-        { id: 'dashboard', label: 'Dashboard Mejora Continua', icon: <LayoutDashboard className="w-4 h-4" /> },
+        { id: 'dashboard', label: 'Dashboard MC', icon: <LayoutDashboard className="w-4 h-4" /> },
         { id: 'dashboard_quality', label: 'Dashboard Calidad', icon: <Shield className="w-4 h-4" /> },
         { id: 'evaluations', label: 'Evaluaciones', icon: <ClipboardList className="w-4 h-4" />, badge: evaluations.length },
         { id: 'pareto', label: 'Pareto 80/20', icon: <BarChart3 className="w-4 h-4" /> },
@@ -46,7 +46,7 @@ export const Sidebar: React.FC = () => {
       groupName: 'GESTIÓN',
       items: [
         { id: 'advisors', label: 'Asesores', icon: <Users2 className="w-4 h-4" />, badge: advisors.length },
-        { id: 'action_plans', label: 'Planes de Acción', icon: <ListTodo className="w-4 h-4" />, badge: activePlansCount },
+        { id: 'action_plans', label: 'PDA', icon: <ListTodo className="w-4 h-4" />, badge: activePlansCount },
         { id: 'interventions', label: 'Intervenciones', icon: <GraduationCap className="w-4 h-4" /> },
       ]
     },
