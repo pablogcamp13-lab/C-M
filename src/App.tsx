@@ -8,6 +8,9 @@ import { QualityEvaluationModal } from './components/evaluations/QualityEvaluati
 import { QualityDashboardView } from './components/dashboard/QualityDashboardView';
 import { HomeView } from './components/dashboard/HomeView';
 import { AdvisorHomeView } from './components/dashboard/AdvisorHomeView';
+import { SupervisorHomeView } from './components/dashboard/SupervisorHomeView';
+import { QualityAlertsView } from './components/quality/QualityAlertsView';
+import { CalibrationsView } from './components/quality/CalibrationsView';
 import { EvaluationDetailModal } from './components/evaluations/EvaluationDetailModal';
 import { AdvisorsList } from './components/advisors/AdvisorsList';
 import { AdvisorProfileModal } from './components/advisors/AdvisorProfileModal';
@@ -85,7 +88,7 @@ const MainLayout: React.FC = () => {
 
         {/* Dynamic View Router */}
         <main className="flex-1 flex flex-col min-h-0 relative">
-          {currentSection === 'home' && (currentUser.role === 'ASESOR' ? <AdvisorHomeView /> : <HomeView />)}
+          {currentSection === 'home' && (currentUser.role === 'ASESOR' ? <AdvisorHomeView /> : currentUser.role === 'SUPERVISOR' ? <SupervisorHomeView /> : <HomeView />)}
           
           {currentSection === 'dashboard' && (
             <DashboardView
@@ -102,6 +105,8 @@ const MainLayout: React.FC = () => {
             />
           )}
           {currentSection === 'feedback' && <FeedbackView />}
+          {currentSection === 'quality_alerts' && <QualityAlertsView />}
+          {currentSection === 'calibrations' && <CalibrationsView />}
           {currentSection === 'development' && <DevelopmentView />}
 
           {currentSection === 'advisors' && (

@@ -9,6 +9,9 @@ const emptyGuideline = (): QualityGuideline => ({
   name: "",
   weight: 1,
   focus: "",
+  category: "",
+  errorType: "Incumplimiento de atributo",
+  classification: "NO_CRITICO",
   critical: false,
   noApplies: false,
   expected: "",
@@ -261,6 +264,20 @@ export const CampaignQualityModal: React.FC<{
                   }
                 />
               </label>
+              <label className="text-xs font-semibold">
+                Categoría
+                <input className={`mt-1 ${field}`} value={editing.category || ""} onChange={(e) => setEditing({ ...editing, category: e.target.value })}/>
+              </label>
+              <label className="text-xs font-semibold">
+                Tipo de error
+                <input className={`mt-1 ${field}`} value={editing.errorType || ""} onChange={(e) => setEditing({ ...editing, errorType: e.target.value })}/>
+              </label>
+              <label className="text-xs font-semibold md:col-span-2">
+                Clasificación
+                <select className={`mt-1 ${field}`} value={editing.classification || (editing.critical ? "CRITICO_NEGOCIO" : "NO_CRITICO")} onChange={(e) => { const classification=e.target.value as QualityGuideline["classification"]; setEditing({ ...editing, classification, critical: classification !== "NO_CRITICO" }); }}>
+                  <option value="NO_CRITICO">No Crítico</option><option value="CRITICO_USUARIO_FINAL">Crítico Usuario Final</option><option value="CRITICO_NEGOCIO">Crítico Negocio</option><option value="CRITICO_COMPLIANCE">Crítico Compliance</option>
+                </select>
+              </label>
               <label className="text-xs font-semibold md:col-span-2">
                 Comportamiento esperado
                 <textarea
@@ -296,7 +313,7 @@ export const CampaignQualityModal: React.FC<{
                   type="checkbox"
                   checked={editing.critical}
                   onChange={(e) =>
-                    setEditing({ ...editing, critical: e.target.checked })
+                    setEditing({ ...editing, critical: e.target.checked, classification: e.target.checked ? (editing.classification === 'NO_CRITICO' || !editing.classification ? 'CRITICO_NEGOCIO' : editing.classification) : 'NO_CRITICO' })
                   }
                 />
                 Incumplimiento crítico

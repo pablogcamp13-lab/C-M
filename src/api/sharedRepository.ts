@@ -1,5 +1,5 @@
 import type { Advisor, Campaign, Team, User } from '../types';
-import type { Evaluation } from '../types';
+import type { Calibration, Evaluation, QualityAlert } from '../types';
 
 const TOKEN_KEY = 'CONTACT_CENTER_AUTH_TOKEN';
 
@@ -81,6 +81,18 @@ export const filesApi = {
     const result = await json<{ file: { id: string; name: string; mimeType: string; size?: string; url?: string } }>(await fetch('/api/files/upload', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify({ name: file.name, mimeType, base64 }) }));
     return result.file;
   }
+};
+
+export const qualityAlertsApi = {
+  async list() { return json<{ alerts: QualityAlert[] }>(await fetch('/api/quality-alerts', { headers: headers() })); },
+  async create(data: Partial<QualityAlert>) { return json<{ alert: QualityAlert }>(await fetch('/api/quality-alerts', { method:'POST', headers:{'Content-Type':'application/json',...headers()}, body:JSON.stringify(data) })); },
+  async update(id: string, data: Partial<QualityAlert>) { return json<{ alert: QualityAlert }>(await fetch(`/api/quality-alerts/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json',...headers()}, body:JSON.stringify(data) })); }
+};
+
+export const calibrationsApi = {
+  async list() { return json<{ calibrations: Calibration[] }>(await fetch('/api/calibrations', { headers:headers() })); },
+  async create(data: { title:string; dueAt:string; evaluation:Evaluation; supervisorIds:string[] }) { return json<{ calibration:Calibration }>(await fetch('/api/calibrations', { method:'POST', headers:{'Content-Type':'application/json',...headers()}, body:JSON.stringify(data) })); },
+  async respond(id:string, answers:Record<string,string>) { return json<{ calibration:Calibration }>(await fetch(`/api/calibrations/${id}/respond`, { method:'PATCH', headers:{'Content-Type':'application/json',...headers()}, body:JSON.stringify({answers}) })); }
 };
 
 export const platformStateApi = {

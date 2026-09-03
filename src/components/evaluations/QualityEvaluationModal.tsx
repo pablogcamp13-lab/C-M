@@ -113,12 +113,12 @@ export const QualityEvaluationModal: React.FC<{
     );
     const invalid =
       critical.length > 0 ||
-      guidelines.some((a) => a.critical && answers[a.id] === "NO_CUMPLE");
+      guidelines.some((a) => (a.critical || a.classification?.startsWith("CRITICO_")) && answers[a.id] === "NO_CUMPLE");
     return {
       groups,
       invalid,
-      score: invalid ? 0 : denom ? Math.round((base / denom) * 100) : null,
-      obtained: invalid ? 0 : Math.round(base * 100),
+      score: denom ? Math.round((base / denom) * 100) : null,
+      obtained: Math.round(base * 100),
       denominator: Math.round(denom * 100),
       answered: denom > 0,
     };
@@ -166,6 +166,12 @@ export const QualityEvaluationModal: React.FC<{
           recommendedAction: "",
           attributeWeight: a.weight,
           qualityGuideline: a,
+          category: a.category || a.criterion,
+          attribute: a.name,
+          errorType: answers[a.id] === "NO_CUMPLE" ? (a.errorType || (a.critical ? "Incumplimiento crítico" : "Incumplimiento de atributo")) : "",
+          classification: a.classification || (a.critical
+            ? (/compliance|cumplimiento/i.test(a.focus) ? "CRITICO_COMPLIANCE" : /usuario/i.test(a.focus) ? "CRITICO_USUARIO_FINAL" : "CRITICO_NEGOCIO")
+            : "NO_CRITICO"),
         }) as EvaluationItem,
     );
     const saved = addEvaluation({
@@ -183,6 +189,9 @@ export const QualityEvaluationModal: React.FC<{
       type: evaluationType,
       evaluationType: "QUALITY",
       qualityStatus: "FINALIZED",
+      source: "MANUAL",
+      validationStatus: "VALIDADO",
+      validatedAt: new Date().toISOString(),
       qualityCriticalErrorIds: critical,
       qualityCriticalErrorSnapshot: criticalErrors.filter((error) => critical.includes(error.id)),
       sale: false,
@@ -361,10 +370,10 @@ export const QualityEvaluationModal: React.FC<{
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs font-bold text-[#43565A]">
-                    PROMEDIO CALIDAD
+                    CALIDAD TÉCNICA
                   </p>
                   <p
-                    className={`mt-1 text-3xl font-black ${summary.invalid ? "text-[#FF4D4F]" : "text-[#008B88]"}`}
+                    className="mt-1 text-3xl font-black text-[#008B88]"
                   >
                     {summary.score === null ? "—" : `${summary.score}%`}
                   </p>
@@ -392,7 +401,7 @@ export const QualityEvaluationModal: React.FC<{
               </div>
               {summary.invalid && (
                 <p className="mt-2 text-xs font-bold text-[#FF4D4F]">
-                  PUE invalidada por error crítico.
+                  Resultado: REPROBADA · Error crítico.
                 </p>
               )}
             </aside>
@@ -464,6 +473,7 @@ export const QualityEvaluationModal: React.FC<{
                       <b className="pt-1">{a.code}</b>
                       <div>
                         <b className="text-xs">{a.name}</b>
+                        {a.category && <span className="ml-2 text-[10px] text-[#66767A]">{a.category}</span>}
                         {"critical" in a && a.critical && (
                           <span className="ml-2 text-[10px] font-bold text-[#FF4D4F]">
                             CRÍTICO
@@ -472,6 +482,7 @@ export const QualityEvaluationModal: React.FC<{
                         <span className="mt-0.5 block text-[11px] text-[#66767A]">
                           {a.focus}
                         </span>
+                        {answer === "NO_CUMPLE" && <span className="mt-1 block text-[10px] font-semibold text-[#FF4D4F]">{a.errorType || "Incumplimiento de atributo"} · {(a.classification || (a.critical ? "CRITICO_NEGOCIO" : "NO_CRITICO")).replaceAll("_", " ")}</span>}
                         <button
                           type="button"
                           onClick={() =>
@@ -611,13 +622,14 @@ export const QualityEvaluationModal: React.FC<{
           <div className="flex items-center gap-4">
             <div>
               <span className="block text-[10px] font-bold uppercase text-[#006B6B]">
-                Score total Calidad
+                Calidad técnica
               </span>
               <strong
-                className={`text-2xl ${summary.invalid ? "text-[#FF4D4F]" : "text-[#008B88]"}`}
+                className="text-2xl text-[#008B88]"
               >
                 {summary.score === null ? "—" : `${summary.score}%`}
               </strong>
+              {summary.invalid && <span className="ml-3 text-xs font-bold text-[#FF4D4F]">REPROBADA</span>}
             </div>
             <span className="hidden text-xs text-[#66767A] md:block">
               {draftSaved

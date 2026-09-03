@@ -160,8 +160,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Load initial states from LocalStorage or defaults
   const [users, setUsers] = useState<User[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_PREFIX}users`);
-    return saved ? JSON.parse(saved) : INITIAL_USERS;
+    return [];
   });
 
   const [currentUser, setCurrentUser] = useState<User>(() => {
@@ -169,67 +168,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [campaigns, setCampaigns] = useState<Campaign[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_PREFIX}campaigns`);
-    return saved ? JSON.parse(saved) : INITIAL_CAMPAIGNS;
+    return [];
   });
 
   const [teams, setTeams] = useState<Team[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_PREFIX}teams`);
-    return saved ? JSON.parse(saved) : INITIAL_TEAMS;
+    return [];
   });
 
   const [advisors, setAdvisors] = useState<Advisor[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_PREFIX}advisors`);
-    return saved ? JSON.parse(saved) : INITIAL_ADVISORS;
+    return [];
   });
 
   const [evaluations, setEvaluations] = useState<Evaluation[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_PREFIX}evaluations`);
-    return saved ? JSON.parse(saved) : INITIAL_EVALUATIONS;
+    return [];
   });
 
   const [actionPlans, setActionPlans] = useState<ActionPlan[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_PREFIX}action_plans`);
-    return saved ? JSON.parse(saved) : INITIAL_ACTION_PLANS;
+    return [];
   });
 
   const [interventions, setInterventions] = useState<Intervention[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_PREFIX}interventions`);
-    return saved ? JSON.parse(saved) : INITIAL_INTERVENTIONS;
+    return [];
   });
 
   const [advisorInterventions, setAdvisorInterventions] = useState<AdvisorIntervention[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_PREFIX}advisor_interventions`);
-    return saved ? JSON.parse(saved) : INITIAL_ADVISOR_INTERVENTIONS;
+    return [];
   });
 
   const [operationalMeasurements, setOperationalMeasurements] = useState<OperationalMeasurement[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_PREFIX}operational_measurements`);
-    return saved ? JSON.parse(saved) : INITIAL_OPERATIONAL_MEASUREMENTS;
+    return [];
   });
 
   const [importHistory, setImportHistory] = useState<ImportHistoryLog[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_PREFIX}import_history`);
-    return saved ? JSON.parse(saved) : [
-      {
-        id: 'imp_initial_demo',
-        date: '2026-08-28T14:30:00.000Z',
-        fileName: 'Base_Operacional_Agosto2026.xlsx',
-        fileSize: 45210,
-        user: 'Pablo Campos (Consultor 3C)',
-        campaign: 'Migraciones Prepago → Postpago',
-        period: 'Agosto 2026',
-        cutoffDate: '2026-08-28',
-        isBaseline: true,
-        rowsDetected: 8,
-        rowsReady: 8,
-        rowsWarnings: 1,
-        rowsErrors: 0,
-        newAdvisorsCount: 8,
-        updatedAdvisorsCount: 0,
-        operationalMeasurementsCount: 8
-      }
-    ];
+    return [];
   });
 
   const [config, setConfig] = useState<MethodologyConfig>(() => {
@@ -264,14 +235,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const persisted = await sharedRepositoryApi.load();
         rosterHydrated.current = true;
         setUsers(persisted.users); setCampaigns(persisted.campaigns); setTeams(persisted.teams); setAdvisors(persisted.advisors);
-        const localState = { evaluations, actionPlans, interventions, advisorInterventions, operationalMeasurements, importHistory, config };
-        const stateMigrationKey = `${STORAGE_PREFIX}platform_state_migrated_v1`;
         const persistedState = await platformStateApi.load();
-        if (currentUser.role !== 'ASESOR' && !localStorage.getItem(stateMigrationKey) && !persistedState) { await platformStateApi.save(localState); }
-        if (!localStorage.getItem(stateMigrationKey)) localStorage.setItem(stateMigrationKey, 'true');
-        const state = persistedState || await platformStateApi.load();
+        const state = persistedState;
         if (state) {
-          setEvaluations(Array.isArray(state.evaluations) ? state.evaluations : INITIAL_EVALUATIONS); setActionPlans(state.actionPlans || []); setInterventions(state.interventions || INITIAL_INTERVENTIONS);
+          setEvaluations(Array.isArray(state.evaluations) ? state.evaluations : []); setActionPlans(state.actionPlans || []); setInterventions(state.interventions || []);
           setAdvisorInterventions(state.advisorInterventions || []); setOperationalMeasurements(state.operationalMeasurements || []); setImportHistory(state.importHistory || []); setConfig(state.config || DEFAULT_METHODOLOGY_CONFIG);
         }
         platformStateHydrated.current = true;
@@ -285,12 +252,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Persistencia incremental del repositorio único de dotación. Los demás módulos
   // siguen en su almacenamiento actual hasta sus fases de migración respectivas.
   useEffect(() => {
-    if (!isAuthenticated || currentUser.role === 'ASESOR' || !rosterHydrated.current) return;
+    if (!isAuthenticated || ['ASESOR', 'SUPERVISOR'].includes(currentUser.role) || !rosterHydrated.current) return;
     void sharedRepositoryApi.sync({ users, campaigns, teams, advisors }).catch(error => console.error('No fue posible sincronizar la dotación', error));
   }, [users, campaigns, teams, advisors, isAuthenticated, currentUser.role]);
 
   useEffect(() => {
-    if (!isAuthenticated || currentUser.role === 'ASESOR' || !platformStateHydrated.current) return;
+    if (!isAuthenticated || ['ASESOR', 'SUPERVISOR'].includes(currentUser.role) || !platformStateHydrated.current) return;
     void platformStateApi.save({ evaluations, actionPlans, interventions, advisorInterventions, operationalMeasurements, importHistory, config }).catch(error => console.error('No fue posible sincronizar el estado de plataforma', error));
   }, [evaluations, actionPlans, interventions, advisorInterventions, operationalMeasurements, importHistory, config, isAuthenticated, currentUser.role]);
 
@@ -372,6 +339,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Filtered dataset computed dynamically
   const filteredEvaluations = evaluations.filter(ev => {
+    const validatedForOperationalUse = !ev.validationStatus || ['VALIDADO', 'AJUSTADO_VALIDADO'].includes(ev.validationStatus);
+    if (['ASESOR', 'SUPERVISOR'].includes(currentUser.role) && !validatedForOperationalUse) return false;
     if (filters.dateFrom && ev.date < filters.dateFrom) return false;
     if (filters.dateTo && ev.date > filters.dateTo) return false;
     if (filters.campaignId && ev.campaignId !== filters.campaignId) return false;
@@ -395,8 +364,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // Role-based restrictions (Supervisor only sees their own team)
-    if (currentUser.role === 'SUPERVISOR' && currentUser.teamId) {
-      if (ev.teamId !== currentUser.teamId) return false;
+    if (currentUser.role === 'SUPERVISOR') {
+      if (ev.supervisorId !== currentUser.id && (!currentUser.teamId || ev.teamId !== currentUser.teamId)) return false;
     }
 
     if (filters.searchQuery) {
@@ -422,8 +391,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (adv.id !== currentUser.advisorId) return false;
     }
 
-    if (currentUser.role === 'SUPERVISOR' && currentUser.teamId) {
-      if (adv.teamId !== currentUser.teamId) return false;
+    if (currentUser.role === 'SUPERVISOR') {
+      if (adv.supervisorId !== currentUser.id && (!currentUser.teamId || adv.teamId !== currentUser.teamId)) return false;
     }
 
     if (filters.searchQuery) {
@@ -453,8 +422,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (advisor.id !== currentUser.advisorId) return false;
     }
 
-    if (currentUser.role === 'SUPERVISOR' && currentUser.teamId) {
-      if (advisor.teamId !== currentUser.teamId) return false;
+    if (currentUser.role === 'SUPERVISOR') {
+      if (advisor.supervisorId !== currentUser.id && (!currentUser.teamId || advisor.teamId !== currentUser.teamId)) return false;
     }
 
     if (filters.searchQuery) {
@@ -562,9 +531,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const passedWeight = entries.filter(item => item.compliance === 'CUMPLE').reduce((sum, item) => sum + Number((item as any).attributeWeight || 1), 0);
       return Math.round((passedWeight / totalWeight) * 100);
     };
-    const criticalFailure = quality && (evalData.qualityCriticalErrorIds?.length || evalData.items.some(item => ['q_1_2', 'q_2_1', 'q_3_2'].includes(item.criterionId) && item.compliance === 'NO_CUMPLE'));
+    const criticalItem = evalData.items.find(item => item.compliance === 'NO_CUMPLE' && (item.qualityGuideline?.critical || item.classification?.startsWith('CRITICO_')));
+    const criticalFailure = Boolean(quality && (evalData.qualityCriticalErrorIds?.length || criticalItem));
     const qualityScores = quality ? { C1: qualityScore('CONECTAR'), C2: qualityScore('CLARIFICAR'), C3: qualityScore('CONVERTIR'), C4: qualityScore('CONECTAR_C4' as any) } : null;
-    const rawQualityTotal = qualityScores ? Math.round(((qualityScores.C1 || 0) * QUALITY_WEIGHTS.C1) + ((qualityScores.C2 || 0) * QUALITY_WEIGHTS.C2) + ((qualityScores.C3 || 0) * QUALITY_WEIGHTS.C3) + ((qualityScores.C4 || 0) * QUALITY_WEIGHTS.C4)) : null;
+    const qualityWeights = campaigns.find(campaign => campaign.id === evalData.campaignId)?.qualityCriterionWeights || QUALITY_WEIGHTS;
+    const qualityKeys: Array<'C1' | 'C2' | 'C3' | 'C4'> = ['C1', 'C2', 'C3', 'C4'];
+    const activeQualityWeight = qualityScores ? qualityKeys.reduce((sum, key) => sum + (qualityScores[key] === null ? 0 : qualityWeights[key]), 0) : 0;
+    const rawQualityTotal = qualityScores && activeQualityWeight ? Math.round(qualityKeys.reduce((sum, key) => sum + (qualityScores[key] === null ? 0 : Number(qualityScores[key]) * qualityWeights[key]), 0) / activeQualityWeight) : null;
     const summary = quality ? { scoreConnect: qualityScores!.C1, scoreClarify: qualityScores!.C2, scoreConvert: qualityScores!.C3, scoreTotal: criticalFailure ? 0 : rawQualityTotal, primaryGap: criticalFailure ? 'Error crítico PUE' : 'PUE', secondaryGap: '', strongestPillar: '', recommendation: criticalFailure ? 'Corregir error crítico antes de nueva evaluación.' : 'Revisar atributos no cumplidos.' } : calculateEvaluationSummary(evalData.items, config);
     const newEval: Evaluation = {
       ...evalData,
@@ -575,6 +548,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       scoreClarify: summary.scoreClarify,
       scoreConvert: summary.scoreConvert,
       scoreTotal: summary.scoreTotal,
+      technicalScore: quality ? rawQualityTotal : undefined,
+      qualityResult: quality ? (criticalFailure ? 'REPROBADA' : 'APROBADA') : undefined,
+      criticalReason: quality && criticalFailure ? (evalData.qualityCriticalErrorSnapshot?.[0]?.name || criticalItem?.classification?.replaceAll('_', ' ') || 'Error crítico') : undefined,
       primaryGap: summary.primaryGap,
       secondaryGap: summary.secondaryGap,
       strongestPillar: summary.strongestPillar,

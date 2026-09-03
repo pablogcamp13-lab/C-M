@@ -30,8 +30,12 @@ CREATE TABLE IF NOT EXISTS app_state (id TEXT PRIMARY KEY, payload_json TEXT NOT
 CREATE TABLE IF NOT EXISTS feedbacks (feedback_id TEXT PRIMARY KEY, evaluation_id TEXT NOT NULL UNIQUE REFERENCES evaluations(id), advisor_id TEXT NOT NULL REFERENCES advisors(id), supervisor_id TEXT NOT NULL REFERENCES users(id), evaluator_id TEXT NOT NULL REFERENCES users(id), evaluation_type TEXT NOT NULL CHECK(evaluation_type IN ('QUALITY','D3C')), feedback_text TEXT NOT NULL DEFAULT '', advisor_response TEXT, supervisor_closure_comment TEXT, status TEXT NOT NULL CHECK(status IN ('PENDIENTE','VALIDADO_ASESOR','OBSERVADO_ASESOR','CERRADO_SUPERVISOR')), created_at TEXT NOT NULL, advisor_action_at TEXT, closed_at TEXT, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS development_capsules (id TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('BORRADOR','PUBLICADA','ARCHIVADA')), data_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS development_assignments (id TEXT PRIMARY KEY, capsule_id TEXT NOT NULL REFERENCES development_capsules(id), advisor_id TEXT NOT NULL REFERENCES advisors(id), status TEXT NOT NULL CHECK(status IN ('PENDIENTE','EN_CURSO','COMPLETADA','VENCIDA')), data_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(capsule_id,advisor_id));
+CREATE TABLE IF NOT EXISTS quality_alerts (id TEXT PRIMARY KEY, status TEXT NOT NULL, advisor_id TEXT NOT NULL, supervisor_id TEXT NOT NULL, campaign_id TEXT NOT NULL, data_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS calibrations (id TEXT PRIMARY KEY, status TEXT NOT NULL, evaluation_id TEXT NOT NULL, campaign_id TEXT NOT NULL, data_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_advisors_campaign ON advisors(campaign_id);
-CREATE INDEX IF NOT EXISTS idx_evaluations_advisor_type ON evaluations(advisor_id, evaluation_type);`);
+CREATE INDEX IF NOT EXISTS idx_evaluations_advisor_type ON evaluations(advisor_id, evaluation_type);
+CREATE INDEX IF NOT EXISTS idx_quality_alerts_supervisor ON quality_alerts(supervisor_id, status);
+CREATE INDEX IF NOT EXISTS idx_calibrations_status ON calibrations(status);`);
 if (!(db.prepare('PRAGMA table_info(feedbacks)').all() as any[]).some(column => column.name === 'advisor_evidence_url')) db.exec('ALTER TABLE feedbacks ADD COLUMN advisor_evidence_url TEXT');
 if (!(db.prepare('PRAGMA table_info(users)').all() as any[]).some(column => column.name === 'must_change_password')) db.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 1');
 if (!(db.prepare('PRAGMA table_info(campaigns)').all() as any[]).some(column => column.name === 'quality_guidelines_json')) db.exec("ALTER TABLE campaigns ADD COLUMN quality_guidelines_json TEXT NOT NULL DEFAULT '[]'");
@@ -50,17 +54,6 @@ function seedDatabase() {
   const now = new Date().toISOString();
   if (!count) db.prepare('INSERT INTO users (id,name,email,username,role,status,created_at,password_hash) VALUES (?,?,?,?,?,?,?,?)').run('usr_admin', 'Administrador Principal', 'admin@consultoria3c.com', 'admin', 'ADMINISTRADOR', 'ACTIVO', now, hashPassword(DEFAULT_ADMIN_PASSWORD));
   db.prepare('INSERT OR IGNORE INTO campaigns (id,name,client,status,products_json,description) VALUES (?,?,?,?,?,?)').run('camp_1', 'Migraciones Bitel', 'Bitel', 'ACTIVA', JSON.stringify(['Migraciones']), 'Campaña de evaluación de Calidad para Migraciones Bitel.');
-  if (!(db.prepare('SELECT COUNT(*) AS total FROM advisors').get().total as number)) {
-    db.prepare('INSERT OR IGNORE INTO users (id,name,email,username,role,status,created_at,password_hash) VALUES (?,?,?,?,?,?,?,?)').run('usr_sup_demo','Ana Ramírez','ana.ramirez@demo.local','ana.ramirez','SUPERVISOR','ACTIVO',now,hashPassword('demo1234'));
-    db.prepare('INSERT OR IGNORE INTO users (id,name,email,username,role,status,created_at,password_hash) VALUES (?,?,?,?,?,?,?,?)').run('usr_eval_demo','José López','jose.lopez@demo.local','jose.lopez','CONSULTOR','ACTIVO',now,hashPassword('demo1234'));
-    db.prepare('INSERT OR IGNORE INTO teams (id,campaign_id,supervisor_id,name) VALUES (?,?,?,?)').run('team_demo','camp_1','usr_sup_demo','Equipo Migraciones Demo');
-    const a1 = { id:'adv_demo_1', dni:'70000001', employeeCode:'A-10234', name:'María Fernanda López', campaignId:'camp_1', teamId:'team_demo', supervisorId:'usr_sup_demo', status:'ACTIVO', hireDate:'2025-01-15', quartile:'Q2', active:true };
-    const a2 = { id:'adv_demo_2', dni:'70000002', employeeCode:'A-10987', name:'Juan Manuel Torres', campaignId:'camp_1', teamId:'team_demo', supervisorId:'usr_sup_demo', status:'ACTIVO', hireDate:'2024-08-10', quartile:'Q3', active:true };
-    for (const a of [a1,a2]) db.prepare('INSERT OR IGNORE INTO advisors (id,dni,employee_code,name,campaign_id,team_id,supervisor_id,data_json) VALUES (?,?,?,?,?,?,?,?)').run(a.id,a.dni,a.employeeCode,a.name,a.campaignId,a.teamId,a.supervisorId,JSON.stringify(a));
-    const e1 = { id:'eval_demo_d3c', advisorId:a1.id, evaluatorId:'usr_eval_demo', supervisorId:'usr_sup_demo', teamId:'team_demo', campaignId:'camp_1', evaluationType:'D3C', date:'2026-08-31', time:'10:30', callId:'LLAM-71920', scoreTotal:82, primaryGap:'Proceso de migración', comments:'La asesora debe profundizar el proceso de migración.', recommendation:'Reforzar el proceso de migración.', items:[] };
-    const e2 = { id:'eval_demo_quality', advisorId:a2.id, evaluatorId:'usr_eval_demo', supervisorId:'usr_sup_demo', teamId:'team_demo', campaignId:'camp_1', evaluationType:'QUALITY', date:'2026-08-30', time:'15:15', callId:'PUE-DEMO-002', scoreTotal:76, primaryGap:'Ofrecimiento y condiciones', comments:'Debe reforzar la validación de condiciones.', recommendation:'Reforzar la validación del cliente.', items:[] };
-    for (const e of [e1,e2]) db.prepare('INSERT OR IGNORE INTO evaluations (id,advisor_id,evaluator_id,evaluation_type,evaluated_at,payload_json,created_at) VALUES (?,?,?,?,?,?,?)').run(e.id,e.advisorId,e.evaluatorId,e.evaluationType,`${e.date}T${e.time}:00`,JSON.stringify(e),now);
-  }
 }
 seedDatabase();
 
@@ -245,6 +238,11 @@ async function startServer() {
 
   app.get('/api/shared-repository', requireAuth, async (req, res) => {
     const source = await readRepository(); const user = (req as any).authUser as User;
+    if (user.role === 'SUPERVISOR') {
+      const advisors = source.advisors.filter(item => item.supervisorId === user.id || (user.teamId && item.teamId === user.teamId));
+      const campaignIds = new Set(advisors.map(item => item.campaignId)); const teamIds = new Set(advisors.map(item => item.teamId).filter(Boolean));
+      return res.json({ repository: { advisors, campaigns: source.campaigns.filter(item => campaignIds.has(item.id)), teams: source.teams.filter(item => teamIds.has(item.id)), users: source.users.filter(item => item.id === user.id || item.advisorId && advisors.some(advisor => advisor.id === item.advisorId)) } });
+    }
     if (user.role !== 'ASESOR' || !user.advisorId) return res.json({ repository: source });
     const advisor = source.advisors.filter(item => item.id === user.advisorId);
     const advisorCampaignIds = new Set(advisor.map(item => item.campaignId));
@@ -258,17 +256,17 @@ async function startServer() {
     } });
   });
   app.post('/api/shared-repository/migrate', requireAuth, async (req, res) => {
-    if ((req as any).authUser.role === 'ASESOR') return res.status(403).json({ error: 'El asesor no puede modificar la dotación.' });
+    if (!['ADMINISTRADOR','CONSULTOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'No tienes permiso para modificar la dotación.' });
     try { return res.json({ repository: await saveRepository(req.body as SharedRepository) }); }
     catch (error: any) { return res.status(400).json({ error: error.message || 'No fue posible migrar la dotación.' }); }
   });
   app.put('/api/shared-repository/sync', requireAuth, async (req, res) => {
-    if ((req as any).authUser.role === 'ASESOR') return res.status(403).json({ error: 'El asesor no puede modificar la dotación.' });
+    if (!['ADMINISTRADOR','CONSULTOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'No tienes permiso para modificar la dotación.' });
     try { return res.json({ repository: await saveRepository(req.body as SharedRepository) }); }
     catch (error: any) { return res.status(400).json({ error: error.message || 'No fue posible guardar la dotación.' }); }
   });
   app.post('/api/evaluations', requireAuth, async (req, res) => {
-    if ((req as any).authUser.role === 'ASESOR') return res.status(403).json({ error: 'El asesor no puede crear evaluaciones.' });
+    if (!['ADMINISTRADOR','CONSULTOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'Solo Calidad o Administración puede crear evaluaciones.' });
     const evaluation = req.body;
     if (!evaluation?.id || !evaluation?.advisorId || !evaluation?.evaluatorId || !['QUALITY', 'D3C'].includes(evaluation?.evaluationType)) return res.status(400).json({ error: 'Evaluación inválida.' });
     try {
@@ -279,7 +277,7 @@ async function startServer() {
   });
   app.get('/api/feedbacks', requireAuth, async (req, res) => {
     const user = (req as any).authUser as User;
-    const onlyOwn = (feedbacks: any[]) => user.role === 'ASESOR' ? feedbacks.filter(feedback => feedback.advisor_id === user.advisorId) : feedbacks;
+    const onlyOwn = (feedbacks: any[]) => user.role === 'ASESOR' ? feedbacks.filter(feedback => feedback.advisor_id === user.advisorId) : user.role === 'SUPERVISOR' ? feedbacks.filter(feedback => feedback.supervisor_id === user.id) : feedbacks;
     try { const remote = googleStorage.enabled ? await googleStorage.loadFeedbacks() : null; if (remote) return res.json({ feedbacks: onlyOwn(remote) }); }
     catch (error) { console.error('[google-storage] No fue posible leer feedbacks.', error instanceof Error ? error.message : ''); }
     res.json({ feedbacks: onlyOwn(db.prepare('SELECT * FROM feedbacks ORDER BY updated_at DESC').all() as any[]) });
@@ -295,6 +293,7 @@ async function startServer() {
   app.patch('/api/feedbacks/:id', requireAuth, async (req, res) => {
     const current = db.prepare('SELECT * FROM feedbacks WHERE feedback_id=?').get(req.params.id) as any; if (!current) return res.status(404).json({ error: 'Feedback no encontrado.' }); const body = req.body || {}; const status = body.status || current.status; const user = (req as any).authUser as User;
     if (user.role === 'ASESOR' && (user.advisorId !== current.advisor_id || !['VALIDADO_ASESOR', 'OBSERVADO_ASESOR'].includes(status))) return res.status(403).json({ error: 'No tienes permiso para cerrar o modificar este feedback.' });
+    if (user.role === 'SUPERVISOR' && current.supervisor_id !== user.id) return res.status(403).json({ error: 'Este feedback no pertenece a tu equipo.' });
     const valid = (current.status === 'PENDIENTE' && ['VALIDADO_ASESOR','OBSERVADO_ASESOR'].includes(status)) || (['VALIDADO_ASESOR','OBSERVADO_ASESOR'].includes(current.status) && status === 'CERRADO_SUPERVISOR') || status === current.status;
     if (!valid || (status === 'CERRADO_SUPERVISOR' && current.status === 'OBSERVADO_ASESOR' && !String(body.supervisor_closure_comment || current.supervisor_closure_comment || '').trim())) return res.status(400).json({ error: 'Transición de feedback no permitida o falta comentario de cierre.' });
     const now = new Date().toISOString(); const feedback = { ...current, status, advisor_response: body.advisor_response ?? current.advisor_response, advisor_evidence_url: body.advisor_evidence_url ?? current.advisor_evidence_url, supervisor_closure_comment: body.supervisor_closure_comment ?? current.supervisor_closure_comment, advisor_action_at: ['VALIDADO_ASESOR','OBSERVADO_ASESOR'].includes(status) ? now : current.advisor_action_at, closed_at: status === 'CERRADO_SUPERVISOR' ? now : current.closed_at, updated_at: now };
@@ -302,18 +301,20 @@ async function startServer() {
     catch (error) { console.error('[google-storage] No fue posible actualizar feedback.', error instanceof Error ? error.message : ''); res.status(502).json({ error: 'No fue posible sincronizar el feedback.' }); }
   });
   app.get('/api/platform-state', requireAuth, async (req, res) => {
-    const user = (req as any).authUser as User;
+    const user = (req as any).authUser as User; const directory = await readRepository();
     const onlyOwn = (state: any) => {
-      if (!state || user.role !== 'ASESOR' || !user.advisorId) return state;
-      const mine = (items: any[] | undefined) => (items || []).filter(item => item.advisorId === user.advisorId);
-      return { ...state, evaluations: mine(state.evaluations), actionPlans: mine(state.actionPlans), advisorInterventions: mine(state.advisorInterventions), operationalMeasurements: mine(state.operationalMeasurements), importHistory: [] };
+      if (!state || !['ASESOR','SUPERVISOR'].includes(user.role)) return state;
+      const advisorIds = user.role === 'ASESOR' && user.advisorId ? new Set([user.advisorId]) : new Set(directory.advisors.filter(item => item.supervisorId === user.id || (user.teamId && item.teamId === user.teamId)).map(item => item.id));
+      const mine = (items: any[] | undefined) => (items || []).filter(item => advisorIds.has(item.advisorId));
+      const visibleEvaluations = mine(state.evaluations).filter((item: any) => !item.validationStatus || ['VALIDADO','AJUSTADO_VALIDADO'].includes(item.validationStatus));
+      return { ...state, evaluations: visibleEvaluations, actionPlans: mine(state.actionPlans), advisorInterventions: mine(state.advisorInterventions), operationalMeasurements: mine(state.operationalMeasurements), importHistory: [] };
     };
     try { const state = googleStorage.enabled ? await googleStorage.loadPlatformState() : null; if (state !== null) return res.json({ state: onlyOwn(state) }); }
     catch (error) { console.error('[google-storage] No fue posible leer el estado de plataforma.', error instanceof Error ? error.message : ''); }
     const row = db.prepare('SELECT payload_json FROM app_state WHERE id=?').get('global'); res.json({ state: row ? onlyOwn(JSON.parse(String(row.payload_json))) : null });
   });
   app.put('/api/platform-state', requireAuth, async (req, res) => {
-    if ((req as any).authUser.role === 'ASESOR') return res.status(403).json({ error: 'El asesor no puede sobrescribir el estado global.' });
+    if (['ASESOR','SUPERVISOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'Este rol no puede sobrescribir el estado global.' });
     const now = new Date().toISOString();
     try { if (googleStorage.enabled) { await googleStorage.savePlatformState(req.body); for (const evaluation of (req.body?.evaluations || [])) if (evaluation?.id && evaluation?.advisorId && evaluation?.evaluatorId && ['QUALITY','D3C'].includes(evaluation?.evaluationType)) await googleStorage.saveEvaluation(evaluation); } }
     catch (error) { console.error('[google-storage] No fue posible guardar el estado de plataforma.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible sincronizar el estado con Google Sheets.' }); }
@@ -347,6 +348,60 @@ async function startServer() {
   });
   app.get('/api/files/:id', requireAuth, async (req, res) => { try { res.json({ file: await googleStorage.fileMetadata(req.params.id) }); } catch { res.status(404).json({ error: 'Archivo no encontrado.' }); } });
   app.delete('/api/files/:id', requireAuth, async (req, res) => { try { await googleStorage.deleteFile(req.params.id); res.status(204).end(); } catch { res.status(404).json({ error: 'Archivo no encontrado.' }); } });
+
+  const qualityManagers = new Set(['ADMINISTRADOR', 'CONSULTOR']);
+  const alertRows = () => (db.prepare('SELECT data_json FROM quality_alerts ORDER BY updated_at DESC').all() as any[]).map(row => JSON.parse(row.data_json));
+  const calibrationRows = () => (db.prepare('SELECT data_json FROM calibrations ORDER BY updated_at DESC').all() as any[]).map(row => JSON.parse(row.data_json));
+  const persistAlert = (item: any) => db.prepare(`INSERT INTO quality_alerts (id,status,advisor_id,supervisor_id,campaign_id,data_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,advisor_id=excluded.advisor_id,supervisor_id=excluded.supervisor_id,campaign_id=excluded.campaign_id,data_json=excluded.data_json,updated_at=excluded.updated_at`).run(item.id,item.status,item.advisorId,item.supervisorId,item.campaignId,JSON.stringify(item),item.publishedAt,item.updatedAt);
+  const persistCalibration = (item: any) => db.prepare(`INSERT INTO calibrations (id,status,evaluation_id,campaign_id,data_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,evaluation_id=excluded.evaluation_id,campaign_id=excluded.campaign_id,data_json=excluded.data_json,updated_at=excluded.updated_at`).run(item.id,item.status,item.evaluationId,item.campaignId,JSON.stringify(item),item.createdAt,item.updatedAt);
+
+  app.get('/api/quality-alerts', requireAuth, async (req, res) => {
+    const user = (req as any).authUser as User; let alerts = alertRows();
+    try { const remote = googleStorage.enabled ? await googleStorage.loadQualityAlerts() : []; if (remote.length) { alerts = remote; remote.forEach(persistAlert); } } catch {}
+    if (user.role === 'ASESOR') alerts = alerts.filter(item => item.advisorId === user.advisorId);
+    if (user.role === 'SUPERVISOR') alerts = alerts.filter(item => item.supervisorId === user.id);
+    res.json({ alerts });
+  });
+  app.post('/api/quality-alerts', requireAuth, async (req, res) => {
+    const user = (req as any).authUser as User; if (!qualityManagers.has(user.role)) return res.status(403).json({ error:'Solo Calidad o Administración puede publicar alertas.' });
+    const body = req.body || {}; if (!body.title || !body.advisorId || !body.supervisorId || !body.campaignId || !body.validUntil) return res.status(400).json({ error:'Completa los datos obligatorios.' });
+    const now = new Date().toISOString(); const alert = { id:`alert_${randomBytes(8).toString('hex')}`,title:String(body.title),audioUrl:body.audioUrl || undefined,contactNumber:String(body.contactNumber || ''),detail:String(body.detail || ''),advisorId:body.advisorId,supervisorId:body.supervisorId,campaignId:body.campaignId,validUntil:body.validUntil,criticality:['BAJA','MEDIA','ALTA','CRITICA'].includes(body.criticality)?body.criticality:'MEDIA',status:'NUEVA',publishedAt:now,createdBy:user.id,updatedAt:now };
+    try { persistAlert(alert); if (googleStorage.enabled) await googleStorage.saveQualityAlert(alert); res.status(201).json({ alert }); } catch { res.status(502).json({ error:'No fue posible guardar la alerta.' }); }
+  });
+  app.patch('/api/quality-alerts/:id', requireAuth, async (req, res) => {
+    const user = (req as any).authUser as User; let items = alertRows(); try { const remote = googleStorage.enabled ? await googleStorage.loadQualityAlerts() : []; if (remote.length) items=remote; } catch {}
+    const current = items.find(item => item.id === req.params.id); if (!current) return res.status(404).json({ error:'Alerta no encontrada.' });
+    const isAssigned = user.role === 'SUPERVISOR' && current.supervisorId === user.id; if (!isAssigned && !qualityManagers.has(user.role)) return res.status(403).json({ error:'No puedes gestionar esta alerta.' });
+    const body=req.body||{}; const now=new Date().toISOString(); const nextStatus=body.status || current.status;
+    if (isAssigned && !['PENDIENTE_GESTION','GESTIONADA'].includes(nextStatus)) return res.status(403).json({ error:'El supervisor solo puede gestionar la alerta.' });
+    if (nextStatus === 'GESTIONADA' && (!body.feedbackPerformed || !String(body.managementDetail || '').trim())) return res.status(400).json({ error:'Registra el feedback y el detalle de gestión.' });
+    const managedAt=nextStatus==='GESTIONADA'?(current.managedAt||now):current.managedAt; const alert={...current,...body,status:nextStatus,managedAt,closedAt:nextStatus==='CERRADA'?now:current.closedAt,elapsedMinutes:managedAt?Math.max(0,Math.round((new Date(managedAt).getTime()-new Date(current.publishedAt).getTime())/60000)):current.elapsedMinutes,updatedAt:now};
+    try { persistAlert(alert); if (googleStorage.enabled) await googleStorage.saveQualityAlert(alert); res.json({ alert }); } catch { res.status(502).json({ error:'No fue posible actualizar la alerta.' }); }
+  });
+
+  app.get('/api/calibrations', requireAuth, async (req, res) => {
+    const user=(req as any).authUser as User; if (user.role === 'ASESOR') return res.json({ calibrations:[] }); let rows=calibrationRows();
+    try { const remote=googleStorage.enabled?await googleStorage.loadCalibrations():[]; if(remote.length){rows=remote;remote.forEach(persistCalibration);} } catch {}
+    const today = new Date().toISOString().slice(0,10); rows = rows.map(item => {
+      if (!item.dueAt || item.dueAt >= today || item.status === 'COMPLETADA') return item;
+      const participants = (item.participants || []).map((participant:any) => participant.status === 'PENDIENTE' ? { ...participant, status:'VENCIDA' } : participant);
+      const expired = { ...item, participants, status:'VENCIDA', updatedAt:new Date().toISOString() }; persistCalibration(expired); return expired;
+    });
+    if(user.role==='SUPERVISOR') rows=rows.filter(item=>item.participants?.some((participant:any)=>participant.supervisorId===user.id)).map(item=>{const {officialAnswers,...safe}=item;return safe;});
+    res.json({ calibrations:rows });
+  });
+  app.post('/api/calibrations', requireAuth, async (req, res) => {
+    const user=(req as any).authUser as User; if(!qualityManagers.has(user.role))return res.status(403).json({error:'Solo Calidad o Administración puede crear calibraciones.'}); const body=req.body||{}; const evaluation=body.evaluation;
+    if(!evaluation?.id||evaluation.evaluationType!=='QUALITY'||!Array.isArray(body.supervisorIds)||!body.supervisorIds.length)return res.status(400).json({error:'Selecciona una evaluación de Calidad y al menos un supervisor.'});
+    const now=new Date().toISOString(); const officialAnswers=Object.fromEntries((evaluation.items||[]).filter((item:any)=>item.compliance).map((item:any)=>[item.criterionId,item.compliance])); const attributeLabels=Object.fromEntries((evaluation.items||[]).map((item:any)=>[item.criterionId,item.qualityGuideline?.name||item.attribute||item.criterionId]));
+    const caseSnapshot={callId:evaluation.callId,date:evaluation.date,product:evaluation.product,audioUrl:evaluation.audioUrl,audioFileName:evaluation.audioFileName,audioDurationSeconds:evaluation.audioDurationSeconds};const calibration={id:`cal_${randomBytes(8).toString('hex')}`,evaluationId:evaluation.id,campaignId:evaluation.campaignId,title:String(body.title||`Calibración ${evaluation.callId}`),dueAt:body.dueAt,status:'PENDIENTE',participants:[...new Set(body.supervisorIds)].map(supervisorId=>({supervisorId,status:'PENDIENTE'})),officialAnswers,attributeLabels,caseSnapshot,createdBy:user.id,createdAt:now,updatedAt:now};
+    try{persistCalibration(calibration);if(googleStorage.enabled)await googleStorage.saveCalibration(calibration);res.status(201).json({calibration});}catch{res.status(502).json({error:'No fue posible crear la calibración.'});}
+  });
+  app.patch('/api/calibrations/:id/respond', requireAuth, async (req,res)=>{
+    const user=(req as any).authUser as User;if(user.role!=='SUPERVISOR')return res.status(403).json({error:'Solo un supervisor invitado puede responder.'});let rows=calibrationRows();try{const remote=googleStorage.enabled?await googleStorage.loadCalibrations():[];if(remote.length)rows=remote;}catch{} const current=rows.find(item=>item.id===req.params.id);if(!current)return res.status(404).json({error:'Calibración no encontrada.'});const participant=current.participants?.find((item:any)=>item.supervisorId===user.id);if(!participant)return res.status(403).json({error:'No tienes invitación para esta calibración.'});
+    if(participant.status==='VENCIDA')return res.status(400).json({error:'La invitación está vencida.'});const answers=req.body?.answers||{};const keys=Object.keys(current.officialAnswers||{}).filter(key=>answers[key]);if(!keys.length)return res.status(400).json({error:'Responde al menos un atributo.'});const agreement=Math.round(keys.filter(key=>answers[key]===current.officialAnswers[key]).length/keys.length*100);const now=new Date().toISOString();const participants=current.participants.map((item:any)=>item.supervisorId===user.id?{...item,status:'RESPONDIDA',answers,agreement,submittedAt:now}:item);const calibration={...current,participants,status:participants.every((item:any)=>item.status==='RESPONDIDA')?'COMPLETADA':'EN_CURSO',updatedAt:now};
+    try{persistCalibration(calibration);if(googleStorage.enabled)await googleStorage.saveCalibration(calibration);const {officialAnswers,...safe}=calibration;res.json({calibration:safe});}catch{res.status(502).json({error:'No fue posible guardar la calibración.'});}
+  });
 
   const developmentAdmin = (req: express.Request, res: express.Response) => (req as any).authUser?.role === 'ADMINISTRADOR' || res.status(403).json({ error: 'Acceso restringido a administración.' });
   const capsuleRows = () => (db.prepare('SELECT data_json FROM development_capsules ORDER BY updated_at DESC').all() as any[]).map(row => JSON.parse(row.data_json));

@@ -15,7 +15,9 @@ const SHEETS = {
   FEEDBACKS: ['feedback_id', 'evaluation_id', 'advisor_id', 'supervisor_id', 'evaluator_id', 'evaluation_type', 'feedback_text', 'advisor_response', 'advisor_evidence_url', 'supervisor_closure_comment', 'status', 'created_at', 'advisor_action_at', 'closed_at', 'updated_at'],
   APP_STATE: ['id', 'payload_json', 'updated_at'],
   DEVELOPMENT_CAPSULES: ['id', 'status', 'data_json', 'created_at', 'updated_at'],
-  DEVELOPMENT_ASSIGNMENTS: ['id', 'capsule_id', 'advisor_id', 'status', 'data_json', 'created_at', 'updated_at']
+  DEVELOPMENT_ASSIGNMENTS: ['id', 'capsule_id', 'advisor_id', 'status', 'data_json', 'created_at', 'updated_at'],
+  QUALITY_ALERTS: ['id', 'status', 'advisor_id', 'supervisor_id', 'campaign_id', 'data_json', 'created_at', 'updated_at'],
+  CALIBRATIONS: ['id', 'status', 'evaluation_id', 'campaign_id', 'data_json', 'created_at', 'updated_at']
 } as const;
 
 type SheetName = keyof typeof SHEETS;
@@ -134,6 +136,10 @@ class GoogleStorage {
   async savePlatformState(state: unknown) { await this.upsert('APP_STATE', 'id', { id: 'global', payload_json: JSON.stringify(state), updated_at: new Date().toISOString() }); }
   async loadDevelopment() { const [capsules, assignments] = await Promise.all([this.rows('DEVELOPMENT_CAPSULES'), this.rows('DEVELOPMENT_ASSIGNMENTS')]); return { capsules: (capsules || []).map(row => JSON.parse(row.data_json || '{}')), assignments: (assignments || []).map(row => JSON.parse(row.data_json || '{}')) }; }
   async saveDevelopment(capsules: any[], assignments: any[]) { await Promise.all([this.replace('DEVELOPMENT_CAPSULES', capsules.map(item => ({ id:item.id,status:item.status,data_json:JSON.stringify(item),created_at:item.createdAt,updated_at:item.updatedAt }))),this.replace('DEVELOPMENT_ASSIGNMENTS', assignments.map(item => ({ id:item.id,capsule_id:item.capsuleId,advisor_id:item.advisorId,status:item.status,data_json:JSON.stringify(item),created_at:item.assignedAt,updated_at:item.updatedAt })))]); }
+  async loadQualityAlerts() { const rows = await this.rows('QUALITY_ALERTS'); return (rows || []).map(row => JSON.parse(row.data_json || '{}')); }
+  async saveQualityAlert(item: any) { await this.upsert('QUALITY_ALERTS', 'id', { id:item.id,status:item.status,advisor_id:item.advisorId,supervisor_id:item.supervisorId,campaign_id:item.campaignId,data_json:JSON.stringify(item),created_at:item.publishedAt,updated_at:item.updatedAt }); }
+  async loadCalibrations() { const rows = await this.rows('CALIBRATIONS'); return (rows || []).map(row => JSON.parse(row.data_json || '{}')); }
+  async saveCalibration(item: any) { await this.upsert('CALIBRATIONS', 'id', { id:item.id,status:item.status,evaluation_id:item.evaluationId,campaign_id:item.campaignId,data_json:JSON.stringify(item),created_at:item.createdAt,updated_at:item.updatedAt }); }
 
   async uploadFile(input: { name: string; mimeType: string; base64: string }) {
     if (!this.enabled) throw new Error('Google Drive no está configurado.');

@@ -30,6 +30,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
   const [resultFilter, setResultFilter] = useState<'ALL' | 'VENTA' | 'NO_VENTA'>('ALL');
   const [stateFilter, setStateFilter] = useState<'ALL' | 'PENDIENTE' | 'FINALIZADA'>('ALL');
   const isAdvisor = currentUser.role === 'ASESOR';
+  const isReadOnly = ['ASESOR', 'SUPERVISOR'].includes(currentUser.role);
   const visibleEvaluations = filteredEvaluations.filter(ev => {
     if (typeFilter !== 'ALL' && ev.evaluationType !== typeFilter) return false;
     if (resultFilter !== 'ALL' && (ev.sale ? 'VENTA' : 'NO_VENTA') !== resultFilter) return false;
@@ -80,7 +81,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
             <p className="text-xs text-[#667085] mt-0.5 font-medium">
               {visibleEvaluations.length} {visibleEvaluations.length === 1 ? 'registro encontrado' : 'registros encontrados'}
             </p>
-          </div><div className="flex flex-wrap items-center justify-end gap-2"><select value={typeFilter} onChange={event => setTypeFilter(event.target.value as typeof typeFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todas</option><option value="QUALITY">Calidad</option><option value="D3C">Mejora Continua</option></select><select value={resultFilter} onChange={event => setResultFilter(event.target.value as typeof resultFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todo resultado</option><option value="VENTA">Venta</option><option value="NO_VENTA">No venta</option></select><select value={stateFilter} onChange={event => setStateFilter(event.target.value as typeof stateFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todo estado</option><option value="PENDIENTE">Pendiente de revisión</option><option value="FINALIZADA">Finalizada</option></select>{!isAdvisor && <button onClick={onOpenNewEvaluation} className="inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-[#1FD6FF] to-[#2E7BFF] px-3 py-2 text-xs font-bold text-[#031326]"><Phone className="h-4 w-4" />Nueva evaluación</button>}</div>
+          </div><div className="flex flex-wrap items-center justify-end gap-2"><select value={typeFilter} onChange={event => setTypeFilter(event.target.value as typeof typeFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todas</option><option value="QUALITY">Calidad</option><option value="D3C">Mejora Continua</option></select><select value={resultFilter} onChange={event => setResultFilter(event.target.value as typeof resultFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todo resultado</option><option value="VENTA">Venta</option><option value="NO_VENTA">No venta</option></select><select value={stateFilter} onChange={event => setStateFilter(event.target.value as typeof stateFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todo estado</option><option value="PENDIENTE">Pendiente de revisión</option><option value="FINALIZADA">Finalizada</option></select>{!isReadOnly && <button onClick={onOpenNewEvaluation} className="inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-[#1FD6FF] to-[#2E7BFF] px-3 py-2 text-xs font-bold text-[#031326]"><Phone className="h-4 w-4" />Nueva evaluación</button>}</div>
         </div>
 
         {/* Evaluations Table */}
@@ -178,13 +179,14 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                           </div>
                         </td>
 
-                        <td className="py-3 px-3"><span className="cm-badge">{ev.evaluationType === 'QUALITY' ? 'Calidad' : 'Mejora Continua'}</span></td>
+                        <td className="py-3 px-3"><span className="cm-badge">{ev.evaluationType === 'QUALITY' ? 'Calidad' : 'Mejora Continua'}</span><span className="mt-1 block text-[9px] text-[var(--cm-text-secondary)]">{ev.source === 'SPEECH_ANALYTICS' ? 'Speech Analytics' : 'Manual'} · {ev.validationStatus === 'AUTOMATICO_PENDIENTE' ? 'Automático pendiente' : ev.validationStatus === 'AJUSTADO_VALIDADO' ? 'Ajustado y validado' : 'Validado'}</span></td>
 
                         {/* 3. Score 3C (Numeric Badge) */}
                         <td className="py-3 px-3 text-center">
-                          <span className={`inline-block text-xs font-bold font-kpi px-2.5 py-1 rounded-md border ${getScoreBadgeClass(ev.scoreTotal)}`}>
-                            {ev.scoreTotal}%
+                          <span className={`inline-block text-xs font-bold font-kpi px-2.5 py-1 rounded-md border ${getScoreBadgeClass(ev.evaluationType === 'QUALITY' ? (ev.technicalScore ?? ev.scoreTotal) : ev.scoreTotal)}`}>
+                            {ev.evaluationType === 'QUALITY' ? (ev.technicalScore ?? ev.scoreTotal) : ev.scoreTotal}%
                           </span>
+                          {ev.qualityResult && <div className={`mt-1 text-[9px] font-bold ${ev.qualityResult === 'REPROBADA' ? 'text-red-600' : 'text-emerald-600'}`}>{ev.qualityResult}</div>}
                         </td>
 
                         {/* 4. Desempeño 3C (ThreeScore Component in one cell) */}
@@ -217,20 +219,20 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                         {/* 7. Acciones */}
                         <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1">
-                            {!isAdvisor && <button
+                            <button
                               onClick={() => onSelectEvaluation(ev)}
                               className="p-1.5 text-[#667085] hover:text-[#FF6B00] hover:bg-[#FF6B00]/10 rounded-lg transition-colors"
                               title="Ver ficha de evaluación"
                             >
                               <Eye className="w-4 h-4" />
-                            </button>}
-                            <button
+                            </button>
+                            {!isReadOnly && <button
                               onClick={() => setDeleteConfirmId(ev.id)}
                               className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                               title="Eliminar evaluación"
                             >
                               <Trash2 className="w-4 h-4" />
-                            </button>
+                            </button>}
                           </div>
                         </td>
 

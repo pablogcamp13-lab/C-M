@@ -42,6 +42,9 @@ export interface QualityGuideline {
   name: string;
   weight: number;
   focus: string;
+  category?: string;
+  errorType?: string;
+  classification?: 'CRITICO_USUARIO_FINAL' | 'CRITICO_NEGOCIO' | 'CRITICO_COMPLIANCE' | 'NO_CRITICO';
   critical: boolean;
   noApplies: boolean;
   expected: string;
@@ -192,6 +195,10 @@ export interface EvaluationItem {
   timestamp?: string; // e.g. "01:24"
   timestampSeconds?: number; // e.g. 84
   qualityGuideline?: QualityGuideline; // Snapshot histórico de la pauta aplicada
+  category?: string;
+  attribute?: string;
+  errorType?: string;
+  classification?: 'CRITICO_USUARIO_FINAL' | 'CRITICO_NEGOCIO' | 'CRITICO_COMPLIANCE' | 'NO_CRITICO';
 }
 
 export interface AiAlert {
@@ -239,6 +246,12 @@ export interface Evaluation {
   qualityCriticalErrorIds?: string[];
   qualityCriticalErrorSnapshot?: QualityCriticalError[];
   qualityStatus?: 'DRAFT' | 'FINALIZED';
+  source?: 'MANUAL' | 'SPEECH_ANALYTICS';
+  validationStatus?: 'AUTOMATICO_PENDIENTE' | 'VALIDADO' | 'AJUSTADO_VALIDADO';
+  validatedAt?: string;
+  technicalScore?: number | null;
+  qualityResult?: 'APROBADA' | 'REPROBADA';
+  criticalReason?: string;
   sale: boolean;
   saleResult: 'VENTA_CONCRETADA' | 'NO_VENTA' | 'VENTA_OBSERVADA' | 'VOLVER_A_LLAMAR';
   noSaleReason?: string;
@@ -293,6 +306,54 @@ export interface ActionPlan {
   comments?: string;
   evidence?: string;
   result?: string;
+}
+
+export type QualityAlertStatus = 'NUEVA' | 'PENDIENTE_GESTION' | 'GESTIONADA' | 'CERRADA';
+export interface QualityAlert {
+  id: string;
+  title: string;
+  audioUrl?: string;
+  contactNumber: string;
+  detail: string;
+  advisorId: string;
+  supervisorId: string;
+  campaignId: string;
+  validUntil: string;
+  criticality: 'BAJA' | 'MEDIA' | 'ALTA' | 'CRITICA';
+  status: QualityAlertStatus;
+  feedbackPerformed?: boolean;
+  managementDetail?: string;
+  evidenceUrl?: string;
+  publishedAt: string;
+  managedAt?: string;
+  closedAt?: string;
+  elapsedMinutes?: number;
+  createdBy: string;
+  updatedAt: string;
+}
+
+export type CalibrationStatus = 'PENDIENTE' | 'EN_CURSO' | 'COMPLETADA' | 'VENCIDA';
+export interface CalibrationParticipant {
+  supervisorId: string;
+  status: 'PENDIENTE' | 'RESPONDIDA' | 'VENCIDA';
+  answers?: Record<string, ComplianceStatus>;
+  agreement?: number;
+  submittedAt?: string;
+}
+export interface Calibration {
+  id: string;
+  evaluationId: string;
+  campaignId: string;
+  title: string;
+  dueAt: string;
+  status: CalibrationStatus;
+  participants: CalibrationParticipant[];
+  officialAnswers?: Record<string, ComplianceStatus>;
+  attributeLabels?: Record<string, string>;
+  caseSnapshot?: { callId: string; date: string; product?: string; audioUrl?: string; audioFileName?: string; audioDurationSeconds?: number };
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type InterventionType = 
@@ -404,6 +465,8 @@ export type NavigationSection =
   | 'new_evaluation' 
   | 'evaluations' 
   | 'feedback'
+  | 'quality_alerts'
+  | 'calibrations'
   | 'advisors' 
   | 'pareto' 
   | 'methodology' 

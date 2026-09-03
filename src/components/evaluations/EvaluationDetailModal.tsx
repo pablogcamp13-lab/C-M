@@ -135,6 +135,10 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
                     label={evaluation.sale ? 'Venta Concretada' : (evaluation.saleResult || 'No Venta')}
                   />
                 </div>
+                <div>
+                  <span className="text-[var(--cm-text-secondary)] block text-[11px]">Origen / validación:</span>
+                  <span className="font-medium text-[var(--cm-text)]">{evaluation.source === 'SPEECH_ANALYTICS' ? 'Speech Analytics' : 'Manual'} · {evaluation.validationStatus === 'AUTOMATICO_PENDIENTE' ? 'Automático pendiente' : evaluation.validationStatus === 'AJUSTADO_VALIDADO' ? 'Ajustado y validado' : 'Validado'}</span>
+                </div>
               </div>
             </div>
 
@@ -147,10 +151,11 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
                 <div className="flex items-center gap-4">
                   <div className="text-center px-4 py-2 bg-[var(--cm-surface-elevated)] border border-[var(--cm-border)] rounded-xl shadow-xs">
                     <span className="text-2xl font-bold font-kpi text-[var(--cm-primary)]">
-                      {evaluation.scoreTotal !== null && evaluation.scoreTotal !== undefined ? `${evaluation.scoreTotal}%` : 'N/A'}
+                      {isQuality && evaluation.technicalScore !== undefined ? `${evaluation.technicalScore ?? 0}%` : evaluation.scoreTotal !== null && evaluation.scoreTotal !== undefined ? `${evaluation.scoreTotal}%` : 'N/A'}
                     </span>
-                    <span className="block text-[10px] uppercase font-semibold text-[var(--cm-text-secondary)]">Puntaje Calidad</span>
+                    <span className="block text-[10px] uppercase font-semibold text-[var(--cm-text-secondary)]">{isQuality ? 'Calidad técnica' : 'Puntaje Calidad'}</span>
                   </div>
+                  {isQuality && <div className={`rounded-xl border px-3 py-2 text-center ${evaluation.qualityResult === 'REPROBADA' ? 'border-[var(--cm-danger)] text-[var(--cm-danger)]' : 'border-[var(--cm-success)] text-[var(--cm-success)]'}`}><b className="block text-sm">{evaluation.qualityResult || (evaluation.scoreTotal === 0 && evaluation.qualityCriticalErrorIds?.length ? 'REPROBADA' : 'APROBADA')}</b><span className="text-[10px]">{evaluation.criticalReason || 'Resultado final'}</span></div>}
                   <div className="flex-1">
                     {isQuality ? (
                       <div className="grid grid-cols-4 gap-2">
@@ -177,6 +182,12 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
               )}
             </div>
 
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="cm-card p-4"><span className="text-[10px] font-bold uppercase text-[var(--cm-success)]">Fortalezas</span><p className="mt-2 text-xs">{evaluation.strongestPillar || 'Sin fortalezas registradas.'}</p></div>
+            <div className="cm-card p-4"><span className="text-[10px] font-bold uppercase text-[var(--cm-warning)]">Oportunidades</span><p className="mt-2 text-xs">{evaluation.primaryGap || evaluation.secondaryGap || 'Sin oportunidades registradas.'}</p></div>
+            <div className="cm-card p-4"><span className="text-[10px] font-bold uppercase text-[var(--cm-primary)]">Observaciones</span><p className="mt-2 text-xs">{evaluation.comments || 'Sin observaciones registradas.'}</p></div>
           </div>
 
           {/* Grabación de Audio (si existe) */}
@@ -351,6 +362,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
                           {code}. {name}
                         </h5>
                         {qualityDef && 'critical' in qualityDef && qualityDef.critical && <span className="cm-badge cm-badge--critical">CRÍTICO</span>}
+                        {isQuality && item.classification && <span className="cm-badge">{item.classification.replaceAll('_', ' ')}</span>}
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -373,6 +385,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
                         <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                       </button>
                     </div>
+                    {isQuality && item.errorType && <p className="text-[11px] text-[var(--cm-danger)]"><b>Tipo de error:</b> {item.errorType}</p>}
 
                     {isExpanded && (
                       <div className="grid gap-2 border-t border-[var(--cm-border)] pt-3 md:grid-cols-2">
