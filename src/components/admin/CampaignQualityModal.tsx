@@ -29,11 +29,19 @@ export const CampaignQualityModal: React.FC<{
   const [guidelines, setGuidelines] = useState<QualityGuideline[]>(
     campaign.qualityGuidelines || [],
   );
+  const [criterionWeights, setCriterionWeights] = useState(
+    campaign.qualityCriterionWeights || { C1: 0.3, C2: 0.3, C3: 0.3, C4: 0.1 },
+  );
+  const [criticalErrorNames, setCriticalErrorNames] = useState(
+    (campaign.qualityCriticalErrors || []).map((error) => error.name).join("\n"),
+  );
   const [editing, setEditing] = useState<QualityGuideline | null>(null);
   const invalidBlocks = (["C1", "C2", "C3", "C4"] as const).filter((criterion) => {
     const rows = guidelines.filter((item) => item.active && item.criterion === criterion);
     return rows.length > 0 && Math.abs(rows.reduce((total, item) => total + item.weight, 0) - 1) > 0.001;
   });
+  const criterionWeightTotal = (Object.values(criterionWeights) as number[]).reduce((total, value) => total + value, 0);
+  const invalidCriterionWeights = Math.abs(criterionWeightTotal - 1) > 0.001;
   const field =
     "w-full rounded-lg border border-slate-600 bg-slate-950/35 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400";
   const saveGuideline = (event: React.FormEvent) => {
@@ -47,7 +55,11 @@ export const CampaignQualityModal: React.FC<{
     setEditing(null);
   };
   const saveAll = () => {
-    if (invalidBlocks.length) return;
+    if (invalidBlocks.length || invalidCriterionWeights) return;
+    const previousErrors = campaign.qualityCriticalErrors || [];
+    const qualityCriticalErrors = criticalErrorNames.split("\n").map((value) => value.trim()).filter(Boolean).map((errorName, index) =>
+      previousErrors.find((error) => error.name === errorName) || { id: `critical_${campaign.id}_${index + 1}`, name: errorName, active: true },
+    );
     onSave({
       name: name.trim(),
       client: client.trim(),
@@ -57,6 +69,8 @@ export const CampaignQualityModal: React.FC<{
         .map((value) => value.trim())
         .filter(Boolean),
       qualityGuidelines: guidelines,
+      qualityCriterionWeights: criterionWeights,
+      qualityCriticalErrors,
     });
     onClose();
   };
@@ -116,7 +130,15 @@ export const CampaignQualityModal: React.FC<{
               </select>
             </label>
           </section>
-        <section>
+          <section className="grid gap-3 rounded-xl border border-slate-700 p-4 md:grid-cols-4">
+            <h4 className="font-bold md:col-span-4">Ponderación final por bloque</h4>
+            {(["C1", "C2", "C3", "C4"] as const).map((criterion) => (
+              <label key={criterion} className="text-xs font-semibold">{criterion} (%)<input type="number" min="0" max="100" className={`mt-1 ${field}`} value={Math.round(criterionWeights[criterion] * 100)} onChange={(event) => setCriterionWeights({ ...criterionWeights, [criterion]: Number(event.target.value) / 100 })}/></label>
+            ))}
+            <p className={`md:col-span-4 text-xs ${!invalidCriterionWeights ? "text-emerald-300" : "text-amber-300"}`}>Total: {Math.round(criterionWeightTotal * 100)}%</p>
+            <label className="text-xs font-semibold md:col-span-4">Errores críticos 4.1 (uno por línea)<textarea rows={3} className={`mt-1 ${field}`} value={criticalErrorNames} onChange={(event) => setCriticalErrorNames(event.target.value)}/></label>
+          </section>
+          <section>
             <div className="mb-3 flex items-center justify-between">
               <div>
                 <h4 className="font-bold">Lineamientos de Calidad</h4>
@@ -310,7 +332,7 @@ export const CampaignQualityModal: React.FC<{
           </button>
           <button
             onClick={saveAll}
-            disabled={!name.trim() || invalidBlocks.length > 0}
+            disabled={!name.trim() || invalidBlocks.length > 0 || invalidCriterionWeights}
             className="rounded-lg bg-cyan-500 px-5 py-2 text-sm font-bold text-slate-950 disabled:opacity-50"
           >
             Guardar campaña

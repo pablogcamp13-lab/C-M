@@ -23,6 +23,16 @@ export interface Campaign {
   products: string[];
   description?: string;
   qualityGuidelines?: QualityGuideline[];
+  qualityCriterionWeights?: Record<'C1' | 'C2' | 'C3' | 'C4', number>;
+  qualityCriticalErrors?: QualityCriticalError[];
+}
+
+export interface QualityCriticalError {
+  id: string;
+  name: string;
+  description?: string;
+  focus?: string;
+  active: boolean;
 }
 
 export interface QualityGuideline {
@@ -227,6 +237,7 @@ export interface Evaluation {
   type: EvaluationType;
   evaluationType?: PlatformEvaluationType;
   qualityCriticalErrorIds?: string[];
+  qualityCriticalErrorSnapshot?: QualityCriticalError[];
   qualityStatus?: 'DRAFT' | 'FINALIZED';
   sale: boolean;
   saleResult: 'VENTA_CONCRETADA' | 'NO_VENTA' | 'VENTA_OBSERVADA' | 'VOLVER_A_LLAMAR';

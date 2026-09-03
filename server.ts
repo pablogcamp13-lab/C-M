@@ -19,7 +19,7 @@ mkdirSync(path.dirname(sqlitePath), { recursive: true });
 const db = new DatabaseSync(sqlitePath);
 db.exec(`PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, username TEXT UNIQUE, role TEXT NOT NULL, status TEXT NOT NULL, team_id TEXT, advisor_id TEXT UNIQUE, avatar TEXT, created_at TEXT NOT NULL, password_hash TEXT NOT NULL, must_change_password INTEGER NOT NULL DEFAULT 1);
-CREATE TABLE IF NOT EXISTS campaigns (id TEXT PRIMARY KEY, name TEXT NOT NULL, client TEXT NOT NULL, status TEXT NOT NULL, products_json TEXT NOT NULL, description TEXT, quality_guidelines_json TEXT NOT NULL DEFAULT '[]');
+CREATE TABLE IF NOT EXISTS campaigns (id TEXT PRIMARY KEY, name TEXT NOT NULL, client TEXT NOT NULL, status TEXT NOT NULL, products_json TEXT NOT NULL, description TEXT, quality_guidelines_json TEXT NOT NULL DEFAULT '[]', quality_criterion_weights_json TEXT, quality_critical_errors_json TEXT NOT NULL DEFAULT '[]');
 CREATE TABLE IF NOT EXISTS teams (id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL REFERENCES campaigns(id), supervisor_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS advisors (id TEXT PRIMARY KEY, dni TEXT NOT NULL UNIQUE, employee_code TEXT NOT NULL, name TEXT NOT NULL, campaign_id TEXT NOT NULL REFERENCES campaigns(id), team_id TEXT, supervisor_id TEXT, data_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -35,6 +35,8 @@ CREATE INDEX IF NOT EXISTS idx_evaluations_advisor_type ON evaluations(advisor_i
 if (!(db.prepare('PRAGMA table_info(feedbacks)').all() as any[]).some(column => column.name === 'advisor_evidence_url')) db.exec('ALTER TABLE feedbacks ADD COLUMN advisor_evidence_url TEXT');
 if (!(db.prepare('PRAGMA table_info(users)').all() as any[]).some(column => column.name === 'must_change_password')) db.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 1');
 if (!(db.prepare('PRAGMA table_info(campaigns)').all() as any[]).some(column => column.name === 'quality_guidelines_json')) db.exec("ALTER TABLE campaigns ADD COLUMN quality_guidelines_json TEXT NOT NULL DEFAULT '[]'");
+if (!(db.prepare('PRAGMA table_info(campaigns)').all() as any[]).some(column => column.name === 'quality_criterion_weights_json')) db.exec('ALTER TABLE campaigns ADD COLUMN quality_criterion_weights_json TEXT');
+if (!(db.prepare('PRAGMA table_info(campaigns)').all() as any[]).some(column => column.name === 'quality_critical_errors_json')) db.exec("ALTER TABLE campaigns ADD COLUMN quality_critical_errors_json TEXT NOT NULL DEFAULT '[]'");
 
 if (isProduction && !process.env.INITIAL_ADMIN_PASSWORD) throw new Error('INITIAL_ADMIN_PASSWORD es obligatoria en producción.');
 const INITIAL_PASSWORD = '12345678';
@@ -64,7 +66,7 @@ seedDatabase();
 
 function repository(): SharedRepository {
   const users = db.prepare('SELECT * FROM users ORDER BY created_at DESC').all().map(publicUser);
-  const campaigns = db.prepare('SELECT * FROM campaigns ORDER BY name').all().map((r: any) => ({ id: r.id, name: r.name, client: r.client, status: r.status, products: JSON.parse(r.products_json), description: r.description || undefined, qualityGuidelines: JSON.parse(r.quality_guidelines_json || '[]') }));
+  const campaigns = db.prepare('SELECT * FROM campaigns ORDER BY name').all().map((r: any) => ({ id: r.id, name: r.name, client: r.client, status: r.status, products: JSON.parse(r.products_json), description: r.description || undefined, qualityGuidelines: JSON.parse(r.quality_guidelines_json || '[]'), qualityCriterionWeights: JSON.parse(r.quality_criterion_weights_json || 'null') || undefined, qualityCriticalErrors: JSON.parse(r.quality_critical_errors_json || '[]') }));
   const teams = db.prepare('SELECT * FROM teams ORDER BY name').all().map((r: any) => ({ id: r.id, campaignId: r.campaign_id, supervisorId: r.supervisor_id, name: r.name }));
   const advisors = db.prepare('SELECT data_json FROM advisors ORDER BY name').all().map((r: any) => JSON.parse(r.data_json));
   return { users, campaigns, teams, advisors };
@@ -75,7 +77,7 @@ function persistRepository(input: SharedRepository) {
   db.exec('BEGIN IMMEDIATE');
   try {
     const source = input;
-    for (const campaign of source.campaigns || []) db.prepare(`INSERT INTO campaigns (id,name,client,status,products_json,description,quality_guidelines_json) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,client=excluded.client,status=excluded.status,products_json=excluded.products_json,description=excluded.description,quality_guidelines_json=excluded.quality_guidelines_json`).run(campaign.id, campaign.name, campaign.client, campaign.status, JSON.stringify(campaign.products || []), campaign.description || null, JSON.stringify(campaign.qualityGuidelines || []));
+    for (const campaign of source.campaigns || []) db.prepare(`INSERT INTO campaigns (id,name,client,status,products_json,description,quality_guidelines_json,quality_criterion_weights_json,quality_critical_errors_json) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,client=excluded.client,status=excluded.status,products_json=excluded.products_json,description=excluded.description,quality_guidelines_json=excluded.quality_guidelines_json,quality_criterion_weights_json=excluded.quality_criterion_weights_json,quality_critical_errors_json=excluded.quality_critical_errors_json`).run(campaign.id, campaign.name, campaign.client, campaign.status, JSON.stringify(campaign.products || []), campaign.description || null, JSON.stringify(campaign.qualityGuidelines || []), JSON.stringify(campaign.qualityCriterionWeights || null), JSON.stringify(campaign.qualityCriticalErrors || []));
     for (const user of source.users || []) {
       const existing = db.prepare('SELECT password_hash,must_change_password FROM users WHERE id=?').get(user.id);
       db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar`).run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt || now, existing?.password_hash || hashPassword(user.password || INITIAL_PASSWORD), existing ? existing.must_change_password : 1);

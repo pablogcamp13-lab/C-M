@@ -25,8 +25,6 @@ import { AudioPlayer } from "../common/AudioPlayer";
 import { filesApi } from "../../api/sharedRepository";
 
 type Result = ComplianceStatus | undefined;
-const criterionWeight = (value: string) =>
-  QUALITY_WEIGHTS[value as keyof typeof QUALITY_WEIGHTS] || 0;
 const migrationGuidelines: QualityGuideline[] = QUALITY_ATTRIBUTES.map(
   (item) => ({
     ...item,
@@ -75,6 +73,11 @@ export const QualityEvaluationModal: React.FC<{
   const team = teams.find((t) => t.id === advisor?.teamId);
   const evaluators = users.filter((u) => u.role !== "ASESOR");
   const campaign = campaigns.find((c) => c.id === advisor?.campaignId);
+  const criterionWeights = campaign?.qualityCriterionWeights || QUALITY_WEIGHTS;
+  const criterionWeight = (value: string) => criterionWeights[value as keyof typeof criterionWeights] || 0;
+  const criticalErrors = (campaign?.qualityCriticalErrors?.length
+    ? campaign.qualityCriticalErrors
+    : QUALITY_CRITICAL_ERRORS.map((error) => ({ ...error, active: true }))).filter((error) => error.active);
   const guidelines = (
     campaign?.qualityGuidelines?.length
       ? campaign.qualityGuidelines
@@ -119,7 +122,7 @@ export const QualityEvaluationModal: React.FC<{
       denominator: Math.round(denom * 100),
       answered: denom > 0,
     };
-  }, [answers, critical, guidelines]);
+  }, [answers, critical, guidelines, criterionWeights]);
   const update = (id: string, value: Result) => {
     setAnswers((p) => ({ ...p, [id]: value }));
     setDraftSaved(false);
@@ -181,6 +184,7 @@ export const QualityEvaluationModal: React.FC<{
       evaluationType: "QUALITY",
       qualityStatus: "FINALIZED",
       qualityCriticalErrorIds: critical,
+      qualityCriticalErrorSnapshot: criticalErrors.filter((error) => critical.includes(error.id)),
       sale: false,
       saleResult: "NO_VENTA",
       comments: generalComments,
@@ -211,7 +215,7 @@ export const QualityEvaluationModal: React.FC<{
                 Evaluación CALIDAD · {campaign?.name || "Selecciona un asesor"}
               </h2>
               <p className="flex items-center gap-1 text-xs text-[#66767A]">
-                C1 30% · C2 30% · C3 30% · C4 10%{" "}
+                {(["C1", "C2", "C3", "C4"] as const).map((key) => `${key} ${Math.round(criterionWeights[key] * 100)}%`).join(" · ")}{" "}
                 <Info className="h-3.5 w-3.5" />
               </p>
             </div>
@@ -580,7 +584,7 @@ export const QualityEvaluationModal: React.FC<{
               Errores críticos 4.1 — cualquiera deja la PUE en 0%
             </div>
             <div className="mt-3 space-y-1.5">
-              {QUALITY_CRITICAL_ERRORS.map((error) => (
+              {criticalErrors.map((error) => (
                 <label
                   key={error.id}
                   className="flex items-center gap-2 text-xs text-[#43565A]"
