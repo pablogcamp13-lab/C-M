@@ -37,13 +37,14 @@ const migrationGuidelines: QualityGuideline[] = QUALITY_ATTRIBUTES.map(
 export const QualityEvaluationModal: React.FC<{
   onClose: () => void;
   onSuccess?: (value: Evaluation) => void;
-}> = ({ onClose, onSuccess }) => {
+  campaignId?: string;
+}> = ({ onClose, onSuccess, campaignId }) => {
   const savingRef = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
   const { advisors, campaigns, users, teams, currentUser, addEvaluation } =
     useApp();
   const selectableAdvisors = advisors.filter(
-    (advisor) => advisor.status === "ACTIVO" && campaigns.some((campaign) => campaign.id === advisor.campaignId && campaign.status === "ACTIVA"),
+    (advisor) => advisor.status === "ACTIVO" && (!campaignId || advisor.campaignId === campaignId) && campaigns.some((campaign) => campaign.id === advisor.campaignId && campaign.status === "ACTIVA"),
   );
   const [advisorId, setAdvisorId] = useState(selectableAdvisors[0]?.id || "");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));

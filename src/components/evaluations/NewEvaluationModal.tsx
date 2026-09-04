@@ -5,6 +5,7 @@ import {
   DimensionId, 
   EvaluationItem, 
   Evaluation,
+  Advisor,
   ComplianceStatus
 } from '../../types';
 import { 
@@ -39,12 +40,16 @@ interface NewEvaluationModalProps {
   onClose: () => void;
   onSuccess?: (evaluation: Evaluation) => void;
   onOpenActionPlanWithEval?: (evaluation: Evaluation) => void;
+  preselectedCampaignId?: string;
+  preselectedAdvisor?: Advisor | null;
 }
 
 export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({ 
   onClose, 
   onSuccess,
-  onOpenActionPlanWithEval
+  onOpenActionPlanWithEval,
+  preselectedCampaignId,
+  preselectedAdvisor
 }) => {
   const { advisors, users, campaigns, teams, currentUser, config, addEvaluation } = useApp();
 
@@ -52,8 +57,9 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
   const evaluators = useMemo(() => users.filter(u => u.role !== 'ASESOR'), [users]);
 
   // Form State
-  const [selectedAdvisorId, setSelectedAdvisorId] = useState<string>(advisors[0]?.id || '');
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string>(campaigns[0]?.id || 'camp_bitel_migra');
+  const campaignAdvisors = advisors.filter(advisor => !preselectedCampaignId || advisor.campaignId === preselectedCampaignId);
+  const [selectedAdvisorId, setSelectedAdvisorId] = useState<string>(preselectedAdvisor?.id || campaignAdvisors[0]?.id || '');
+  const [selectedCampaignId] = useState<string>(preselectedCampaignId || preselectedAdvisor?.campaignId || campaigns[0]?.id || 'camp_bitel_migra');
   const [product, setProduct] = useState<string>(COMMERCIAL_PLANS[1]?.name || 'Plan Ilimitado S/ 39.90');
   const [evaluatorId, setEvaluatorId] = useState<string>(() => {
     if (currentUser && currentUser.role !== 'ASESOR') return currentUser.id;
@@ -405,7 +411,7 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
                   className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-teal-500 font-medium text-slate-800"
                   required
                 >
-                  {advisors.map(a => (
+                  {campaignAdvisors.map(a => (
                     <option key={a.id} value={a.id}>
                       {a.name} ({a.employeeCode})
                     </option>

@@ -24,16 +24,17 @@ import { ReportsExportView } from './components/reports/ReportsExportView';
 import { AdminSettingsView } from './components/admin/AdminSettingsView';
 import { FeedbackView } from './components/feedback/FeedbackView';
 import { DevelopmentView } from './components/development/DevelopmentView';
-import { Evaluation, Advisor } from './types';
+import { Evaluation, Advisor, Campaign } from './types';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { ForcePasswordChange } from './components/auth/ForcePasswordChange';
 import { ChevronRight, ShieldCheck, TrendingUp, X } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
-  const { currentSection, setCurrentSection, evaluations, advisors, currentUser } = useApp();
+  const { currentSection, setCurrentSection, evaluations, advisors, campaigns, currentUser } = useApp();
 
   // Modals state
   const [isNewEvalModalOpen, setIsNewEvalModalOpen] = useState(false);
+  const [newEvaluationCampaignId, setNewEvaluationCampaignId] = useState<string | null>(null);
   const [newEvaluationModule, setNewEvaluationModule] = useState<'QUALITY' | 'D3C' | null>(null);
   const [preselectedAdvisorForEval, setPreselectedAdvisorForEval] = useState<Advisor | null>(null);
   
@@ -48,6 +49,7 @@ const MainLayout: React.FC = () => {
     } else {
       setPreselectedAdvisorForEval(null);
     }
+    setNewEvaluationCampaignId(advisor?.campaignId || null);
     setNewEvaluationModule(null);
     setIsNewEvalModalOpen(true);
   };
@@ -155,12 +157,14 @@ const MainLayout: React.FC = () => {
 
       {/* Global Modals */}
       {isNewEvalModalOpen && (
-        newEvaluationModule === null ? <EvaluationModulePicker onSelect={setNewEvaluationModule} onClose={() => setIsNewEvalModalOpen(false)} /> : newEvaluationModule === 'QUALITY' ? <QualityEvaluationModal onClose={() => { setIsNewEvalModalOpen(false); setNewEvaluationModule(null); }} onSuccess={(evaluation) => setSelectedEvaluationForDetail(evaluation)} /> : <NewEvaluationModal
+        newEvaluationCampaignId === null ? <CampaignPicker onSelect={setNewEvaluationCampaignId} onClose={() => setIsNewEvalModalOpen(false)} /> : newEvaluationModule === null ? <EvaluationModulePicker campaign={campaigns.find(item => item.id === newEvaluationCampaignId)} onBack={() => setNewEvaluationCampaignId(null)} onSelect={setNewEvaluationModule} onClose={() => setIsNewEvalModalOpen(false)} /> : newEvaluationModule === 'QUALITY' ? <QualityEvaluationModal campaignId={newEvaluationCampaignId} onClose={() => { setIsNewEvalModalOpen(false); setNewEvaluationCampaignId(null); setNewEvaluationModule(null); }} onSuccess={(evaluation) => setSelectedEvaluationForDetail(evaluation)} /> : <NewEvaluationModal
           onClose={() => {
             setIsNewEvalModalOpen(false);
+            setNewEvaluationCampaignId(null);
             setNewEvaluationModule(null);
             setPreselectedAdvisorForEval(null);
           }}
+          preselectedCampaignId={newEvaluationCampaignId}
           preselectedAdvisor={preselectedAdvisorForEval}
           onOpenActionPlanWithEval={(evalData) => {
             handleOpenActionPlanWithEval(evalData);
@@ -208,10 +212,19 @@ const MainLayout: React.FC = () => {
   );
 };
 
-const EvaluationModulePicker: React.FC<{ onSelect: (module: 'QUALITY' | 'D3C') => void; onClose: () => void }> = ({ onSelect, onClose }) => {
+const campaignImage = (campaign: Campaign) => /retenciones/i.test(campaign.name) ? '/home/mejora-continua.png' : '/home/calidad.png';
+
+const CampaignPicker: React.FC<{ onSelect: (campaignId: string) => void; onClose: () => void }> = ({ onSelect, onClose }) => {
+  const { campaigns } = useApp();
+  const available = campaigns.filter(campaign => campaign.status === 'ACTIVA');
+  const [selected, setSelected] = useState(available[0]?.id || '');
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm"><div role="dialog" aria-modal="true" className="cm-modal w-full max-w-3xl overflow-hidden"><header className="flex items-start justify-between border-b border-[var(--cm-border)] px-7 pb-5 pt-6"><div><p className="cm-eyebrow">NUEVA EVALUACIÓN</p><h2 className="text-xl font-bold">Selecciona la campaña</h2><p className="mt-1 text-sm text-[var(--cm-text-secondary)]">La ficha y los lineamientos se cargarán según la campaña elegida.</p></div><button onClick={onClose} className="cm-navbar__icon-button" aria-label="Cerrar"><X className="h-5 w-5" /></button></header><div className="grid max-h-[62vh] gap-4 overflow-y-auto p-7 sm:grid-cols-2 lg:grid-cols-3">{available.map(campaign => <button key={campaign.id} onClick={() => setSelected(campaign.id)} className={`group relative aspect-square overflow-hidden rounded-2xl border text-left transition-all ${selected===campaign.id?'border-[var(--cm-primary)] shadow-[0_0_0_2px_rgba(31,214,255,.22)]':'border-[var(--cm-border)] hover:border-[var(--cm-primary)]'}`}><img src={campaignImage(campaign)} alt="" className="absolute inset-0 h-full w-full object-cover opacity-45 transition-transform group-hover:scale-105"/><span className="absolute inset-0 bg-gradient-to-t from-[#041426] via-[#071b30]/75 to-transparent"/>{selected===campaign.id&&<span className="absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-full bg-[var(--cm-primary)] font-bold text-[#031326]">✓</span>}<span className="absolute inset-x-0 bottom-0 p-5"><small className="font-bold uppercase tracking-wider text-[var(--cm-primary)]">{campaign.client}</small><strong className="mt-1 block text-lg text-white">{campaign.name}</strong><span className="mt-1 block text-xs text-slate-300">{campaign.description || `${campaign.client} · campaña activa`}</span></span></button>)}{!available.length&&<p className="col-span-full py-10 text-center text-sm text-[var(--cm-text-secondary)]">No existen campañas activas.</p>}</div><footer className="flex items-center justify-between border-t border-[var(--cm-border)] px-7 py-4"><button onClick={onClose} className="cm-button-secondary px-4 py-2 text-sm">Cancelar</button><button disabled={!selected} onClick={() => selected && onSelect(selected)} className="cm-button-primary px-4 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-50">Continuar <ChevronRight className="h-4 w-4" /></button></footer></div></div>;
+};
+
+const EvaluationModulePicker: React.FC<{ campaign?: Campaign; onSelect: (module: 'QUALITY' | 'D3C') => void; onBack: () => void; onClose: () => void }> = ({ campaign, onSelect, onBack, onClose }) => {
   const [selected, setSelected] = useState<'QUALITY' | 'D3C'>('QUALITY');
-  const options = [{ id: 'QUALITY' as const, title: 'Calidad', description: 'Migraciones Bitel · cumplimiento y estándar', icon: <ShieldCheck className="h-9 w-9" /> }, { id: 'D3C' as const, title: 'MC D+3C', description: 'Diagnóstico comercial y plan de mejora', icon: <TrendingUp className="h-9 w-9" /> }];
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#102A2E]/40 p-4 backdrop-blur-[2px]"><div role="dialog" aria-modal="true" className="w-full max-w-[640px] overflow-hidden rounded-2xl bg-white shadow-2xl"><div className="flex items-start justify-between px-7 pb-5 pt-6"><div><h2 className="text-xl font-bold text-[#102A2E]">Nueva evaluación</h2><p className="mt-1 text-sm text-[#66767A]">Selecciona el tipo de evaluación que deseas realizar</p></div><button onClick={onClose} className="rounded-lg p-1 text-[#66767A] hover:bg-[#F0F7F7]" aria-label="Cerrar"><X className="h-5 w-5" /></button></div><div className="px-7"><p className="text-xs font-bold text-[#43565A]">Tipo de evaluación</p><div className="mt-3 grid gap-4 sm:grid-cols-2">{options.map(option => <button key={option.id} onClick={() => setSelected(option.id)} className={`relative min-h-[220px] rounded-xl border p-5 text-center transition-all ${selected === option.id ? 'border-[#00B8B0] bg-[#F5FCFC] shadow-[0_0_0_1px_#00B8B0]' : 'border-[#E2E9E9] bg-white hover:border-[#9CCFCD]'}`}><span className={`mx-auto grid h-16 w-16 place-items-center rounded-full ${selected === option.id ? 'bg-[#E3F6F5] text-[#006B6B]' : 'bg-[#F3F5F5] text-[#008B88]'}`}>{option.icon}</span>{selected === option.id && <span className="absolute right-3 top-3 grid h-6 w-6 place-items-center rounded-full bg-[#00A9A3] text-sm font-bold text-white">✓</span>}<strong className="mt-4 block text-[15px] text-[#102A2E]">{option.title}</strong><span className="mx-auto mt-2 block max-w-[210px] text-xs leading-5 text-[#66767A]">{option.description}</span></button>)}</div></div><footer className="mt-7 flex items-center justify-between border-t border-[#E2E9E9] px-7 py-4"><button onClick={onClose} className="text-sm font-medium text-[#66767A] hover:text-[#102A2E]">Cancelar</button><button onClick={() => onSelect(selected)} className="inline-flex items-center gap-2 rounded-lg bg-[#008B88] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#006B6B]">Continuar <ChevronRight className="h-4 w-4" /></button></footer></div></div>;
+  const options = [{ id: 'QUALITY' as const, title: 'Calidad', description: `${campaign?.name || 'Campaña'} · cumplimiento y estándar`, icon: <ShieldCheck className="h-9 w-9" /> }, { id: 'D3C' as const, title: 'MC D+3C', description: `${campaign?.name || 'Campaña'} · diagnóstico y mejora`, icon: <TrendingUp className="h-9 w-9" /> }];
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm"><div role="dialog" aria-modal="true" className="cm-modal w-full max-w-[640px] overflow-hidden"><div className="flex items-start justify-between px-7 pb-5 pt-6"><div><p className="cm-eyebrow">{campaign?.name}</p><h2 className="text-xl font-bold">Nueva evaluación</h2><p className="mt-1 text-sm text-[var(--cm-text-secondary)]">Selecciona el tipo de evaluación que deseas realizar</p></div><button onClick={onClose} className="cm-navbar__icon-button" aria-label="Cerrar"><X className="h-5 w-5" /></button></div><div className="px-7"><p className="text-xs font-bold text-[var(--cm-text-secondary)]">Tipo de evaluación</p><div className="mt-3 grid gap-4 sm:grid-cols-2">{options.map(option => <button key={option.id} onClick={() => setSelected(option.id)} className={`relative min-h-[220px] rounded-xl border p-5 text-center transition-all ${selected === option.id ? 'border-[var(--cm-primary)] bg-[var(--cm-surface-elevated)] shadow-[0_0_0_1px_var(--cm-primary)]' : 'border-[var(--cm-border)] hover:border-[var(--cm-primary)]'}`}><span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[var(--cm-surface-elevated)] text-[var(--cm-primary)]">{option.icon}</span>{selected === option.id && <span className="absolute right-3 top-3 grid h-6 w-6 place-items-center rounded-full bg-[var(--cm-primary)] text-sm font-bold text-[#031326]">✓</span>}<strong className="mt-4 block text-[15px]">{option.title}</strong><span className="mx-auto mt-2 block max-w-[210px] text-xs leading-5 text-[var(--cm-text-secondary)]">{option.description}</span></button>)}</div></div><footer className="mt-7 flex items-center justify-between border-t border-[var(--cm-border)] px-7 py-4"><button onClick={onBack} className="cm-button-secondary px-4 py-2 text-sm">← Volver</button><button onClick={() => onSelect(selected)} className="cm-button-primary px-4 py-2.5 text-sm">Continuar <ChevronRight className="h-4 w-4" /></button></footer></div></div>;
 };
 
 export default function App() {
