@@ -566,11 +566,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       recommendation: summary.recommendation
     };
 
-    await evaluationsApi.create(newEval);
-    recentEvaluation.current = { key: submissionKey, evaluation: newEval, createdAt: Date.now() };
-    setEvaluations(prev => [newEval, ...prev.filter(item => evaluationIdentity(item) !== submissionKey)]);
+    const saved = (await evaluationsApi.create(newEval)).evaluation || newEval;
+    recentEvaluation.current = { key: submissionKey, evaluation: saved, createdAt: Date.now() };
+    setEvaluations(prev => [saved, ...prev.filter(item => evaluationIdentity(item) !== submissionKey)]);
     window.dispatchEvent(new Event('cm:data-changed'));
-    return newEval;
+    return saved;
   };
 
   const updateEvaluation = (id: string, evalData: Partial<Evaluation>) => {

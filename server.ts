@@ -293,11 +293,21 @@ async function startServer() {
     const evaluation = req.body;
     if (!evaluation?.id || !evaluation?.advisorId || !evaluation?.evaluatorId || !['QUALITY', 'D3C'].includes(evaluation?.evaluationType)) return res.status(400).json({ error: 'Evaluación inválida.' });
     const evaluatedAt = `${evaluation.date}T${evaluation.time || '00:00'}:00`;
-    const duplicate = (db.prepare('SELECT payload_json FROM evaluations WHERE advisor_id=? AND evaluation_type=? AND evaluated_at=?').all(evaluation.advisorId,evaluation.evaluationType,evaluatedAt) as any[]).map(row=>JSON.parse(row.payload_json)).find(item=>evaluationIdentity(item)===evaluationIdentity(evaluation));
-    if (duplicate) return res.status(200).json({ evaluation: duplicate, deduplicated: true });
     try {
-      if (googleStorage.enabled) await googleStorage.saveEvaluation(evaluation);
-      db.prepare(`INSERT INTO evaluations (id,advisor_id,evaluator_id,evaluation_type,evaluated_at,payload_json,created_at) VALUES (?,?,?,?,?,?,?)`).run(evaluation.id, evaluation.advisorId, evaluation.evaluatorId, evaluation.evaluationType, evaluatedAt, JSON.stringify(evaluation), evaluation.createdAt || new Date().toISOString());
+      if (googleStorage.enabled) await readRepository();
+      const localDuplicate = (db.prepare('SELECT payload_json FROM evaluations WHERE advisor_id=? AND evaluation_type=? AND evaluated_at=?').all(evaluation.advisorId,evaluation.evaluationType,evaluatedAt) as any[]).flatMap(row=>{try{return [JSON.parse(row.payload_json)];}catch{return [];}}).find(item=>evaluationIdentity(item)===evaluationIdentity(evaluation));
+      if (localDuplicate) return res.status(200).json({ evaluation: localDuplicate, deduplicated: true });
+      if (googleStorage.enabled) {
+        const remoteDuplicate = (await googleStorage.loadEvaluations()).find(item=>evaluationIdentity(item)===evaluationIdentity(evaluation));
+        if (remoteDuplicate) return res.status(200).json({ evaluation: remoteDuplicate, deduplicated: true });
+        await googleStorage.saveEvaluation(evaluation);
+      }
+      try {
+        db.prepare(`INSERT INTO evaluations (id,advisor_id,evaluator_id,evaluation_type,evaluated_at,payload_json,created_at) VALUES (?,?,?,?,?,?,?)`).run(evaluation.id, evaluation.advisorId, evaluation.evaluatorId, evaluation.evaluationType, evaluatedAt, JSON.stringify(evaluation), evaluation.createdAt || new Date().toISOString());
+      } catch (cacheError) {
+        if (!googleStorage.enabled) throw cacheError;
+        console.error('[evaluations] La evaluación se guardó remotamente, pero no pudo actualizarse la caché local.', cacheError instanceof Error ? cacheError.message : '');
+      }
       return res.status(201).json({ evaluation });
     } catch (error: any) { console.error('[google-storage] No fue posible guardar la evaluación.', error instanceof Error ? error.message : ''); return res.status(400).json({ error: error.message || 'No fue posible guardar la evaluación.' }); }
   });
