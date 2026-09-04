@@ -69,6 +69,8 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
     measurementsCount: number;
     errorCount: number;
     warningCount: number;
+    duplicateCount: number;
+    invalidCount: number;
   } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -78,10 +80,6 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
 
   // Handle file reading
   const handleProcessFile = async (file: File) => {
-    if (!selectedCampaignId) {
-      setParseError('Selecciona primero la campaña de destino para los asesores.');
-      return;
-    }
     // Validate format
     const name = file.name.toLowerCase();
     if (!name.endsWith('.xlsx') && !name.endsWith('.xls') && !name.endsWith('.csv')) {
@@ -100,6 +98,10 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
 
     try {
       const result = await parseAndValidateExcel(file, advisors, users);
+      if (!result.usesSheetCampaigns && !selectedCampaignId) {
+        setParseError('Selecciona la campaña de destino para archivos de una sola hoja.');
+        return;
+      }
       setValidationResult(result);
 
       // Initialize supervisor mappings
@@ -166,14 +168,15 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
     });
 
     const summary = importAdvisorsBatch({
-      campaignId: selectedCampaign.id,
-      campaignName: selectedCampaign.name,
+      campaignId: selectedCampaign?.id || '',
+      campaignName: selectedCampaign?.name || 'Campaña importada',
       periodName: periodName.trim() || 'Periodo Actual',
       cutoffDate,
       isBaseline,
       baselineHandling,
       fileName: validationResult.fileName,
       fileSize: validationResult.fileSize,
+      usesSheetCampaigns: validationResult.usesSheetCampaigns,
       rows: rowsWithMappedSupervisors
     });
 
@@ -188,7 +191,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
     const reportContent = {
       timestamp: new Date().toISOString(),
       archivo: validationResult.fileName,
-      campaña: selectedCampaign.name,
+      campaña: validationResult.usesSheetCampaigns ? validationResult.detectedCampaigns : [selectedCampaign?.name],
       periodo: periodName,
       fechaCorte: cutoffDate,
       resumen: {
@@ -200,6 +203,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
       filasConErrores: validationResult.rows
         .filter(r => r.status === 'ERROR')
         .map(r => ({
+          hoja: r.sheetName,
           fila: r.rowIndex,
           dni: r.dni,
           asesor: r.name,
@@ -208,6 +212,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
       filasConAdvertencias: validationResult.rows
         .filter(r => r.status === 'WARNING')
         .map(r => ({
+          hoja: r.sheetName,
           fila: r.rowIndex,
           dni: r.dni,
           asesor: r.name,
@@ -335,14 +340,14 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                      Campaña de Destino *
+                      Campaña de destino
                     </label>
                     <select
                       value={selectedCampaignId}
                       onChange={(e) => setSelectedCampaignId(e.target.value)}
                       className="w-full bg-[#F6F7F9] border border-[#E5E8EC] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#031E3C] focus:outline-none focus:ring-1 focus:ring-[#031E3C]"
                     >
-                      <option value="" disabled>Selecciona una campaña</option>
+                      <option value="">Automática según cada hoja</option>
                       {campaigns.map(c => (
                         <option key={c.id} value={c.id}>
                           {c.name} ({c.client})
@@ -499,8 +504,8 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                     </span>
                   ))}
                 </div>
-                <p className="text-[11px] text-[#667085] pt-1">
-                  💡 No distingue mayúsculas/minúsculas, puntos o acentos. Tolera valores <code>#N/D</code> en fechas y conserva el identificador DNI exacto sin alterar ceros.
+                  <p className="text-[11px] text-[#667085] pt-1">
+                  💡 En archivos con varias hojas, cada hoja se importa como una campaña. Los encabezados se leen por nombre y el DNI se conserva como identificador.
                 </p>
               </div>
 
@@ -526,7 +531,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                       </span>
                     </div>
                     <div className="text-xs text-[#667085] mt-0.5 flex items-center gap-2">
-                      <span>Campaña: <strong>{selectedCampaign.name}</strong></span>
+                      <span>Campaña: <strong>{validationResult.usesSheetCampaigns ? validationResult.detectedCampaigns.join(', ') : selectedCampaign?.name}</strong></span>
                       <span>·</span>
                       <span>Periodo: <strong>{periodName}</strong></span>
                       <span>·</span>
@@ -559,7 +564,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                       {validationResult.newCount} Nuevos
                     </span>
                     <span className="px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-md font-bold">
-                      {validationResult.updateCount} Actualizaciones
+                      {validationResult.duplicateCount} Duplicados omitidos
                     </span>
                   </div>
                 </div>
@@ -648,6 +653,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                       <th className="py-2.5 px-3">Fila</th>
                       <th className="py-2.5 px-3">DNI</th>
                       <th className="py-2.5 px-3">Asesor</th>
+                      <th className="py-2.5 px-3">Campaña</th>
                       <th className="py-2.5 px-3">Supervisor</th>
                       <th className="py-2.5 px-3">F. Ingreso</th>
                       <th className="py-2.5 px-3 text-center">
@@ -664,7 +670,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                   <tbody className="divide-y divide-[#E5E8EC]">
                     {displayedRows.map((row) => (
                       <tr 
-                        key={row.rowIndex}
+                        key={`${row.sheetName}-${row.rowIndex}`}
                         className={`transition-colors ${
                           row.status === 'ERROR' ? 'bg-rose-50/40 hover:bg-rose-50/70' :
                           row.status === 'WARNING' ? 'bg-amber-50/30 hover:bg-amber-50/60' :
@@ -683,6 +689,8 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                           {row.name || <span className="text-rose-600 italic">Vacío</span>}
                         </td>
 
+                        <td className="py-2 px-3 text-[#031E3C] font-semibold">{row.campaignName}</td>
+
                         <td className="py-2 px-3 text-[#667085] truncate max-w-[120px]">
                           {row.supervisorRaw || '-'}
                         </td>
@@ -690,6 +698,10 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                         <td className="py-2 px-3 font-mono text-[11px]">
                           {row.hireDate ? (
                             <span className="text-[#031E3C]">{row.hireDate}</span>
+                          ) : row.actionType === 'UPDATE' ? (
+                            <span className="px-1.5 py-0.5 bg-purple-100 text-purple-800 rounded font-bold text-[10px]">
+                              ACTUALIZAR
+                            </span>
                           ) : (
                             <span className="text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded text-[10px] font-semibold">
                               Pendiente
@@ -708,7 +720,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                             </span>
                           ) : (
                             <span className="px-1.5 py-0.5 bg-purple-100 text-purple-800 rounded font-bold text-[10px]">
-                              ACTUALIZAR
+                              OMITIR
                             </span>
                           )}
                         </td>
@@ -787,7 +799,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                   ¡Importación Completada con Éxito!
                 </h4>
                 <p className="text-xs text-[#667085] mt-1">
-                  Se procesaron los datos operacionales de la campaña <strong className="text-[#031E3C]">{selectedCampaign.name}</strong> para el periodo <strong className="text-[#031E3C]">{periodName}</strong>.
+                  Se procesó la dotación de <strong className="text-[#031E3C]">{validationResult?.usesSheetCampaigns ? validationResult.detectedCampaigns.length : 1} campaña(s)</strong> para el periodo <strong className="text-[#031E3C]">{periodName}</strong>.
                 </p>
               </div>
 
@@ -795,7 +807,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-left">
                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-3.5">
                   <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider block">
-                    Nuevos Asesores
+                    Nuevos importados
                   </span>
                   <span className="text-2xl font-black text-blue-900 mt-1 block">
                     {importSummary.newCount}
@@ -807,13 +819,13 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
 
                 <div className="bg-purple-50 border border-purple-200 rounded-xl p-3.5">
                   <span className="text-[10px] font-bold text-purple-700 uppercase tracking-wider block">
-                    Actualizados
+                    Duplicados omitidos
                   </span>
                   <span className="text-2xl font-black text-purple-900 mt-1 block">
-                    {importSummary.updateCount}
+                    {importSummary.duplicateCount}
                   </span>
                   <span className="text-[10px] text-purple-700 mt-0.5 block">
-                    Asesores existentes
+                    Sin sobrescribir datos
                   </span>
                 </div>
 
@@ -831,10 +843,10 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
 
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
                   <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block">
-                    Errores Omitidos
+                    Registros inválidos
                   </span>
                   <span className="text-2xl font-black text-slate-800 mt-1 block">
-                    {importSummary.errorCount}
+                    {importSummary.invalidCount}
                   </span>
                   <span className="text-[10px] text-slate-500 mt-0.5 block">
                     Filas no procesadas

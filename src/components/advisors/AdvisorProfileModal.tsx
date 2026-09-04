@@ -947,6 +947,34 @@ export const AdvisorProfileModal: React.FC<AdvisorProfileModalProps> = ({
                 Antigüedad importada
                 <input className="cm-input mt-1.5 px-3 py-2.5" value={editDraft.importedTenureLabel || ''} onChange={e => setEditDraft(prev => ({ ...prev, importedTenureLabel: e.target.value }))} />
               </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                Indicadores
+                <input className="cm-input mt-1.5 px-3 py-2.5" value={editDraft.indicators ?? ''} onChange={e => setEditDraft(prev => ({ ...prev, indicators: e.target.value }))} />
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                Condición
+                <input className="cm-input mt-1.5 px-3 py-2.5" value={editDraft.condition || ''} onChange={e => setEditDraft(prev => ({ ...prev, condition: e.target.value }))} />
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                FTE
+                <input type="number" min="0" step="0.01" className="cm-input mt-1.5 px-3 py-2.5" value={editDraft.fte ?? ''} onChange={e => setEditDraft(prev => ({ ...prev, fte: e.target.value === '' ? undefined : Number(e.target.value) }))} />
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                Modalidad
+                <input className="cm-input mt-1.5 px-3 py-2.5" value={editDraft.modality || ''} onChange={e => setEditDraft(prev => ({ ...prev, modality: e.target.value }))} />
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                Turno
+                <input className="cm-input mt-1.5 px-3 py-2.5" value={editDraft.sourceShift || ''} onChange={e => setEditDraft(prev => ({ ...prev, sourceShift: e.target.value }))} />
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                Sede
+                <input className="cm-input mt-1.5 px-3 py-2.5" value={editDraft.site || ''} onChange={e => setEditDraft(prev => ({ ...prev, site: e.target.value }))} />
+              </label>
+              <label className="font-semibold text-[var(--cm-text-secondary)]">
+                Fecha de cese
+                <input type="date" className="cm-input mt-1.5 px-3 py-2.5" value={editDraft.terminationDate || ''} onChange={e => setEditDraft(prev => ({ ...prev, terminationDate: e.target.value }))} />
+              </label>
             </div>
 
             <div className="flex justify-end gap-2 border-t border-[var(--cm-border)] pt-4">

@@ -6,6 +6,7 @@ export interface RawExcelRow {
 }
 
 export interface NormalizedAdvisorRow {
+  sheetName: string;
   rowIndex: number;
   dni: string;
   name: string;
@@ -30,10 +31,18 @@ export interface NormalizedAdvisorRow {
   ac?: string | number;
   sourcePercentage2?: string | number;
   quartile?: string;
+  sourceStatus?: string;
+  condition?: string;
+  fte?: string | number;
+  modality?: string;
+  shiftRaw?: string;
+  campaignName?: string;
+  site?: string;
+  indicators?: string | number;
   
   // Validation status
   status: 'READY' | 'WARNING' | 'ERROR';
-  actionType: 'NEW' | 'UPDATE';
+  actionType: 'NEW' | 'UPDATE' | 'SKIP';
   errors: string[];
   warnings: string[];
   existingAdvisor?: Advisor;
@@ -48,6 +57,10 @@ export interface ExcelValidationResult {
   errorRows: number;
   newCount: number;
   updateCount: number;
+  duplicateCount: number;
+  invalidCount: number;
+  usesSheetCampaigns: boolean;
+  detectedCampaigns: string[];
   rows: NormalizedAdvisorRow[];
   detectedSupervisors: Array<{
     nameRaw: string;
@@ -75,7 +88,7 @@ const HEADER_PATTERNS: Record<string, string[]> = {
   dni: ['dni', 'documento', 'docidentidad', 'cedula', 'idasesor', 'documentoidentidad', 'nrodocumento'],
   name: ['asesores', 'asesor', 'nombre', 'nombres', 'nombrecompleto', 'nombrerepresentante', 'asesorrepresentante'],
   supervisor: ['supervisor', 'supervisora', 'sup', 'teamleader', 'lider', 'coordinador'],
-  schedule: ['horario', 'turno', 'jornada', 'horariogestion', 'horariotrabajo'],
+  schedule: ['horario', 'jornada', 'horariogestion', 'horariotrabajo'],
   hireDate: ['fingreso', 'fechadeingreso', 'fechaingreso', 'fingresoempresa', 'fechaingresoempresa'],
   campaignStartDate: ['fcampana', 'fechacampana', 'fechadecampana', 'fingresocampana', 'fechaingresocampana'],
   terminationDate: ['fcese', 'fechacese', 'fechadecese', 'fegreso', 'fechasalida'],
@@ -88,7 +101,15 @@ const HEADER_PATTERNS: Record<string, string[]> = {
   pct1: ['%', 'porcentaje', 'pct', 'porcentaje1', 'pct1'],
   ac: ['ac'],
   pct2: ['%2', 'porcentaje2', 'pct2', 'porcentajeacum'],
-  quartile: ['cuartil', 'cuartilsph', 'cuartiloperacional', 'q']
+  quartile: ['cuartil', 'cuartilsph', 'cuartiloperacional', 'q'],
+  sourceStatus: ['estado'],
+  condition: ['condicion'],
+  fte: ['fte'],
+  modality: ['modalidad'],
+  shiftRaw: ['turno'],
+  campaign: ['campana'],
+  site: ['sede'],
+  indicators: ['indicadores', 'indicador']
 };
 
 export function matchHeaderToField(header: string): string | null {
@@ -110,7 +131,8 @@ export function matchHeaderToField(header: string): string | null {
   }
   if (norm.includes('asesor')) return 'name';
   if (norm.includes('supervis')) return 'supervisor';
-  if (norm.includes('horario') || norm.includes('turno')) return 'schedule';
+  if (norm.includes('horario')) return 'schedule';
+  if (norm === 'turno') return 'shiftRaw';
   if (norm.includes('antigue')) return 'tenureLabel';
   if (norm === 'sph' || norm.includes('sph')) return 'sph';
   if (norm === 'pv') return 'pv';
@@ -121,6 +143,13 @@ export function matchHeaderToField(header: string): string | null {
   if (norm === '%2' || norm === 'porcentaje2') return 'pct2';
   if (norm.includes('cuartil')) return 'quartile';
   if (norm.includes('gestion')) return 'gestion';
+  if (norm === 'estado') return 'sourceStatus';
+  if (norm.includes('condicion')) return 'condition';
+  if (norm === 'fte') return 'fte';
+  if (norm.includes('modalidad')) return 'modality';
+  if (norm === 'campana') return 'campaign';
+  if (norm === 'sede') return 'site';
+  if (norm.includes('indicador')) return 'indicators';
 
   return null;
 }
@@ -246,50 +275,10 @@ export async function parseAndValidateExcel(
     dateNF: 'yyyy-mm-dd'
   });
 
-  const firstSheetName = workbook.SheetNames[0];
-  const worksheet = workbook.Sheets[firstSheetName];
+  if (!workbook.SheetNames.length) throw new Error('El archivo seleccionado está vacío.');
 
-  // Convert worksheet to JSON array of arrays to inspect raw headers
-  const rawGrid: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
-
-  if (rawGrid.length === 0) {
-    throw new Error('El archivo seleccionado está vacío.');
-  }
-
-  // Find header row (first non-empty row)
-  let headerRowIndex = 0;
-  for (let i = 0; i < Math.min(rawGrid.length, 10); i++) {
-    const row = rawGrid[i];
-    const hasDniOrAsesor = row.some(cell => {
-      const norm = normalizeHeaderKey(String(cell));
-      return norm.includes('dni') || norm.includes('asesor') || norm.includes('supervisor');
-    });
-    if (hasDniOrAsesor) {
-      headerRowIndex = i;
-      break;
-    }
-  }
-
-  const rawHeaders = rawGrid[headerRowIndex].map(h => String(h || '').trim());
-  const columnMapping: Record<number, string> = {};
+  const usesSheetCampaigns = workbook.SheetNames.length > 1;
   const columnMappingSummary: Record<string, string> = {};
-
-  rawHeaders.forEach((h, colIdx) => {
-    if (!h) return;
-    const field = matchHeaderToField(h);
-    if (field) {
-      columnMapping[colIdx] = field;
-      columnMappingSummary[h] = field;
-    }
-  });
-
-  // Check that at least DNI or Asesor column was found
-  const mappedFields = Object.values(columnMapping);
-  if (!mappedFields.includes('dni') && !mappedFields.includes('name')) {
-    throw new Error('No se detectaron las columnas requeridas (DNI o ASESORES). Verifica que el archivo contenga las cabeceras operacionales.');
-  }
-
-  // Map supervisors for matching
   const supervisorsList = existingUsers.filter(u => u.role === 'SUPERVISOR' || u.role === 'ADMINISTRADOR');
   const supervisorCounts: Record<string, { count: number; matchedId?: string; matchedName?: string }> = {};
 
@@ -301,8 +290,34 @@ export async function parseAndValidateExcel(
   const dniSeenInFile = new Set<string>();
   const normalizedRows: NormalizedAdvisorRow[] = [];
 
-  // Parse data rows
-  for (let r = headerRowIndex + 1; r < rawGrid.length; r++) {
+  for (const sheetName of workbook.SheetNames) {
+    const worksheet = workbook.Sheets[sheetName];
+    const rawGrid: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: true });
+    if (!rawGrid.length) continue;
+
+    let headerRowIndex = -1;
+    for (let i = 0; i < Math.min(rawGrid.length, 15); i++) {
+      const normalized = rawGrid[i].map(cell => normalizeHeaderKey(String(cell)));
+      if (normalized.includes('dni') && normalized.some(value => value === 'asesor' || value === 'asesores')) {
+        headerRowIndex = i;
+        break;
+      }
+    }
+    if (headerRowIndex < 0) continue;
+
+    const columnMapping: Record<number, string> = {};
+    rawGrid[headerRowIndex].forEach((header, colIdx) => {
+      const label = String(header || '').trim();
+      const field = matchHeaderToField(label);
+      if (label && field) {
+        columnMapping[colIdx] = field;
+        columnMappingSummary[`${sheetName}: ${label}`] = field;
+      }
+    });
+    const mappedFields = Object.values(columnMapping);
+    if (!mappedFields.includes('dni') || !mappedFields.includes('name')) continue;
+
+    for (let r = headerRowIndex + 1; r < rawGrid.length; r++) {
     const rowData = rawGrid[r];
     // Check if entire row is empty
     if (!rowData || rowData.every(c => c === '' || c === null || c === undefined)) {
@@ -322,6 +337,7 @@ export async function parseAndValidateExcel(
     const supervisorRaw = String(rowObj.supervisor || '').trim();
     const schedule = rowObj.schedule ? String(rowObj.schedule).trim() : undefined;
     const importedTenureLabel = rowObj.tenureLabel ? String(rowObj.tenureLabel).trim() : undefined;
+    const campaignName = sheetName.trim();
 
     const hireDateParsed = parseExcelDate(rowObj.hireDate);
     const campaignDateParsed = parseExcelDate(rowObj.campaignStartDate);
@@ -336,7 +352,7 @@ export async function parseAndValidateExcel(
     if (!dni) {
       errors.push('DNI vacío o no detectado en la fila');
     } else if (dniSeenInFile.has(dni)) {
-      errors.push(`DNI duplicado (${dni}) dentro del mismo archivo Excel`);
+      warnings.push(`DNI duplicado (${dni}) dentro del Excel; se omitirá esta fila`);
     } else {
       dniSeenInFile.add(dni);
     }
@@ -349,8 +365,6 @@ export async function parseAndValidateExcel(
     // Validation 3: SPH
     if (!sphParsed.isValid && rowObj.sph !== undefined && rowObj.sph !== '' && rowObj.sph !== '#N/D') {
       errors.push(`SPH con formato inválido ("${rowObj.sph}")`);
-    } else if (!sphParsed.isValid) {
-      warnings.push('SPH no disponible en este archivo (se registrará como 0.00)');
     }
 
     // Warnings on dates
@@ -389,7 +403,13 @@ export async function parseAndValidateExcel(
 
     // Existing advisor check
     const existingAdvisor = dni ? existingDniMap.get(dni) : undefined;
-    const actionType: 'NEW' | 'UPDATE' = existingAdvisor ? 'UPDATE' : 'NEW';
+    const duplicateInWorkbook = Boolean(dni && dniSeenInFile.has(dni) && normalizedRows.some(item => item.dni === dni));
+    const actionType: 'NEW' | 'UPDATE' | 'SKIP' = duplicateInWorkbook
+      ? 'SKIP'
+      : existingAdvisor
+        ? (usesSheetCampaigns ? 'SKIP' : 'UPDATE')
+        : 'NEW';
+    if (existingAdvisor && usesSheetCampaigns) warnings.push('DNI ya existente; se omitirá sin sobrescribir información');
 
     let status: 'READY' | 'WARNING' | 'ERROR' = 'READY';
     if (errors.length > 0) {
@@ -399,6 +419,7 @@ export async function parseAndValidateExcel(
     }
 
     normalizedRows.push({
+      sheetName,
       rowIndex: r + 1,
       dni,
       name,
@@ -423,12 +444,25 @@ export async function parseAndValidateExcel(
       ac: rowObj.ac,
       sourcePercentage2: rowObj.pct2,
       quartile: rowObj.quartile ? String(rowObj.quartile).trim() : undefined,
+      sourceStatus: rowObj.sourceStatus ? String(rowObj.sourceStatus).trim() : undefined,
+      condition: rowObj.condition ? String(rowObj.condition).trim() : undefined,
+      fte: rowObj.fte,
+      modality: rowObj.modality ? String(rowObj.modality).trim() : undefined,
+      shiftRaw: rowObj.shiftRaw ? String(rowObj.shiftRaw).trim() : undefined,
+      campaignName,
+      site: rowObj.site ? String(rowObj.site).trim() : undefined,
+      indicators: rowObj.indicators,
       status,
       actionType,
       errors,
       warnings,
       existingAdvisor
     });
+    }
+  }
+
+  if (!normalizedRows.length) {
+    throw new Error('No se encontraron hojas con los encabezados DNI y ASESOR.');
   }
 
   // Sort rows by SPH ascending (menor a mayor SPH)
@@ -451,6 +485,8 @@ export async function parseAndValidateExcel(
   const errorRows = normalizedRows.filter(r => r.status === 'ERROR').length;
   const newCount = normalizedRows.filter(r => r.status !== 'ERROR' && r.actionType === 'NEW').length;
   const updateCount = normalizedRows.filter(r => r.status !== 'ERROR' && r.actionType === 'UPDATE').length;
+  const duplicateCount = normalizedRows.filter(r => r.actionType === 'SKIP').length;
+  const invalidCount = normalizedRows.filter(r => r.status === 'ERROR').length;
 
   return {
     fileName: file.name,
@@ -461,6 +497,10 @@ export async function parseAndValidateExcel(
     errorRows,
     newCount,
     updateCount,
+    duplicateCount,
+    invalidCount,
+    usesSheetCampaigns,
+    detectedCampaigns: workbook.SheetNames.filter(name => normalizedRows.some(row => row.sheetName === name)),
     rows: normalizedRows,
     detectedSupervisors,
     columnMappingSummary

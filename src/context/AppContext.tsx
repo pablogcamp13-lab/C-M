@@ -125,6 +125,7 @@ interface AppContextType {
     baselineHandling: 'KEEP' | 'REPLACE';
     fileName: string;
     fileSize: number;
+    usesSheetCampaigns?: boolean;
     rows: any[];
   }) => {
     newCount: number;
@@ -132,6 +133,8 @@ interface AppContextType {
     measurementsCount: number;
     errorCount: number;
     warningCount: number;
+    duplicateCount: number;
+    invalidCount: number;
   };
   deleteImportHistoryLog: (id: string) => void;
 
@@ -776,9 +779,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     baselineHandling: 'KEEP' | 'REPLACE';
     fileName: string;
     fileSize: number;
+    usesSheetCampaigns?: boolean;
     rows: any[];
   }) => {
-    const validRows = payload.rows.filter(r => r.status !== 'ERROR');
+    const validRows = payload.rows.filter(r => r.status !== 'ERROR' && r.actionType !== 'SKIP');
     const existingDniMap = new Map<string, Advisor>();
     advisors.forEach(a => {
       if (a.dni) existingDniMap.set(a.dni.trim(), a);
@@ -793,14 +797,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const advisorsToUpdate: Advisor[] = [];
     const usersToAdd: User[] = [];
     const measurementsToAdd: OperationalMeasurement[] = [];
+    const campaignsToAdd: Campaign[] = [];
+    const teamsToAdd: Team[] = [];
+
+    const normalizeCampaign = (value: string) => value.trim().toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const campaignByName = new Map<string, Campaign>(campaigns.map(campaign => [normalizeCampaign(campaign.name), campaign]));
+    if (payload.usesSheetCampaigns) {
+      payload.rows.filter(row => row.status !== 'ERROR').forEach(row => {
+        const name = String(row.campaignName || row.sheetName || '').trim();
+        const key = normalizeCampaign(name);
+        if (!name || campaignByName.has(key)) return;
+        const id = `camp_excel_${nowTimestamp}_${campaignsToAdd.length}`;
+        const campaign: Campaign = { id, name, client: name, status: 'ACTIVA', products: [] };
+        campaignsToAdd.push(campaign);
+        campaignByName.set(key, campaign);
+      });
+    }
 
     // Fallback supervisor and team
     const defaultSupervisor = users.find(u => u.role === 'SUPERVISOR') || users[0];
-    const defaultTeam = teams[0] || { id: 'team_default', name: 'Equipo Operaciones' };
 
     validRows.forEach((row, index) => {
       const existingAdv = existingDniMap.get(row.dni);
       const rowSph = typeof row.sph === 'number' ? row.sph : 0.00;
+      const rowCampaign = payload.usesSheetCampaigns
+        ? campaignByName.get(normalizeCampaign(String(row.campaignName || row.sheetName || '')))
+        : undefined;
+      const campaignId = rowCampaign?.id || payload.campaignId;
+      const campaignName = rowCampaign?.name || payload.campaignName;
+      let campaignTeam = teams.find(team => team.campaignId === campaignId);
+      if (!campaignTeam) {
+        campaignTeam = teamsToAdd.find(team => team.campaignId === campaignId);
+      }
+      if (!campaignTeam) {
+        campaignTeam = {
+          id: `team_excel_${nowTimestamp}_${teamsToAdd.length}`,
+          campaignId,
+          supervisorId: row.supervisorId || defaultSupervisor.id,
+          name: `Equipo ${campaignName}`
+        };
+        teamsToAdd.push(campaignTeam);
+      }
 
       if (!existingAdv) {
         // Create new advisor
@@ -813,20 +850,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           dni: row.dni,
           employeeCode: newEmployeeCode,
           name: row.name,
-          campaignId: payload.campaignId,
-          teamId: defaultTeam.id,
+          campaignId,
+          teamId: campaignTeam.id,
           supervisorId: row.supervisorId || defaultSupervisor.id,
           supervisor: row.supervisorRaw || defaultSupervisor.name,
           schedule: row.schedule || 'COMPLETO',
-          shift: 'COMPLETO',
-          status: row.terminationDate ? 'INACTIVO' : 'ACTIVO',
+          shift: /tarde|noche/i.test(row.shiftRaw || '') ? 'TARDE' : /mañana|manana/i.test(row.shiftRaw || '') ? 'MANANA' : 'COMPLETO',
+          status: row.terminationDate || /inactivo|cesado/i.test(row.sourceStatus || '') ? 'INACTIVO' : 'ACTIVO',
           hireDate: row.hireDate || '',
           hireDatePending: Boolean(row.hireDatePending),
           campaignStartDate: row.campaignStartDate,
           campaignStartDatePending: Boolean(!row.campaignStartDate),
           terminationDate: row.terminationDate,
           importedTenureLabel: row.importedTenureLabel,
-          active: !row.terminationDate,
+          quartile: row.quartile || undefined,
+          condition: row.condition,
+          fte: row.fte,
+          modality: row.modality,
+          sourceShift: row.shiftRaw,
+          site: row.site,
+          indicators: row.indicators,
+          active: !(row.terminationDate || /inactivo|cesado/i.test(row.sourceStatus || '')),
 
           // Operational Baseline
           hasOperationalBaseline: true,
@@ -861,8 +905,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           dni: newAdvisor.dni,
           measurementDate: payload.cutoffDate,
           periodName: payload.periodName,
-          campaignId: payload.campaignId,
-          campaignName: payload.campaignName,
+          campaignId,
+          campaignName,
           connectionTime: 'Pendiente',
           connectionMinutes: 0,
           sph: rowSph,
@@ -878,12 +922,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           comments: `Importación Excel (${payload.fileName})`,
           createdAt: isoNow
         });
-
-      } else {
-        // Update existing advisor operational fields
+      } else if (row.actionType === 'UPDATE') {
         updateCount++;
         const updatedAdvisor: Advisor = { ...existingAdv };
-
         if (row.schedule) updatedAdvisor.schedule = row.schedule;
         if (row.supervisorId) updatedAdvisor.supervisorId = row.supervisorId;
         if (row.supervisorRaw) updatedAdvisor.supervisor = row.supervisorRaw;
@@ -892,28 +933,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           updatedAdvisor.status = 'INACTIVO';
           updatedAdvisor.active = false;
         }
-
-        // Handle baseline logic or latest SPH
-        if (payload.isBaseline || updatedAdvisor.baselineSph === undefined) {
-          if (!updatedAdvisor.hasOperationalBaseline || payload.baselineHandling === 'REPLACE' || updatedAdvisor.baselineSph === undefined) {
-            updatedAdvisor.hasOperationalBaseline = true;
-            updatedAdvisor.baselineSph = rowSph;
-            updatedAdvisor.baselineDate = payload.cutoffDate;
-            updatedAdvisor.baselinePeriod = payload.periodName;
-          }
+        if ((payload.isBaseline || updatedAdvisor.baselineSph === undefined) && (!updatedAdvisor.hasOperationalBaseline || payload.baselineHandling === 'REPLACE' || updatedAdvisor.baselineSph === undefined)) {
+          updatedAdvisor.hasOperationalBaseline = true;
+          updatedAdvisor.baselineSph = rowSph;
+          updatedAdvisor.baselineDate = payload.cutoffDate;
+          updatedAdvisor.baselinePeriod = payload.periodName;
         }
-
         advisorsToUpdate.push(updatedAdvisor);
-
-        // Create Operational Measurement for existing advisor
         measurementsToAdd.push({
           id: `opm_${nowTimestamp}_${index}`,
           advisorId: existingAdv.id,
           dni: existingAdv.dni,
           measurementDate: payload.cutoffDate,
           periodName: payload.periodName,
-          campaignId: payload.campaignId,
-          campaignName: payload.campaignName,
+          campaignId,
+          campaignName,
           connectionTime: 'Pendiente',
           connectionMinutes: 0,
           sph: rowSph,
@@ -937,9 +971,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setAdvisors(prev => [...prev, ...advisorsToAdd]);
     }
     if (advisorsToUpdate.length > 0) {
-      const updateMap = new Map(advisorsToUpdate.map(a => [a.id, a]));
-      setAdvisors(prev => prev.map(a => updateMap.get(a.id) || a));
+      const updateMap = new Map(advisorsToUpdate.map(advisor => [advisor.id, advisor]));
+      setAdvisors(prev => prev.map(advisor => updateMap.get(advisor.id) || advisor));
     }
+    if (campaignsToAdd.length > 0) setCampaigns(prev => [...prev, ...campaignsToAdd]);
+    if (teamsToAdd.length > 0) setTeams(prev => [...prev, ...teamsToAdd]);
     if (usersToAdd.length > 0) {
       setUsers(prev => [...prev, ...usersToAdd]);
     }
@@ -954,7 +990,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       fileName: payload.fileName,
       fileSize: payload.fileSize,
       user: currentUser.name,
-      campaign: payload.campaignName,
+      campaign: payload.usesSheetCampaigns ? [...new Set(payload.rows.filter(row => row.status !== 'ERROR').map(row => row.campaignName))].join(', ') : payload.campaignName,
       period: payload.periodName,
       cutoffDate: payload.cutoffDate,
       isBaseline: payload.isBaseline,
@@ -964,6 +1000,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       rowsErrors: payload.rows.filter(r => r.status === 'ERROR').length,
       newAdvisorsCount: newCount,
       updatedAdvisorsCount: updateCount,
+      duplicatesOmittedCount: payload.rows.filter(r => r.actionType === 'SKIP').length,
       operationalMeasurementsCount: measurementsToAdd.length,
       errorsList: payload.rows.filter(r => r.status === 'ERROR').map(r => ({
         row: r.rowIndex,
@@ -986,7 +1023,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updateCount,
       measurementsCount: measurementsToAdd.length,
       errorCount: payload.rows.filter(r => r.status === 'ERROR').length,
-      warningCount: payload.rows.filter(r => r.status === 'WARNING').length
+      warningCount: payload.rows.filter(r => r.status === 'WARNING').length,
+      duplicateCount: payload.rows.filter(r => r.actionType === 'SKIP').length,
+      invalidCount: payload.rows.filter(r => r.status === 'ERROR').length
     };
   };
 

@@ -81,6 +81,12 @@ export interface Advisor {
   campaignStartDatePending?: boolean;
   terminationDate?: string; // YYYY-MM-DD (F. CESE)
   importedTenureLabel?: string; // ANTIGÜEDAD from Excel (for traceability)
+  condition?: string;
+  fte?: number | string;
+  modality?: string;
+  sourceShift?: string;
+  site?: string;
+  indicators?: number | string;
   avatar?: string;
   active?: boolean;
 
@@ -139,6 +145,7 @@ export interface ImportHistoryLog {
   rowsErrors: number;
   newAdvisorsCount: number;
   updatedAdvisorsCount: number;
+  duplicatesOmittedCount?: number;
   operationalMeasurementsCount: number;
   errorsList?: Array<{ row: number; dni: string; advisor: string; reason: string }>;
   warningsList?: Array<{ row: number; dni: string; advisor: string; reason: string }>;
