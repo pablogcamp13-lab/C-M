@@ -68,6 +68,7 @@ export interface Advisor {
   employeeCode: string;
   name: string;
   campaignId: string;
+  sourceCampaignName?: string;
   teamId: string;
   supervisorId: string;
   supervisor?: string;

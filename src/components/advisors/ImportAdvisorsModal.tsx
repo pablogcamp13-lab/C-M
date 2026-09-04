@@ -58,6 +58,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
 
   // Supervisor mapping adjustments in Step 2
   const [supervisorOverrides, setSupervisorOverrides] = useState<Record<string, string>>({});
+  const [campaignMappings, setCampaignMappings] = useState<Record<string, string>>({});
 
   // Filter in preview table
   const [previewFilter, setPreviewFilter] = useState<'ALL' | 'READY' | 'WARNING' | 'ERROR'>('ALL');
@@ -103,6 +104,11 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
         return;
       }
       setValidationResult(result);
+      const normalized = (value: string) => value.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      setCampaignMappings(Object.fromEntries(result.detectedCampaigns.map(name => [
+        name,
+        campaigns.find(campaign => normalized(campaign.name) === normalized(name))?.id || '__NEW__'
+      ])));
 
       // Initialize supervisor mappings
       const initialMap: Record<string, string> = {};
@@ -177,6 +183,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
       fileName: validationResult.fileName,
       fileSize: validationResult.fileSize,
       usesSheetCampaigns: validationResult.usesSheetCampaigns,
+      campaignMappings,
       rows: rowsWithMappedSupervisors
     });
 
@@ -568,6 +575,24 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                     </span>
                   </div>
                 </div>
+
+                {validationResult.usesSheetCampaigns && (
+                  <div className="mt-3 grid gap-2 border-t border-[#E5E8EC] pt-3 sm:grid-cols-2">
+                    {validationResult.detectedCampaigns.map(sourceName => (
+                      <label key={sourceName} className="text-[11px] font-semibold text-slate-700">
+                        Origen Excel: <strong>{sourceName}</strong>
+                        <select
+                          value={campaignMappings[sourceName] || '__NEW__'}
+                          onChange={event => setCampaignMappings(previous => ({ ...previous, [sourceName]: event.target.value }))}
+                          className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-2.5 py-1.5 text-xs font-semibold text-[#031E3C]"
+                        >
+                          <option value="__NEW__">Crear nueva: {sourceName}</option>
+                          {campaigns.map(campaign => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                )}
 
                 {/* Supervisor Mapping Alert & Selector */}
                 {validationResult.detectedSupervisors.some(s => !s.matchedUserId) && (

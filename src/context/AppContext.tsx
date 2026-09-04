@@ -126,6 +126,7 @@ interface AppContextType {
     fileName: string;
     fileSize: number;
     usesSheetCampaigns?: boolean;
+    campaignMappings?: Record<string, string>;
     rows: any[];
   }) => {
     newCount: number;
@@ -780,6 +781,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     fileName: string;
     fileSize: number;
     usesSheetCampaigns?: boolean;
+    campaignMappings?: Record<string, string>;
     rows: any[];
   }) => {
     const validRows = payload.rows.filter(r => r.status !== 'ERROR' && r.actionType !== 'SKIP');
@@ -805,6 +807,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (payload.usesSheetCampaigns) {
       payload.rows.filter(row => row.status !== 'ERROR').forEach(row => {
         const name = String(row.campaignName || row.sheetName || '').trim();
+        const mappedId = payload.campaignMappings?.[name];
+        if (mappedId && mappedId !== '__NEW__') return;
         const key = normalizeCampaign(name);
         if (!name || campaignByName.has(key)) return;
         const id = `camp_excel_${nowTimestamp}_${campaignsToAdd.length}`;
@@ -821,7 +825,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const existingAdv = existingDniMap.get(row.dni);
       const rowSph = typeof row.sph === 'number' ? row.sph : 0.00;
       const rowCampaign = payload.usesSheetCampaigns
-        ? campaignByName.get(normalizeCampaign(String(row.campaignName || row.sheetName || '')))
+        ? campaigns.find(campaign => campaign.id === payload.campaignMappings?.[String(row.campaignName || row.sheetName || '')])
+          || campaignByName.get(normalizeCampaign(String(row.campaignName || row.sheetName || '')))
         : undefined;
       const campaignId = rowCampaign?.id || payload.campaignId;
       const campaignName = rowCampaign?.name || payload.campaignName;
@@ -851,6 +856,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           employeeCode: newEmployeeCode,
           name: row.name,
           campaignId,
+          sourceCampaignName: row.campaignName || row.sheetName,
           teamId: campaignTeam.id,
           supervisorId: row.supervisorId || defaultSupervisor.id,
           supervisor: row.supervisorRaw || defaultSupervisor.name,
