@@ -76,6 +76,7 @@ export const QualityEvaluationModal: React.FC<{
   const team = teams.find((t) => t.id === advisor?.teamId);
   const evaluators = users.filter((u) => u.role !== "ASESOR");
   const campaign = campaigns.find((c) => c.id === advisor?.campaignId);
+  const isMigracionesBitelCampaign = /(?:migraciones.*bitel|bitel.*migraciones)/i.test(campaign?.name || "");
   const criterionWeights = campaign?.qualityCriterionWeights || QUALITY_WEIGHTS;
   const criterionWeight = (value: string) => criterionWeights[value as keyof typeof criterionWeights] || 0;
   const criticalErrors = (campaign?.qualityCriticalErrors?.length
@@ -117,15 +118,18 @@ export const QualityEvaluationModal: React.FC<{
     const invalid =
       critical.length > 0 ||
       guidelines.some((a) => (a.critical || a.classification?.startsWith("CRITICO_")) && answers[a.id] === "NO_CUMPLE");
+    const failedByMinimum = isMigracionesBitelCampaign && denom > 0 && Math.round((base / denom) * 100) < 75;
     return {
       groups,
       invalid,
+      failed: invalid || failedByMinimum,
+      failedByMinimum,
       score: denom ? Math.round((base / denom) * 100) : null,
       obtained: Math.round(base * 100),
       denominator: Math.round(denom * 100),
       answered: denom > 0,
     };
-  }, [answers, critical, guidelines, criterionWeights]);
+  }, [answers, critical, guidelines, criterionWeights, isMigracionesBitelCampaign]);
   const update = (id: string, value: Result) => {
     setAnswers((p) => ({ ...p, [id]: value }));
     setDraftSaved(false);
@@ -394,7 +398,7 @@ export const QualityEvaluationModal: React.FC<{
                   </p>
                 </div>
                 <div
-                  className={`flex h-14 w-14 items-center justify-center rounded-full border-[8px] text-xs font-bold ${summary.invalid ? "border-[#FF4D4F] text-[#FF4D4F]" : "border-[#00B8B0] text-[#006B6B]"}`}
+                  className={`flex h-14 w-14 items-center justify-center rounded-full border-[8px] text-xs font-bold ${summary.failed ? "border-[#FF4D4F] text-[#FF4D4F]" : "border-[#00B8B0] text-[#006B6B]"}`}
                 >
                   {summary.score === null ? "—" : `${summary.score}%`}
                 </div>
@@ -409,9 +413,9 @@ export const QualityEvaluationModal: React.FC<{
                   </span>
                 ))}
               </div>
-              {summary.invalid && (
+              {summary.failed && (
                 <p className="mt-2 text-xs font-bold text-[#FF4D4F]">
-                  Resultado: REPROBADA · Error crítico.
+                  Resultado: REPROBADA · {summary.invalid ? 'Error crítico.' : 'Puntaje menor al 75%.'}
                 </p>
               )}
             </aside>
@@ -639,7 +643,7 @@ export const QualityEvaluationModal: React.FC<{
               >
                 {summary.score === null ? "—" : `${summary.score}%`}
               </strong>
-              {summary.invalid && <span className="ml-3 text-xs font-bold text-[#FF4D4F]">REPROBADA</span>}
+              {summary.failed && <span className="ml-3 text-xs font-bold text-[#FF4D4F]">REPROBADA</span>}
             </div>
             <span className="hidden text-xs text-[#66767A] md:block">
               {draftSaved

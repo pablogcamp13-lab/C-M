@@ -5,6 +5,7 @@ import {
   Team, 
   Advisor, 
   Evaluation, 
+  EvaluationItem,
   ActionPlan, 
   Intervention, 
   AdvisorIntervention, 
@@ -534,10 +535,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (recentEvaluation.current?.key === submissionKey && Date.now() - recentEvaluation.current.createdAt < 30000) return recentEvaluation.current.evaluation;
     const quality = evalData.evaluationType === 'QUALITY';
     const qualityScore = (criterion: string) => {
-      const entries = evalData.items.filter(item => item.dimension === criterion && item.compliance !== 'NO_APLICA');
+      const entries = evalData.items.filter(item => item.dimension === criterion && ['CUMPLE', 'NO_CUMPLE'].includes(item.compliance || ''));
       if (!entries.length) return null;
-      const totalWeight = entries.reduce((sum, item) => sum + Number(item.percentage === undefined ? 1 : (item as any).attributeWeight || 1), 0);
-      const passedWeight = entries.filter(item => item.compliance === 'CUMPLE').reduce((sum, item) => sum + Number((item as any).attributeWeight || 1), 0);
+      const itemWeight = (item: EvaluationItem) => Number((item as any).attributeWeight ?? item.qualityGuideline?.weight ?? 1);
+      const totalWeight = entries.reduce((sum, item) => sum + itemWeight(item), 0);
+      const passedWeight = entries.filter(item => item.compliance === 'CUMPLE').reduce((sum, item) => sum + itemWeight(item), 0);
       return Math.round((passedWeight / totalWeight) * 100);
     };
     const criticalItem = evalData.items.find(item => item.compliance === 'NO_CUMPLE' && (item.qualityGuideline?.critical || item.classification?.startsWith('CRITICO_')));
@@ -547,6 +549,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const qualityKeys: Array<'C1' | 'C2' | 'C3' | 'C4'> = ['C1', 'C2', 'C3', 'C4'];
     const activeQualityWeight = qualityScores ? qualityKeys.reduce((sum, key) => sum + (qualityScores[key] === null ? 0 : qualityWeights[key]), 0) : 0;
     const rawQualityTotal = qualityScores && activeQualityWeight ? Math.round(qualityKeys.reduce((sum, key) => sum + (qualityScores[key] === null ? 0 : Number(qualityScores[key]) * qualityWeights[key]), 0) / activeQualityWeight) : null;
+    const qualityCampaign = campaigns.find(campaign => campaign.id === evalData.campaignId);
+    const failedByMinimum = Boolean(quality && /(?:migraciones.*bitel|bitel.*migraciones)/i.test(qualityCampaign?.name || '') && (rawQualityTotal ?? 0) < 75);
     const summary = quality ? { scoreConnect: qualityScores!.C1, scoreClarify: qualityScores!.C2, scoreConvert: qualityScores!.C3, scoreTotal: criticalFailure ? 0 : rawQualityTotal, primaryGap: criticalFailure ? 'Error crítico PUE' : 'PUE', secondaryGap: '', strongestPillar: '', recommendation: criticalFailure ? 'Corregir error crítico antes de nueva evaluación.' : 'Revisar atributos no cumplidos.' } : calculateEvaluationSummary(evalData.items, config);
     const newEval: Evaluation = {
       ...evalData,
@@ -558,8 +562,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       scoreConvert: summary.scoreConvert,
       scoreTotal: summary.scoreTotal,
       technicalScore: quality ? rawQualityTotal : undefined,
-      qualityResult: quality ? (criticalFailure ? 'REPROBADA' : 'APROBADA') : undefined,
-      criticalReason: quality && criticalFailure ? (evalData.qualityCriticalErrorSnapshot?.[0]?.name || criticalItem?.classification?.replaceAll('_', ' ') || 'Error crítico') : undefined,
+      qualityResult: quality ? (criticalFailure || failedByMinimum ? 'REPROBADA' : 'APROBADA') : undefined,
+      criticalReason: quality && criticalFailure ? (evalData.qualityCriticalErrorSnapshot?.[0]?.name || criticalItem?.classification?.replaceAll('_', ' ') || 'Error crítico') : failedByMinimum ? 'Puntaje menor al mínimo aprobatorio de 75%' : undefined,
       primaryGap: summary.primaryGap,
       secondaryGap: summary.secondaryGap,
       strongestPillar: summary.strongestPillar,

@@ -50,6 +50,24 @@ const publicUser = (row: any): User => ({ id: row.id, name: row.name, email: row
 const evaluationIdentity = (item: any) => [item?.advisorId, item?.evaluationType, item?.date, item?.time, item?.callId || item?.recordingCode || item?.id].join('|');
 const uniqueEvaluations = (items: any[] = []) => { const seen = new Set<string>(); return items.filter(item => { const key=evaluationIdentity(item); if(seen.has(key)) return false; seen.add(key); return true; }); };
 const normalizePlatformState = (state: any) => state ? { ...state, evaluations: uniqueEvaluations(state.evaluations || []) } : state;
+const isMigracionesBitel = (campaign?: Campaign) => /(?:migraciones.*bitel|bitel.*migraciones)/i.test(campaign?.name || '');
+const correctMigracionesQualityEvaluation = (evaluation: any, campaigns: Campaign[]) => {
+  if (evaluation?.evaluationType !== 'QUALITY' || !isMigracionesBitel(campaigns.find(item => item.id === evaluation.campaignId))) return evaluation;
+  const weights = campaigns.find(item => item.id === evaluation.campaignId)?.qualityCriterionWeights || { C1: .30, C2: .30, C3: .30, C4: .10 };
+  const dimensions: Record<string,string> = { C1:'CONECTAR', C2:'CLARIFICAR', C3:'CONVERTIR', C4:'CONECTAR_C4' };
+  const groups = Object.entries(dimensions).map(([criterion,dimension]) => {
+    const rows = (evaluation.items || []).filter((item:any) => item.dimension === dimension && ['CUMPLE','NO_CUMPLE'].includes(item.compliance));
+    const denominator = rows.reduce((sum:number,item:any) => sum + Number(item.attributeWeight || item.qualityGuideline?.weight || 1), 0);
+    const achieved = rows.filter((item:any) => item.compliance === 'CUMPLE').reduce((sum:number,item:any) => sum + Number(item.attributeWeight || item.qualityGuideline?.weight || 1), 0);
+    return { criterion, score: denominator ? achieved / denominator * 100 : null, weight: Number((weights as any)[criterion] || 0) };
+  });
+  const activeWeight = groups.reduce((sum,item) => sum + (item.score === null ? 0 : item.weight), 0);
+  const recalculated = activeWeight ? Math.round(groups.reduce((sum,item) => sum + (item.score === null ? 0 : item.score * item.weight), 0) / activeWeight) : Number(evaluation.technicalScore ?? evaluation.scoreTotal ?? 0);
+  const criticalItem = (evaluation.items || []).find((item:any) => item.compliance === 'NO_CUMPLE' && (item.qualityGuideline?.critical || String(item.classification || '').startsWith('CRITICO_')));
+  const criticalFailure = Boolean(evaluation.qualityCriticalErrorIds?.length || criticalItem);
+  const failedByScore = recalculated < 75;
+  return { ...evaluation, technicalScore: recalculated, scoreTotal: criticalFailure ? 0 : recalculated, qualityResult: criticalFailure || failedByScore ? 'REPROBADA' : 'APROBADA', criticalReason: criticalFailure ? (evaluation.criticalReason || evaluation.qualityCriticalErrorSnapshot?.[0]?.name || 'Error crítico') : failedByScore ? 'Puntaje menor al mínimo aprobatorio de 75%' : undefined };
+};
 
 async function cleanupEvaluationDuplicates() {
   const rows = db.prepare('SELECT id,payload_json FROM evaluations ORDER BY created_at DESC').all() as any[];
@@ -290,11 +308,12 @@ async function startServer() {
   });
   app.post('/api/evaluations', requireAuth, async (req, res) => {
     if (!['ADMINISTRADOR','CONSULTOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'Solo Calidad o Administración puede crear evaluaciones.' });
-    const evaluation = req.body;
+    let evaluation = req.body;
     if (!evaluation?.id || !evaluation?.advisorId || !evaluation?.evaluatorId || !['QUALITY', 'D3C'].includes(evaluation?.evaluationType)) return res.status(400).json({ error: 'Evaluación inválida.' });
     const evaluatedAt = `${evaluation.date}T${evaluation.time || '00:00'}:00`;
     try {
-      if (googleStorage.enabled) await readRepository();
+      const directory = googleStorage.enabled ? await readRepository() : repository();
+      evaluation = correctMigracionesQualityEvaluation(evaluation, directory.campaigns);
       const localDuplicate = (db.prepare('SELECT payload_json FROM evaluations WHERE advisor_id=? AND evaluation_type=? AND evaluated_at=?').all(evaluation.advisorId,evaluation.evaluationType,evaluatedAt) as any[]).flatMap(row=>{try{return [JSON.parse(row.payload_json)];}catch{return [];}}).find(item=>evaluationIdentity(item)===evaluationIdentity(evaluation));
       if (localDuplicate) return res.status(200).json({ evaluation: localDuplicate, deduplicated: true });
       if (googleStorage.enabled) {
@@ -373,14 +392,22 @@ async function startServer() {
       if (googleStorage.enabled) {
         const [state, storedEvaluations] = await Promise.all([googleStorage.loadPlatformState(), googleStorage.loadEvaluations()]);
         const consolidated = normalizePlatformState({ ...(state || {}), evaluations: uniqueEvaluations([...(storedEvaluations || []), ...(state?.evaluations || [])]) });
-        return res.json({ state: onlyOwn(consolidated) });
+        const corrected = { ...consolidated, evaluations: consolidated.evaluations.map((evaluation:any) => correctMigracionesQualityEvaluation(evaluation, directory.campaigns)) };
+        const changed = corrected.evaluations.filter((evaluation:any,index:number) => JSON.stringify(evaluation) !== JSON.stringify(consolidated.evaluations[index]));
+        if (changed.length) await Promise.all([...changed.map((evaluation:any) => googleStorage.saveEvaluation(evaluation)), googleStorage.savePlatformState(corrected)]);
+        return res.json({ state: onlyOwn(corrected) });
       }
     }
     catch (error) { console.error('[google-storage] No fue posible leer el estado de plataforma.', error instanceof Error ? error.message : ''); }
     const row = db.prepare('SELECT payload_json FROM app_state WHERE id=?').get('global') as any;
     const state = row ? JSON.parse(String(row.payload_json)) : {};
     const storedEvaluations = (db.prepare('SELECT payload_json FROM evaluations ORDER BY created_at DESC').all() as any[]).flatMap(item => { try { return [JSON.parse(item.payload_json)]; } catch { return []; } });
-    res.json({ state: onlyOwn(normalizePlatformState({ ...state, evaluations: uniqueEvaluations([...storedEvaluations, ...(state.evaluations || [])]) })) });
+    const consolidated = normalizePlatformState({ ...state, evaluations: uniqueEvaluations([...storedEvaluations, ...(state.evaluations || [])]) });
+    const corrected = { ...consolidated, evaluations: consolidated.evaluations.map((evaluation:any) => correctMigracionesQualityEvaluation(evaluation, directory.campaigns)) };
+    const updateEvaluationCache = db.prepare('UPDATE evaluations SET payload_json=? WHERE id=?');
+    corrected.evaluations.forEach((evaluation:any) => updateEvaluationCache.run(JSON.stringify(evaluation), evaluation.id));
+    if (row) db.prepare('UPDATE app_state SET payload_json=?,updated_at=? WHERE id=?').run(JSON.stringify(corrected), new Date().toISOString(), 'global');
+    res.json({ state: onlyOwn(corrected) });
   });
   app.put('/api/platform-state', requireAuth, async (req, res) => {
     if (['ASESOR','SUPERVISOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'Este rol no puede sobrescribir el estado global.' });
