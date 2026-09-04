@@ -5,6 +5,7 @@ import { ThreeScore } from '../common/ThreeScore';
 import { StatusBadge } from '../common/StatusBadge';
 import { classifyPriority, calculateAdvisorTenure } from '../../utils/calculations';
 import { ImportAdvisorsModal } from './ImportAdvisorsModal';
+import { CampaignManagerModal } from './CampaignManagerModal';
 import { 
   Users, 
   UserPlus, 
@@ -19,7 +20,8 @@ import {
   History,
   Activity,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  PanelsTopLeft
 } from 'lucide-react';
 
 interface AdvisorsListProps {
@@ -31,10 +33,11 @@ export const AdvisorsList: React.FC<AdvisorsListProps> = ({
   onSelectAdvisor, 
   onOpenNewAdvisor 
 }) => {
-  const { filteredAdvisors, filteredEvaluations, users, teams, campaigns, config, actionPlans, importHistory, operationalMeasurements, updateAdvisor, deleteAdvisor } = useApp();
+  const { currentUser, filteredAdvisors, filteredEvaluations, users, teams, campaigns, config, actionPlans, importHistory, operationalMeasurements, updateAdvisor, deleteAdvisor } = useApp();
   const [sortField, setSortField] = useState<'name' | 'score' | 'supervisor' | 'evals' | 'tenure' | 'sph'>('score');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
+  const [isCampaignManagerOpen, setIsCampaignManagerOpen] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
   const [advisorToDelete, setAdvisorToDelete] = useState<{ id: string; name: string; dni: string } | null>(null);
 
@@ -141,6 +144,7 @@ export const AdvisorsList: React.FC<AdvisorsListProps> = ({
 
           {/* Action Buttons: Importar Excel (Secundaria) + Nuevo Asesor (Principal) */}
           <div className="flex items-center gap-2">
+            {currentUser.role === 'ADMINISTRADOR' && <button type="button" onClick={() => setIsCampaignManagerOpen(true)} className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-[#031E3C] border border-[#E5E8EC] px-3.5 py-2 rounded-lg text-xs font-semibold"><PanelsTopLeft className="w-3.5 h-3.5 text-[#FF6B00]" />Gestionar campañas</button>}
             
             {/* Historial de Cargas Button */}
             {importHistory.length > 0 && (
@@ -451,6 +455,7 @@ export const AdvisorsList: React.FC<AdvisorsListProps> = ({
           onSuccess={() => setIsImportModalOpen(false)}
         />
       )}
+      {isCampaignManagerOpen && <CampaignManagerModal onClose={() => setIsCampaignManagerOpen(false)} />}
 
       {/* History Modal */}
       {showHistoryModal && (

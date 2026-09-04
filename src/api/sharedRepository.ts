@@ -51,6 +51,13 @@ export const adminUsersApi = {
   async remove(id: string) { await json(await fetch(`/api/admin/users/${id}`, { method: 'DELETE', headers: headers() })); }
 };
 
+export const adminCampaignsApi = {
+  async remove(id: string) {
+    const response = await fetch(`/api/admin/campaigns/${id}`, { method: 'DELETE', headers: headers() });
+    if (!response.ok) throw new Error((await response.json()).error || 'No se pudo eliminar la campaña.');
+  }
+};
+
 export const sharedRepositoryApi = {
   async migrate(repository: SharedRepository) {
     return json<{ repository: SharedRepository }>(await fetch('/api/shared-repository/migrate', {

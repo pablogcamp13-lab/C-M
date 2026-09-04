@@ -212,7 +212,7 @@ const MainLayout: React.FC = () => {
   );
 };
 
-const campaignImage = (campaign: Campaign) => /retenciones/i.test(campaign.name) ? '/home/mejora-continua.png' : '/home/calidad.png';
+const campaignImage = (campaign: Campaign) => campaign.backgroundImage || (/retenciones/i.test(campaign.name) ? '/home/mejora-continua.png' : '/home/calidad.png');
 
 const CampaignPicker: React.FC<{ onSelect: (campaignId: string) => void; onClose: () => void }> = ({ onSelect, onClose }) => {
   const { campaigns } = useApp();

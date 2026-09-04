@@ -29,7 +29,7 @@ import {
 } from '../data/initialData';
 import { INITIAL_INTERVENTIONS } from '../data/interventionsData';
 import { calculateEvaluationSummary, parseTimeToMinutes, formatMinutesToHHMM } from '../utils/calculations';
-import { adminUsersApi, authApi, evaluationsApi, platformStateApi, sharedRepositoryApi } from '../api/sharedRepository';
+import { adminCampaignsApi, adminUsersApi, authApi, evaluationsApi, platformStateApi, sharedRepositoryApi } from '../api/sharedRepository';
 import { QUALITY_WEIGHTS } from '../data/qualityPueData';
 
 export const formatAdvisorUsername = (name: string): string => {
@@ -87,6 +87,7 @@ interface AppContextType {
   // Campaign & Team management
   addCampaign: (campaign: Omit<Campaign, 'id'>) => Campaign;
   updateCampaign: (id: string, data: Partial<Campaign>) => void;
+  deleteCampaign: (id: string) => Promise<void>;
   addTeam: (team: Omit<Team, 'id'>) => Team;
 
   // Mutators
@@ -520,6 +521,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateCampaign = (id: string, data: Partial<Campaign>) => {
     setCampaigns(prev => prev.map(campaign => campaign.id === id ? { ...campaign, ...data, id } : campaign));
+  };
+
+  const deleteCampaign = async (id: string) => {
+    await adminCampaignsApi.remove(id);
+    setCampaigns(prev => prev.filter(campaign => campaign.id !== id));
+    setTeams(prev => prev.filter(team => team.campaignId !== id));
   };
 
   const addTeam = (team: Omit<Team, 'id'>): Team => {
@@ -1107,6 +1114,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         createUsersForAdvisorsWithoutAccount,
         addCampaign,
         updateCampaign,
+        deleteCampaign,
         addTeam,
         addEvaluation,
         updateEvaluation,

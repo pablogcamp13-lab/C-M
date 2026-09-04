@@ -40,6 +40,7 @@ if (!(db.prepare('PRAGMA table_info(users)').all() as any[]).some(column => colu
 if (!(db.prepare('PRAGMA table_info(campaigns)').all() as any[]).some(column => column.name === 'quality_guidelines_json')) db.exec("ALTER TABLE campaigns ADD COLUMN quality_guidelines_json TEXT NOT NULL DEFAULT '[]'");
 if (!(db.prepare('PRAGMA table_info(campaigns)').all() as any[]).some(column => column.name === 'quality_criterion_weights_json')) db.exec('ALTER TABLE campaigns ADD COLUMN quality_criterion_weights_json TEXT');
 if (!(db.prepare('PRAGMA table_info(campaigns)').all() as any[]).some(column => column.name === 'quality_critical_errors_json')) db.exec("ALTER TABLE campaigns ADD COLUMN quality_critical_errors_json TEXT NOT NULL DEFAULT '[]'");
+if (!(db.prepare('PRAGMA table_info(campaigns)').all() as any[]).some(column => column.name === 'background_image')) db.exec('ALTER TABLE campaigns ADD COLUMN background_image TEXT');
 
 if (isProduction && !process.env.INITIAL_ADMIN_PASSWORD) throw new Error('INITIAL_ADMIN_PASSWORD es obligatoria en producción.');
 const INITIAL_PASSWORD = '12345678';
@@ -96,7 +97,7 @@ seedDatabase();
 
 function repository(): SharedRepository {
   const users = db.prepare('SELECT * FROM users ORDER BY created_at DESC').all().map(publicUser);
-  const campaigns = db.prepare('SELECT * FROM campaigns ORDER BY name').all().map((r: any) => ({ id: r.id, name: r.name, client: r.client, status: r.status, products: JSON.parse(r.products_json), description: r.description || undefined, qualityGuidelines: JSON.parse(r.quality_guidelines_json || '[]'), qualityCriterionWeights: JSON.parse(r.quality_criterion_weights_json || 'null') || undefined, qualityCriticalErrors: JSON.parse(r.quality_critical_errors_json || '[]') }));
+  const campaigns = db.prepare('SELECT * FROM campaigns ORDER BY name').all().map((r: any) => ({ id: r.id, name: r.name, client: r.client, status: r.status, products: JSON.parse(r.products_json), description: r.description || undefined, backgroundImage: r.background_image || undefined, qualityGuidelines: JSON.parse(r.quality_guidelines_json || '[]'), qualityCriterionWeights: JSON.parse(r.quality_criterion_weights_json || 'null') || undefined, qualityCriticalErrors: JSON.parse(r.quality_critical_errors_json || '[]') }));
   const teams = db.prepare('SELECT * FROM teams ORDER BY name').all().map((r: any) => ({ id: r.id, campaignId: r.campaign_id, supervisorId: r.supervisor_id, name: r.name }));
   const advisors = db.prepare('SELECT data_json FROM advisors ORDER BY name').all().map((r: any) => JSON.parse(r.data_json));
   return { users, campaigns, teams, advisors };
@@ -107,7 +108,7 @@ function persistRepository(input: SharedRepository) {
   db.exec('BEGIN IMMEDIATE');
   try {
     const source = input;
-    for (const campaign of source.campaigns || []) db.prepare(`INSERT INTO campaigns (id,name,client,status,products_json,description,quality_guidelines_json,quality_criterion_weights_json,quality_critical_errors_json) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,client=excluded.client,status=excluded.status,products_json=excluded.products_json,description=excluded.description,quality_guidelines_json=excluded.quality_guidelines_json,quality_criterion_weights_json=excluded.quality_criterion_weights_json,quality_critical_errors_json=excluded.quality_critical_errors_json`).run(campaign.id, campaign.name, campaign.client, campaign.status, JSON.stringify(campaign.products || []), campaign.description || null, JSON.stringify(campaign.qualityGuidelines || []), JSON.stringify(campaign.qualityCriterionWeights || null), JSON.stringify(campaign.qualityCriticalErrors || []));
+    for (const campaign of source.campaigns || []) db.prepare(`INSERT INTO campaigns (id,name,client,status,products_json,description,background_image,quality_guidelines_json,quality_criterion_weights_json,quality_critical_errors_json) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,client=excluded.client,status=excluded.status,products_json=excluded.products_json,description=excluded.description,background_image=excluded.background_image,quality_guidelines_json=excluded.quality_guidelines_json,quality_criterion_weights_json=excluded.quality_criterion_weights_json,quality_critical_errors_json=excluded.quality_critical_errors_json`).run(campaign.id, campaign.name, campaign.client, campaign.status, JSON.stringify(campaign.products || []), campaign.description || null, campaign.backgroundImage || null, JSON.stringify(campaign.qualityGuidelines || []), JSON.stringify(campaign.qualityCriterionWeights || null), JSON.stringify(campaign.qualityCriticalErrors || []));
     for (const user of source.users || []) {
       const existing = db.prepare('SELECT password_hash,must_change_password FROM users WHERE id=?').get(user.id);
       db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar`).run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt || now, existing?.password_hash || hashPassword(user.password || INITIAL_PASSWORD), existing ? existing.must_change_password : 1);
@@ -305,6 +306,16 @@ async function startServer() {
     if (!['ADMINISTRADOR','CONSULTOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'No tienes permiso para modificar la dotación.' });
     try { return res.json({ repository: await saveRepository(req.body as SharedRepository) }); }
     catch (error: any) { return res.status(400).json({ error: error.message || 'No fue posible guardar la dotación.' }); }
+  });
+  app.delete('/api/admin/campaigns/:id', requireAuth, async (req, res) => {
+    if (requireAdmin(req, res) !== true) return;
+    try {
+      if ((db.prepare('SELECT COUNT(*) AS total FROM advisors WHERE campaign_id=?').get(req.params.id) as any).total) return res.status(409).json({ error: 'La campaña tiene asesores asignados.' });
+      db.prepare('DELETE FROM teams WHERE campaign_id=?').run(req.params.id);
+      db.prepare('DELETE FROM campaigns WHERE id=?').run(req.params.id);
+      if (googleStorage.enabled) await googleStorage.saveRepository(repository(), passwordHashes());
+      res.status(204).end();
+    } catch (error: any) { res.status(400).json({ error: error.message || 'No se pudo eliminar la campaña.' }); }
   });
   app.post('/api/evaluations', requireAuth, async (req, res) => {
     if (!['ADMINISTRADOR','CONSULTOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'Solo Calidad o Administración puede crear evaluaciones.' });

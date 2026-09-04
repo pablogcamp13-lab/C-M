@@ -22,6 +22,7 @@ export interface Campaign {
   status: 'ACTIVA' | 'INACTIVA';
   products: string[];
   description?: string;
+  backgroundImage?: string;
   qualityGuidelines?: QualityGuideline[];
   qualityCriterionWeights?: Record<'C1' | 'C2' | 'C3' | 'C4', number>;
   qualityCriticalErrors?: QualityCriticalError[];
