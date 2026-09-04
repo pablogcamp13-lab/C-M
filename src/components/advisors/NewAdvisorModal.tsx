@@ -15,8 +15,8 @@ export const NewAdvisorModal: React.FC<NewAdvisorModalProps> = ({ onClose, onSuc
   const [name, setName] = useState('');
   const [employeeCode, setEmployeeCode] = useState(`ADV-${Math.floor(100 + Math.random() * 900)}`);
   const [dni, setDni] = useState('');
-  const [campaignId, setCampaignId] = useState(campaigns[0]?.id || '');
-  const [teamId, setTeamId] = useState(teams[0]?.id || '');
+  const [campaignId, setCampaignId] = useState('');
+  const [teamId, setTeamId] = useState('');
   const [supervisorId, setSupervisorId] = useState(users.find(u => u.role === 'SUPERVISOR')?.id || '');
   const [shift, setShift] = useState<'MANANA' | 'TARDE' | 'COMPLETO'>('MANANA');
 
@@ -31,13 +31,14 @@ export const NewAdvisorModal: React.FC<NewAdvisorModalProps> = ({ onClose, onSuc
   const [baselinePeriod, setBaselinePeriod] = useState('Línea Base Inicial');
 
   const supervisors = users.filter(u => u.role === 'SUPERVISOR');
+  const campaignTeams = teams.filter(team => team.campaignId === campaignId);
 
   const generatedUsername = name.trim() ? formatAdvisorUsername(name) : 'nombre.apellido';
   const generatedPassword = dni.trim() || 'DNI del asesor';
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !dni.trim()) return;
+    if (!name.trim() || !dni.trim() || !campaignId) return;
 
     const sphNum = parseFloat(baselineSph) || 0.20;
     const connMinutes = parseTimeToMinutes(baselineConnectionTime) || 360;
@@ -124,6 +125,25 @@ export const NewAdvisorModal: React.FC<NewAdvisorModalProps> = ({ onClose, onSuc
           </div>
 
           <div>
+            <label className="block font-semibold text-slate-700 mb-1">Campaña *</label>
+            <select
+              required
+              value={campaignId}
+              onChange={(e) => {
+                const nextCampaignId = e.target.value;
+                const firstTeam = teams.find(team => team.campaignId === nextCampaignId);
+                setCampaignId(nextCampaignId);
+                setTeamId(firstTeam?.id || '');
+                if (firstTeam?.supervisorId) setSupervisorId(firstTeam.supervisorId);
+              }}
+              className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#031E3C] font-medium text-slate-800"
+            >
+              <option value="" disabled>Selecciona una campaña</option>
+              {campaigns.filter(campaign => campaign.status === 'ACTIVA').map(campaign => <option key={campaign.id} value={campaign.id}>{campaign.name} ({campaign.client})</option>)}
+            </select>
+          </div>
+
+          <div>
             <label className="block font-semibold text-slate-700 mb-1">Supervisor a Cargo *</label>
             <select
               value={supervisorId}
@@ -144,7 +164,7 @@ export const NewAdvisorModal: React.FC<NewAdvisorModalProps> = ({ onClose, onSuc
                 onChange={(e) => setTeamId(e.target.value)}
                 className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#031E3C]"
               >
-                {teams.map(t => (
+                {campaignTeams.map(t => (
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
               </select>

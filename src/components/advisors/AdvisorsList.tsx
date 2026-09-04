@@ -31,7 +31,7 @@ export const AdvisorsList: React.FC<AdvisorsListProps> = ({
   onSelectAdvisor, 
   onOpenNewAdvisor 
 }) => {
-  const { filteredAdvisors, filteredEvaluations, users, teams, config, actionPlans, importHistory, operationalMeasurements, deleteAdvisor } = useApp();
+  const { filteredAdvisors, filteredEvaluations, users, teams, campaigns, config, actionPlans, importHistory, operationalMeasurements, updateAdvisor, deleteAdvisor } = useApp();
   const [sortField, setSortField] = useState<'name' | 'score' | 'supervisor' | 'evals' | 'tenure' | 'sph'>('score');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
@@ -197,6 +197,10 @@ export const AdvisorsList: React.FC<AdvisorsListProps> = ({
                     </div>
                   </th>
 
+                  <th className="py-3 px-3">
+                    <span>Campaña</span>
+                  </th>
+
                   <th 
                     className="py-3 px-3 cursor-pointer hover:text-[#031E3C] transition-colors"
                     onClick={() => { setSortField('supervisor'); setSortAsc(!sortAsc); }}
@@ -258,7 +262,7 @@ export const AdvisorsList: React.FC<AdvisorsListProps> = ({
               <tbody className="divide-y divide-[#E5E8EC]">
                 {sortedStats.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-8 text-center text-slate-400">
+                    <td colSpan={10} className="py-8 text-center text-slate-400">
                       No se encontraron asesores con los filtros actuales.
                     </td>
                   </tr>
@@ -293,6 +297,23 @@ export const AdvisorsList: React.FC<AdvisorsListProps> = ({
                             </>
                           )}
                         </div>
+                      </td>
+
+                      {/* Campaña visible y editable */}
+                      <td className="py-3 px-3" onClick={(event) => event.stopPropagation()}>
+                        <select
+                          aria-label={`Campaña de ${stat.advisor.name}`}
+                          value={stat.advisor.campaignId || ''}
+                          onChange={(event) => {
+                            const campaignId = event.target.value;
+                            const firstTeam = teams.find(team => team.campaignId === campaignId);
+                            updateAdvisor(stat.advisor.id, { campaignId, teamId: firstTeam?.id || '', supervisorId: firstTeam?.supervisorId || stat.advisor.supervisorId });
+                          }}
+                          className="w-40 rounded-lg border border-[#D7E2E2] bg-white px-2 py-1.5 text-[11px] font-semibold text-[#031E3C] focus:border-cyan-500 focus:outline-none"
+                        >
+                          <option value="" disabled>Asignar campaña</option>
+                          {campaigns.filter(campaign => campaign.status === 'ACTIVA').map(campaign => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}
+                        </select>
                       </td>
 
                       {/* 2. Supervisor */}

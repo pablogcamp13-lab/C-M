@@ -42,9 +42,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
   // Import Parameters
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string>(
-    campaigns[0]?.id || 'camp_mig_1'
-  );
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
   const [periodName, setPeriodName] = useState<string>('Agosto 2026');
   const [cutoffDate, setCutoffDate] = useState<string>(
     new Date().toISOString().split('T')[0]
@@ -80,6 +78,10 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
 
   // Handle file reading
   const handleProcessFile = async (file: File) => {
+    if (!selectedCampaignId) {
+      setParseError('Selecciona primero la campaña de destino para los asesores.');
+      return;
+    }
     // Validate format
     const name = file.name.toLowerCase();
     if (!name.endsWith('.xlsx') && !name.endsWith('.xls') && !name.endsWith('.csv')) {
@@ -340,6 +342,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                       onChange={(e) => setSelectedCampaignId(e.target.value)}
                       className="w-full bg-[#F6F7F9] border border-[#E5E8EC] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#031E3C] focus:outline-none focus:ring-1 focus:ring-[#031E3C]"
                     >
+                      <option value="" disabled>Selecciona una campaña</option>
                       {campaigns.map(c => (
                         <option key={c.id} value={c.id}>
                           {c.name} ({c.client})
