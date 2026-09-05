@@ -305,12 +305,18 @@ export interface QualityAlert {
   updatedAt: string;
 }
 
-export type CalibrationStatus = 'PENDIENTE' | 'EN_CURSO' | 'COMPLETADA' | 'VENCIDA';
+export type CalibrationStatus = 'BORRADOR' | 'PROGRAMADA' | 'EN_VIVO' | 'FINALIZADA' | 'CERRADA' | 'ANULADA' | 'PENDIENTE' | 'EN_CURSO' | 'COMPLETADA' | 'VENCIDA';
+export interface CalibrationResponse { answers: Record<string, ComplianceStatus>; comments?: Record<string,string>; typification?: string; observation?: string; criticalIds?: string[]; score:number; submittedAt:string; }
 export interface CalibrationParticipant {
   supervisorId: string;
   status: 'PENDIENTE' | 'RESPONDIDA' | 'VENCIDA';
   answers?: Record<string, ComplianceStatus>;
+  response?: CalibrationResponse;
   agreement?: number;
+  affinity?: number;
+  affinityLevel?: string;
+  deviation?: number;
+  mainDifferences?: string[];
   submittedAt?: string;
 }
 export interface Calibration {
@@ -318,12 +324,19 @@ export interface Calibration {
   evaluationId: string;
   campaignId: string;
   title: string;
+  description?: string;
+  callType?: 'VENTA' | 'NO_VENTA';
+  scheduledAt?: string;
   dueAt: string;
   status: CalibrationStatus;
+  expertId?: string;
+  expertResponse?: CalibrationResponse;
   participants: CalibrationParticipant[];
   officialAnswers?: Record<string, ComplianceStatus>;
   attributeLabels?: Record<string, string>;
-  caseSnapshot?: { callId: string; date: string; product?: string; audioUrl?: string; audioFileName?: string; audioDurationSeconds?: number };
+  caseSnapshot?: { callId:string; date:string; time?:string; advisorId?:string; product?:string; typification?:string; result?:string; observation?:string; audioUrl?:string; audioFileName?:string; audioDurationSeconds?:number; items?:EvaluationItem[] };
+  results?: { patternScore:number; averageAffinity:number; highestAffinity:number; lowestAffinity:number; closedAt:string };
+  audit?: Array<{ action:string; userId:string; at:string }>;
   createdBy: string;
   createdAt: string;
   updatedAt: string;

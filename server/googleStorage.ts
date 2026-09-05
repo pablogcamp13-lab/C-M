@@ -163,6 +163,7 @@ class GoogleStorage {
   async saveQualityAlert(item: any) { await this.upsert('QUALITY_ALERTS', 'id', { id:item.id,status:item.status,advisor_id:item.advisorId,supervisor_id:item.supervisorId,campaign_id:item.campaignId,data_json:JSON.stringify(item),created_at:item.publishedAt,updated_at:item.updatedAt }); }
   async loadCalibrations() { const rows = await this.rows('CALIBRATIONS'); return (rows || []).map(row => JSON.parse(row.data_json || '{}')); }
   async saveCalibration(item: any) { await this.upsert('CALIBRATIONS', 'id', { id:item.id,status:item.status,evaluation_id:item.evaluationId,campaign_id:item.campaignId,data_json:JSON.stringify(item),created_at:item.createdAt,updated_at:item.updatedAt }); }
+  async deleteCalibration(id: string) { await this.replace('CALIBRATIONS', (await this.rows('CALIBRATIONS') || []).filter(row => row.id !== id)); }
 
   async uploadFile(input: { name: string; mimeType: string; base64: string }) {
     if (!this.enabled) throw new Error('Google Drive no está configurado.');
