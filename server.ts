@@ -154,8 +154,17 @@ function persistRepository(input: SharedRepository) {
       const existing = db.prepare('SELECT password_hash,must_change_password FROM users WHERE id=?').get(user.id);
       db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar`).run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt || now, existing?.password_hash || hashPassword(user.password || INITIAL_PASSWORD), existing ? existing.must_change_password : 1);
     }
-    for (const team of source.teams || []) db.prepare(`INSERT INTO teams (id,campaign_id,supervisor_id,name) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET campaign_id=excluded.campaign_id,supervisor_id=excluded.supervisor_id,name=excluded.name`).run(team.id, team.campaignId, team.supervisorId, team.name);
+    for (const team of source.teams || []) {
+      const validCampaign=db.prepare('SELECT 1 FROM campaigns WHERE id=?').get(team.campaignId);
+      const validSupervisor=db.prepare('SELECT 1 FROM users WHERE id=?').get(team.supervisorId);
+      if(validCampaign&&validSupervisor) db.prepare(`INSERT INTO teams (id,campaign_id,supervisor_id,name) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET campaign_id=excluded.campaign_id,supervisor_id=excluded.supervisor_id,name=excluded.name`).run(team.id, team.campaignId, team.supervisorId, team.name);
+    }
     for (const advisor of source.advisors || []) {
+      if(!db.prepare('SELECT 1 FROM campaigns WHERE id=?').get(advisor.campaignId)) {
+        const campaignName=advisor.sourceCampaignName||`Campaña histórica ${advisor.campaignId}`;
+        db.prepare('INSERT INTO campaigns (id,name,client,status,products_json,description) VALUES (?,?,?,?,?,?)').run(advisor.campaignId,campaignName,campaignName,'ACTIVA','[]','Campaña preservada desde dotación histórica.');
+      }
+      db.prepare('INSERT OR IGNORE INTO operations (id,company_id,campaign_id,name,status,legacy) VALUES (?,?,?,?,?,1)').run(`op_legacy_${advisor.campaignId}`,'company_legacy',advisor.campaignId,`LEGACY / ${advisor.sourceCampaignName||advisor.campaignId}`,'ACTIVA');
       const previousRow=db.prepare('SELECT data_json FROM advisors WHERE id=?').get(advisor.id) as any;
       const previous=previousRow ? JSON.parse(previousRow.data_json) : null;
       const requestedOperationId=advisor.operationId || previous?.operationId || `op_legacy_${advisor.campaignId}`;
@@ -163,8 +172,6 @@ function persistRepository(input: SharedRepository) {
       const operation=requestedOperation || db.prepare('SELECT * FROM operations WHERE company_id=? AND campaign_id=? AND status=?').get('company_legacy',advisor.campaignId,'ACTIVA') as any;
       const operationId=operation?.id;
       if(!operation) throw new Error(`No se pudo preservar la campaña de ${advisor.name}.`);
-      const supervisor=advisor.supervisorId ? db.prepare('SELECT role,status FROM users WHERE id=?').get(advisor.supervisorId) as any : null;
-      if(advisor.supervisorId && (!supervisor || supervisor.status!=='ACTIVO' || !['SUPERVISOR','FORMADOR','ADMINISTRADOR','CONSULTOR'].includes(supervisor.role))) throw new Error(`Supervisor inválido para ${advisor.name}.`);
       db.prepare(`INSERT INTO advisors (id,dni,employee_code,name,campaign_id,team_id,supervisor_id,data_json) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET dni=excluded.dni,employee_code=excluded.employee_code,name=excluded.name,campaign_id=excluded.campaign_id,team_id=excluded.team_id,supervisor_id=excluded.supervisor_id,data_json=excluded.data_json`).run(advisor.id, advisor.dni, advisor.employeeCode || '', advisor.name, advisor.campaignId, advisor.teamId || null, advisor.supervisorId || null, JSON.stringify({...advisor,operationId}));
       const changed=!previous || previous.operationId!==operationId || previous.supervisorId!==advisor.supervisorId || previous.teamId!==advisor.teamId;
       if(changed){
@@ -191,7 +198,14 @@ async function readRepository() {
   if (!googleStorage.enabled) return repository();
   try {
     const remote = await googleStorage.loadRepository();
-    if (remote && (remote.users.length || remote.campaigns.length || remote.teams.length || remote.advisors.length)) { persistRepository(remote); return repository(); }
+    if (remote && (remote.users.length || remote.campaigns.length || remote.teams.length || remote.advisors.length)) {
+      try { persistRepository(remote); return repository(); }
+      catch (cacheError) {
+        console.error('[google-storage] La caché local no pudo actualizarse; se entrega la dotación remota.', cacheError instanceof Error ? cacheError.message : '');
+        const local=repository(),legacyOperations=remote.campaigns.map(campaign=>({id:`op_legacy_${campaign.id}`,companyId:'company_legacy',campaignId:campaign.id,name:`LEGACY / ${campaign.name}`,status:'ACTIVA' as const,legacy:true}));
+        return {...remote,companies:local.companies,operations:[...(local.operations||[]),...legacyOperations.filter(operation=>!(local.operations||[]).some(item=>item.id===operation.id))]};
+      }
+    }
     const local = repository();
     await googleStorage.saveRepository(local, passwordHashes());
     console.log('[google-storage] Google Sheets inicializado con la persistencia local existente.');
