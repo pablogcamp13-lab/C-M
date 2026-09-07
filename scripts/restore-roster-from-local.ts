@@ -1,0 +1,25 @@
+import 'dotenv/config';
+import { DatabaseSync } from 'node:sqlite';
+import { join } from 'node:path';
+import { googleStorage } from '../server/googleStorage';
+import type { Advisor, Campaign, Team, User } from '../src/types';
+
+if (!googleStorage.enabled) throw new Error('Configura las variables GOOGLE_* de Sheets en .env.');
+const databasePath=process.env.RESTORE_SQLITE_PATH || join(process.cwd(),'data','contact-center.sqlite');
+const database=new DatabaseSync(databasePath,{readOnly:true});
+const current=await googleStorage.loadRepository();
+const auth=await googleStorage.loadUsersForAuthentication();
+if(!current||!auth) throw new Error('No fue posible leer la persistencia de producción.');
+const localAdvisors=(database.prepare('SELECT data_json FROM advisors').all() as any[]).flatMap(row=>{try{return [JSON.parse(row.data_json) as Advisor]}catch{return[]}});
+if(!localAdvisors.length) throw new Error('La base local no contiene asesores para recuperar.');
+const localCampaigns=(database.prepare('SELECT * FROM campaigns').all() as any[]).map(row=>({id:row.id,name:row.name,client:row.client,status:row.status,products:JSON.parse(row.products_json||'[]'),description:row.description||undefined} as Campaign));
+const localTeams=(database.prepare('SELECT * FROM teams').all() as any[]).map(row=>({id:row.id,campaignId:row.campaign_id,supervisorId:row.supervisor_id,name:row.name} as Team));
+const advisorIds=new Set(localAdvisors.map(advisor=>advisor.id));
+const supervisorIds=new Set(localAdvisors.map(advisor=>advisor.supervisorId).filter(Boolean));
+const localUsers=(database.prepare('SELECT * FROM users').all() as any[]).filter(row=>advisorIds.has(row.advisor_id)||supervisorIds.has(row.id)).map(row=>({id:row.id,name:row.name,email:row.email,username:row.username||undefined,role:row.role,status:row.status,teamId:row.team_id||undefined,advisorId:row.advisor_id||undefined,avatar:row.avatar||undefined,createdAt:row.created_at,mustChangePassword:Boolean(row.must_change_password)} as User));
+const merge=<T extends {id:string}>(remote:T[],local:T[])=>{const result=[...remote];const ids=new Set(remote.map(item=>item.id));for(const item of local)if(!ids.has(item.id)){result.push(item);ids.add(item.id)}return result};
+const hashes=new Map(auth.map(user=>[user.id,user.passwordHash]));
+for(const row of database.prepare('SELECT id,password_hash FROM users').all() as any[])if(!hashes.has(row.id))hashes.set(row.id,row.password_hash);
+const repository={users:merge(current.users,localUsers),campaigns:merge(current.campaigns,localCampaigns),teams:merge(current.teams,localTeams),advisors:merge(current.advisors,localAdvisors)};
+await googleStorage.saveRepository(repository,hashes);
+console.log(JSON.stringify({restored:repository.advisors.length-current.advisors.length,total:repository.advisors.length,preserved:current.advisors.length}));

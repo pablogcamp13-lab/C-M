@@ -122,11 +122,15 @@ class GoogleStorage {
 
   async saveRepository(repository: SharedRepository, passwordHashes: Map<string, string>) {
     if (!this.enabled) return;
+    const existingAdvisors = await this.rows('ADVISORS') || [];
+    const advisorWrite = repository.advisors.length === 0 && existingAdvisors.length > 0
+      ? Promise.resolve()
+      : this.replace('ADVISORS', repository.advisors.map(advisor => ({ id: advisor.id, dni: advisor.dni, employee_code: advisor.employeeCode || '', name: advisor.name, campaign_id: advisor.campaignId, team_id: advisor.teamId, supervisor_id: advisor.supervisorId, data_json: JSON.stringify(advisor) })));
     await Promise.all([
       this.replace('USERS', repository.users.map(user => ({ id: user.id, name: user.name, email: user.email, username: user.username, role: user.role, status: user.status, team_id: user.teamId, advisor_id: user.advisorId, avatar: user.avatar, created_at: user.createdAt, password_hash: passwordHashes.get(user.id), must_change_password: user.mustChangePassword !== false ? '1' : '0' }))),
       this.replace('CAMPAIGNS', repository.campaigns.map(campaign => ({ id: campaign.id, name: campaign.name, client: campaign.client, status: campaign.status, products_json: JSON.stringify(campaign.products || []), description: campaign.description, background_image: campaign.backgroundImage, quality_guidelines_json: JSON.stringify(campaign.qualityGuidelines || []), quality_criterion_weights_json: JSON.stringify(campaign.qualityCriterionWeights || null), quality_critical_errors_json: JSON.stringify(campaign.qualityCriticalErrors || []) }))),
       this.replace('TEAMS', repository.teams.map(team => ({ id: team.id, campaign_id: team.campaignId, supervisor_id: team.supervisorId, name: team.name }))),
-      this.replace('ADVISORS', repository.advisors.map(advisor => ({ id: advisor.id, dni: advisor.dni, employee_code: advisor.employeeCode || '', name: advisor.name, campaign_id: advisor.campaignId, team_id: advisor.teamId, supervisor_id: advisor.supervisorId, data_json: JSON.stringify(advisor) })))
+      advisorWrite
     ]);
   }
 

@@ -15,6 +15,7 @@
     "clean": "rm -rf dist server.js",
     "seed:demo": "node scripts/seed-demo.mjs",
     "import:roster": "tsx scripts/replace-roster.ts",
+    "restore:roster": "tsx scripts/restore-roster-from-local.ts",
     "lint": "npm run typecheck",
     "test:phase1": "node scripts/test-phase1.mjs",
     "test:phase2": "node scripts/test-phase2.mjs"
