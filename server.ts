@@ -250,7 +250,7 @@ async function startServer() {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) return res.status(400).json({ error: 'Correo de prueba inválido.' });
     if (!emailService.enabled) return res.status(503).json({ error: 'El servicio de correo no está configurado.' });
     try {
-      await emailService.sendSupervisorNotification({ recipient, subject: 'Calidad y Mejora Continua: Prueba de notificaciones', title: 'Configuración de correo validada', description: 'El envío automático de correos desde la plataforma C&M está funcionando correctamente.', advisorName: 'Prueba técnica', campaignName: 'C&M', actionLabel: 'Abrir plataforma', path: '/' });
+      await emailService.sendEvaluationNotification({ recipient, advisorName: 'Prueba de notificación', campaignName: 'Migraciones Bitel', date: new Date().toLocaleDateString('es-PE'), result: 'Prueba técnica', evaluatorName: 'Calidad y Mejora Continua', evaluationId: 'prueba-correo' });
       return res.json({ ok: true });
     } catch (error) {
       const detail = error instanceof Error ? error.message : 'Error desconocido de Gmail.';
