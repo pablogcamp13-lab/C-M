@@ -32,7 +32,7 @@ import { ForcePasswordChange } from './components/auth/ForcePasswordChange';
 import { ChevronRight, ShieldCheck, TrendingUp, X } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
-  const { currentSection, setCurrentSection, evaluations, advisors, campaigns, currentUser } = useApp();
+  const { currentSection, setCurrentSection, evaluations, advisors, campaigns, currentUser, authenticatedUserId } = useApp();
   useEffect(() => {
     const allowed = ['evaluations', 'feedback', 'monitor_results', 'development', 'monitor_progress'];
     if (currentUser.role === 'MONITOR' && !allowed.includes(currentSection)) setCurrentSection('monitor_progress');
@@ -161,7 +161,7 @@ const MainLayout: React.FC = () => {
 
         </main>
 
-      </div>{currentUser.mustChangePassword && !currentUser.isPreview && <ForcePasswordChange />}
+      </div>{currentUser.mustChangePassword && currentUser.id === authenticatedUserId && <ForcePasswordChange />}
 
       {/* Global Modals */}
       {isNewEvalModalOpen && (

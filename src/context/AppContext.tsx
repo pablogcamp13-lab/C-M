@@ -49,6 +49,7 @@ export const formatAdvisorUsername = (name: string): string => {
 
 interface AppContextType {
   currentUser: User;
+  authenticatedUserId: string | null;
   isAuthReady: boolean;
   isAuthenticated: boolean;
   login: (identity: string, password: string) => Promise<void>;
@@ -224,6 +225,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentSection, setCurrentSection] = useState<NavigationSection>('home');
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authenticatedUserId, setAuthenticatedUserId] = useState<string | null>(null);
   const rosterHydrated = useRef(false);
   const platformStateHydrated = useRef(false);
   const recentEvaluation = useRef<{ key: string; evaluation: Evaluation; createdAt: number } | null>(null);
@@ -232,7 +234,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     const restoreSession = async () => {
       if (!authApi.token()) { setIsAuthReady(true); return; }
-      try { setCurrentUser(await authApi.currentUser()); setIsAuthenticated(true); }
+      try { const user=await authApi.currentUser(); setCurrentUser(user); setAuthenticatedUserId(user.id); setIsAuthenticated(true); }
       catch { await authApi.logout(); }
       finally { setIsAuthReady(true); }
     };
@@ -278,7 +280,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const user = await authApi.login(identity, password);
     rosterHydrated.current = false;
     platformStateHydrated.current = false;
-    setCurrentUser(user); setIsAuthenticated(true);
+    setCurrentUser(user); setAuthenticatedUserId(user.id); setIsAuthenticated(true);
   };
   const changePassword = async (password: string) => {
     const updated = await authApi.changePassword(password);
@@ -291,6 +293,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     rosterHydrated.current = false;
     platformStateHydrated.current = false;
     setIsAuthenticated(false);
+    setAuthenticatedUserId(null);
   };
 
   // Sync to LocalStorage on changes
@@ -1087,6 +1090,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     <AppContext.Provider
       value={{
         currentUser,
+        authenticatedUserId,
         isAuthReady,
         isAuthenticated,
       login,
