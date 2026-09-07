@@ -13,6 +13,8 @@ export interface User {
   username?: string; // e.g. "nombre.apellido"
   password?: string; // e.g. DNI for advisors
   mustChangePassword?: boolean;
+  /** Vista temporal de administrador; no representa una sesión autenticada del usuario. */
+  isPreview?: boolean;
 }
 
 export interface Campaign {

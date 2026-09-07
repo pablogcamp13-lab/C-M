@@ -161,7 +161,7 @@ const MainLayout: React.FC = () => {
 
         </main>
 
-      </div>{currentUser.mustChangePassword && <ForcePasswordChange />}
+      </div>{currentUser.mustChangePassword && !currentUser.isPreview && <ForcePasswordChange />}
 
       {/* Global Modals */}
       {isNewEvalModalOpen && (

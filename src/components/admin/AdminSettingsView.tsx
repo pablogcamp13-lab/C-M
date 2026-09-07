@@ -208,7 +208,7 @@ export const AdminSettingsView: React.FC = () => {
   const handleSimulateUser = (user: User) => {
     // La simulación conserva la sesión real del administrador: nunca debe forzar
     // el cambio de clave ni alterar las credenciales del usuario observado.
-    setCurrentUser({ ...user, mustChangePassword: false });
+    setCurrentUser({ ...user, mustChangePassword: false, isPreview: true });
     showNotification(
       `Sesión cambiada a: ${user.name} (${user.role}). Ahora ves la plataforma desde su perspectiva.`,
     );
