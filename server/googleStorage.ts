@@ -159,8 +159,18 @@ class GoogleStorage {
   async clearRuntimeData() {
     await Promise.all([this.replace('EVALUATIONS', []), this.replace('FEEDBACKS', []), this.replace('APP_STATE', [])]);
   }
-  async loadPlatformState() { const rows = await this.rows('APP_STATE'); const row = rows?.find(item => item.id === 'global'); return row?.payload_json ? JSON.parse(row.payload_json) : null; }
-  async savePlatformState(state: unknown) { await this.upsert('APP_STATE', 'id', { id: 'global', payload_json: JSON.stringify(state), updated_at: new Date().toISOString() }); }
+  async loadPlatformState() {
+    const rows = await this.rows('APP_STATE');
+    const legacy = rows?.find(item => item.id === 'global');
+    if (legacy?.payload_json) return JSON.parse(legacy.payload_json);
+    const chunks=(rows || []).filter(item=>/^global_\d+$/.test(item.id || '')).sort((a,b)=>(a.id || '').localeCompare(b.id || ''));
+    return chunks.length ? JSON.parse(chunks.map(item=>item.payload_json || '').join('')) : null;
+  }
+  async savePlatformState(state: unknown) {
+    const payload=JSON.stringify(state),updatedAt=new Date().toISOString(),chunkSize=45000;
+    const chunks=Array.from({length:Math.ceil(payload.length/chunkSize)},(_,index)=>({id:`global_${String(index).padStart(4,'0')}`,payload_json:payload.slice(index*chunkSize,(index+1)*chunkSize),updated_at:updatedAt}));
+    await this.replace('APP_STATE',chunks);
+  }
   async loadDevelopment() { const [capsules, assignments] = await Promise.all([this.rows('DEVELOPMENT_CAPSULES'), this.rows('DEVELOPMENT_ASSIGNMENTS')]); return { capsules: (capsules || []).map(row => JSON.parse(row.data_json || '{}')), assignments: (assignments || []).map(row => JSON.parse(row.data_json || '{}')) }; }
   async saveDevelopment(capsules: any[], assignments: any[]) { await Promise.all([this.replace('DEVELOPMENT_CAPSULES', capsules.map(item => ({ id:item.id,status:item.status,data_json:JSON.stringify(item),created_at:item.createdAt,updated_at:item.updatedAt }))),this.replace('DEVELOPMENT_ASSIGNMENTS', assignments.map(item => ({ id:item.id,capsule_id:item.capsuleId,advisor_id:item.advisorId,status:item.status,data_json:JSON.stringify(item),created_at:item.assignedAt,updated_at:item.updatedAt })))]); }
   async loadQualityAlerts() { const rows = await this.rows('QUALITY_ALERTS'); return (rows || []).map(row => JSON.parse(row.data_json || '{}')); }
