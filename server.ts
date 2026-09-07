@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import { googleStorage } from "./server/googleStorage";
+import { emailService } from "./server/emailService";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
@@ -174,8 +175,8 @@ async function requireAuth(req: express.Request, res: express.Response, next: ex
 let lastGoogleAuthSync = 0;
 const advisorDnisForAuth = new Map<string, string>();
 const advisorUsersByDni = new Map<string, string>();
-async function syncAuthUsersFromGoogle() {
-  if (!googleStorage.enabled || Date.now() - lastGoogleAuthSync < 60_000) return;
+async function syncAuthUsersFromGoogle(force = false) {
+  if (!googleStorage.enabled || (!force && Date.now() - lastGoogleAuthSync < 60_000)) return;
   const users = await googleStorage.loadUsersForAuthentication();
   if (!users?.length) return;
   const upsert = db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash,must_change_password)
@@ -208,15 +209,17 @@ async function startServer() {
     try { await syncAuthUsersFromGoogle(); }
     catch (error) { console.error('[google-storage] No fue posible sincronizar cuentas para el acceso.', error instanceof Error ? error.message : ''); }
     const identityText = String(identity).trim(); const passwordText = String(password);
-    let user = db.prepare('SELECT * FROM users WHERE lower(email)=lower(?) OR lower(username)=lower(?)').get(identityText, identityText) as any;
-    if (!user && advisorUsersByDni.has(identityText)) user = db.prepare('SELECT * FROM users WHERE id=?').get(advisorUsersByDni.get(identityText)) as any;
-    const validInitialPassword = Boolean(user?.must_change_password) && passwordText === INITIAL_PASSWORD;
-    if (!user || user.status !== 'ACTIVO' || (!validPassword(passwordText, String(user.password_hash)) && !validInitialPassword)) return res.status(401).json({ error: 'Credenciales inválidas.' });
-    if (validInitialPassword && !validPassword(passwordText, String(user.password_hash))) {
-      const passwordHash = hashPassword(passwordText); db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(passwordHash, user.id);
-      try { if (googleStorage.enabled) await googleStorage.updateUserPasswordHash(user.id, passwordHash, true); } catch (error) { console.error('[google-storage] No fue posible actualizar la clave inicial.', error instanceof Error ? error.message : ''); }
-      user = { ...user, password_hash: passwordHash };
+    const findUser = () => {
+      let match = db.prepare('SELECT * FROM users WHERE lower(email)=lower(?) OR lower(username)=lower(?)').get(identityText, identityText) as any;
+      if (!match && advisorUsersByDni.has(identityText)) match = db.prepare('SELECT * FROM users WHERE id=?').get(advisorUsersByDni.get(identityText)) as any;
+      return match;
+    };
+    let user = findUser();
+    if ((!user || !validPassword(passwordText, String(user.password_hash))) && googleStorage.enabled) {
+      try { await syncAuthUsersFromGoogle(true); user = findUser(); }
+      catch (error) { console.error('[google-storage] No fue posible refrescar la cuenta para el acceso.', error instanceof Error ? error.message : ''); }
     }
+    if (!user || user.status !== 'ACTIVO' || !validPassword(passwordText, String(user.password_hash))) return res.status(401).json({ error: 'Credenciales inválidas.' });
     const token = randomBytes(32).toString('hex');
     const createdAt = new Date().toISOString(); const expiresAt = '9999-12-31T23:59:59.999Z';
     db.prepare('INSERT INTO sessions (token,user_id,expires_at,created_at) VALUES (?,?,?,?)').run(token, user.id, expiresAt, createdAt);
@@ -228,9 +231,10 @@ async function startServer() {
   app.post('/api/auth/change-password', requireAuth, async (req, res) => {
     const { password } = req.body || {}; if (typeof password !== 'string' || password.length < 8) return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres.' });
     const user = (req as any).authUser as User; const passwordHash = hashPassword(password);
-    db.prepare('UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?').run(passwordHash, user.id);
     try { if (googleStorage.enabled) await googleStorage.updateUserPasswordHash(user.id, passwordHash, false); }
-    catch (error) { console.error('[google-storage] No fue posible guardar la contraseña.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible sincronizar la contraseña.' }); }
+    catch (error) { console.error('[google-storage] No fue posible guardar la contraseña.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible guardar la contraseña en el repositorio central. Revisa la autorización de Google Sheets.' }); }
+    db.prepare('UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?').run(passwordHash, user.id);
+    lastGoogleAuthSync = Date.now();
     res.json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)) });
   });
   app.post('/api/auth/logout', requireAuth, async (req, res) => {
@@ -245,6 +249,7 @@ async function startServer() {
     const body = req.body || {}; const name = String(body.name || '').trim(); const email = String(body.email || '').trim().toLowerCase();
     const validRoles = ['ADMINISTRADOR','CONSULTOR','SUPERVISOR','FORMADOR','GERENCIA','ASESOR']; const role = validRoles.includes(body.role) ? body.role : 'ASESOR'; const status = body.status === 'INACTIVO' ? 'INACTIVO' : 'ACTIVO';
     if (!name || !email) return res.status(400).json({ error: 'Nombre y correo son obligatorios.' });
+    if (role === 'SUPERVISOR' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'El supervisor debe tener un correo válido.' });
     if (db.prepare('SELECT 1 FROM users WHERE lower(email)=lower(?)').get(email)) return res.status(409).json({ error: 'El correo ya está registrado.' });
     const base = String(body.username || name).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\s.]/g, '').trim().replace(/[\s.]+/g, '.').replace(/^\.|\.$/g, '') || `usuario.${Date.now()}`;
     let username = base; let suffix = 1; while (db.prepare('SELECT 1 FROM users WHERE lower(username)=lower(?)').get(username)) username = `${base}.${++suffix}`;
@@ -259,6 +264,7 @@ async function startServer() {
     const current = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id) as any; if (!current) return res.status(404).json({ error: 'Usuario no encontrado.' });
     const body = req.body || {}; const next = { name: String(body.name ?? current.name).trim(), email: String(body.email ?? current.email).trim(), username: String((body.username ?? current.username) || '').trim() || null, role: body.role ?? current.role, status: body.status ?? current.status, teamId: body.teamId ?? current.team_id, advisorId: body.advisorId ?? current.advisor_id };
     if (!next.name || !next.email) return res.status(400).json({ error: 'Nombre y correo son obligatorios.' });
+    if (next.role === 'SUPERVISOR' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.email)) return res.status(400).json({ error: 'El supervisor debe tener un correo válido.' });
     try { db.prepare('UPDATE users SET name=?,email=?,username=?,role=?,status=?,team_id=?,advisor_id=? WHERE id=?').run(next.name, next.email, next.username, next.role, next.status, next.teamId || null, next.advisorId || null, current.id); if (googleStorage.enabled) await googleStorage.saveRepository(repository(), passwordHashes()); return res.json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(current.id)) }); }
     catch { return res.status(400).json({ error: 'No fue posible actualizar el usuario.' }); }
   });
@@ -338,7 +344,21 @@ async function startServer() {
         if (!googleStorage.enabled) throw cacheError;
         console.error('[evaluations] La evaluación se guardó remotamente, pero no pudo actualizarse la caché local.', cacheError instanceof Error ? cacheError.message : '');
       }
-      return res.status(201).json({ evaluation });
+      let notificationSent = false;
+      try {
+        const advisor = directory.advisors.find(item => item.id === evaluation.advisorId);
+        const advisorRecipient = directory.users.find(item => item.advisorId === evaluation.advisorId && item.status === 'ACTIVO');
+        const supervisorRecipient = directory.users.find(item => item.id === (advisor?.supervisorId || evaluation.supervisorId) && item.role === 'SUPERVISOR' && item.status === 'ACTIVO');
+        const campaign = directory.campaigns.find(item => item.id === evaluation.campaignId);
+        const evaluator = directory.users.find(item => item.id === evaluation.evaluatorId);
+        const score = evaluation.technicalScore ?? evaluation.scoreTotal;
+        const result = [evaluation.qualityResult, score == null ? null : `${score}%`].filter(Boolean).join(' · ') || 'Registrado';
+        const recipients = [...new Set([advisorRecipient?.email, supervisorRecipient?.email].filter(Boolean))] as string[];
+        if (advisor && recipients.length) notificationSent = (await Promise.all(recipients.map(recipient => emailService.sendEvaluationNotification({ recipient, advisorName: advisor.name, campaignName: campaign?.name || 'Sin campaña', date: evaluation.date, result, evaluatorName: evaluator?.name || 'Monitor de Calidad', evaluationId: evaluation.id })))).every(Boolean);
+      } catch (mailError) {
+        console.error('[email] La evaluación se guardó, pero no fue posible enviar la notificación.', mailError instanceof Error ? mailError.message : '');
+      }
+      return res.status(201).json({ evaluation, notificationSent });
     } catch (error: any) { console.error('[google-storage] No fue posible guardar la evaluación.', error instanceof Error ? error.message : ''); return res.status(400).json({ error: error.message || 'No fue posible guardar la evaluación.' }); }
   });
   app.get('/api/feedbacks', requireAuth, async (req, res) => {
@@ -365,6 +385,13 @@ async function startServer() {
         await googleStorage.saveFeedback(feedback);
       }
       try { db.prepare('INSERT INTO feedbacks (feedback_id,evaluation_id,advisor_id,supervisor_id,evaluator_id,evaluation_type,feedback_text,advisor_evidence_url,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(feedback.feedback_id, feedback.evaluation_id, feedback.advisor_id, feedback.supervisor_id, feedback.evaluator_id, feedback.evaluation_type, feedback.feedback_text, feedback.advisor_evidence_url, feedback.status, now, now); } catch (localError) { if (!googleStorage.enabled) throw localError; }
+      try {
+        const directory = googleStorage.enabled ? await readRepository() : repository();
+        const advisor = directory.advisors.find(item => item.id === feedback.advisor_id);
+        const supervisor = directory.users.find(item => item.id === (advisor?.supervisorId || feedback.supervisor_id) && item.role === 'SUPERVISOR' && item.status === 'ACTIVO');
+        const campaign = directory.campaigns.find(item => item.id === advisor?.campaignId);
+        if (advisor && supervisor?.email) await emailService.sendSupervisorNotification({ recipient: supervisor.email, subject: `Calidad y Mejora Continua: Nuevo Feedback | ${advisor.name} - ${campaign?.name || 'Sin campaña'}`, title: 'Nuevo feedback registrado', description: 'Hay un nuevo feedback asociado a una evaluación de un asesor de tu dotación.', advisorName: advisor.name, campaignName: campaign?.name || 'Sin campaña', actionLabel: 'Ver feedback', path: `/?section=feedback&feedbackId=${encodeURIComponent(feedback.feedback_id)}` });
+      } catch (mailError) { console.error('[email] El feedback se guardó, pero no se notificó al supervisor.', mailError instanceof Error ? mailError.message : ''); }
       res.status(201).json({ feedback });
     }
     catch (error) { console.error('[google-storage] No fue posible guardar feedback.', error instanceof Error ? error.message : ''); res.status(400).json({ error: 'Esta evaluación ya tiene feedback o no fue posible sincronizarlo.' }); }
@@ -386,6 +413,13 @@ async function startServer() {
     try {
       if (googleStorage.enabled) await googleStorage.saveFeedback(feedback);
       db.prepare('UPDATE feedbacks SET status=?, feedback_text=?, advisor_response=?, advisor_evidence_url=?, supervisor_closure_comment=?, advisor_action_at=?, closed_at=?, updated_at=? WHERE feedback_id=?').run(feedback.status, feedback.feedback_text, feedback.advisor_response, feedback.advisor_evidence_url, feedback.supervisor_closure_comment, feedback.advisor_action_at, feedback.closed_at, feedback.updated_at, req.params.id);
+      if (user.role === 'ASESOR' && ['VALIDADO_ASESOR','OBSERVADO_ASESOR'].includes(feedback.status)) try {
+        const directory = googleStorage.enabled ? await readRepository() : repository();
+        const advisor = directory.advisors.find(item => item.id === feedback.advisor_id);
+        const supervisor = directory.users.find(item => item.id === (advisor?.supervisorId || feedback.supervisor_id) && item.role === 'SUPERVISOR' && item.status === 'ACTIVO');
+        const campaign = directory.campaigns.find(item => item.id === advisor?.campaignId);
+        if (advisor && supervisor?.email) await emailService.sendSupervisorNotification({ recipient: supervisor.email, subject: `Calidad y Mejora Continua: Feedback ${feedback.status === 'OBSERVADO_ASESOR' ? 'observado' : 'validado'} | ${advisor.name}`, title: `Feedback ${feedback.status === 'OBSERVADO_ASESOR' ? 'observado' : 'validado'} por el asesor`, description: 'El asesor registró una respuesta sobre el feedback de su evaluación.', advisorName: advisor.name, campaignName: campaign?.name || 'Sin campaña', actionLabel: 'Revisar feedback', path: `/?section=feedback&feedbackId=${encodeURIComponent(feedback.feedback_id)}` });
+      } catch (mailError) { console.error('[email] El feedback se actualizó, pero no se notificó al supervisor.', mailError instanceof Error ? mailError.message : ''); }
       res.json({ feedback });
     }
     catch (error) { console.error('[google-storage] No fue posible actualizar feedback.', error instanceof Error ? error.message : ''); res.status(502).json({ error: 'No fue posible sincronizar el feedback.' }); }
@@ -474,7 +508,17 @@ async function startServer() {
     const user = (req as any).authUser as User; if (!qualityManagers.has(user.role)) return res.status(403).json({ error:'Solo Calidad o Administración puede publicar alertas.' });
     const body = req.body || {}; if (!body.title || !body.advisorId || !body.supervisorId || !body.campaignId || !body.validUntil) return res.status(400).json({ error:'Completa los datos obligatorios.' });
     const now = new Date().toISOString(); const alert = { id:`alert_${randomBytes(8).toString('hex')}`,title:String(body.title),audioUrl:body.audioUrl || undefined,contactNumber:String(body.contactNumber || ''),detail:String(body.detail || ''),advisorId:body.advisorId,supervisorId:body.supervisorId,campaignId:body.campaignId,validUntil:body.validUntil,criticality:['BAJA','MEDIA','ALTA','CRITICA'].includes(body.criticality)?body.criticality:'MEDIA',status:'NUEVA',publishedAt:now,createdBy:user.id,updatedAt:now };
-    try { persistAlert(alert); if (googleStorage.enabled) await googleStorage.saveQualityAlert(alert); res.status(201).json({ alert }); } catch { res.status(502).json({ error:'No fue posible guardar la alerta.' }); }
+    try {
+      persistAlert(alert); if (googleStorage.enabled) await googleStorage.saveQualityAlert(alert);
+      try {
+        const directory = googleStorage.enabled ? await readRepository() : repository();
+        const advisor = directory.advisors.find(item => item.id === alert.advisorId);
+        const supervisor = directory.users.find(item => item.id === (advisor?.supervisorId || alert.supervisorId) && item.role === 'SUPERVISOR' && item.status === 'ACTIVO');
+        const campaign = directory.campaigns.find(item => item.id === alert.campaignId);
+        if (advisor && supervisor?.email) await emailService.sendSupervisorNotification({ recipient: supervisor.email, subject: `Calidad y Mejora Continua: Nueva Alerta | ${advisor.name} - ${campaign?.name || 'Sin campaña'}`, title: 'Nueva alerta de calidad', description: `${alert.title}. Criticidad: ${alert.criticality}.`, advisorName: advisor.name, campaignName: campaign?.name || 'Sin campaña', actionLabel: 'Ver alerta', path: `/?section=quality_alerts&alertId=${encodeURIComponent(alert.id)}` });
+      } catch (mailError) { console.error('[email] La alerta se guardó, pero no se notificó al supervisor.', mailError instanceof Error ? mailError.message : ''); }
+      res.status(201).json({ alert });
+    } catch { res.status(502).json({ error:'No fue posible guardar la alerta.' }); }
   });
   app.patch('/api/quality-alerts/:id', requireAuth, async (req, res) => {
     const user = (req as any).authUser as User; let items = alertRows(); try { const remote = googleStorage.enabled ? await googleStorage.loadQualityAlerts() : []; if (remote.length) items=remote; } catch {}
