@@ -169,7 +169,11 @@ class GoogleStorage {
   async savePlatformState(state: unknown) {
     const payload=JSON.stringify(state),updatedAt=new Date().toISOString(),chunkSize=45000;
     const chunks=Array.from({length:Math.ceil(payload.length/chunkSize)},(_,index)=>({id:`global_${String(index).padStart(4,'0')}`,payload_json:payload.slice(index*chunkSize,(index+1)*chunkSize),updated_at:updatedAt}));
-    await this.replace('APP_STATE',chunks);
+    // Una sola escritura evita agotar la cuota de Sheets. Las filas sobrantes se
+    // vacían dentro de la misma actualización cuando el estado reduce su tamaño.
+    const previous=await this.rows('APP_STATE') || [],headers=SHEETS.APP_STATE as unknown as string[];
+    const rowCount=Math.max(previous.length,chunks.length),body=[headers,...Array.from({length:rowCount},(_,index)=>index<chunks.length?headers.map(header=>clean((chunks[index] as Row)[header])):['','',''])];
+    await this.sheets().spreadsheets.values.update({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:`${this.quote('APP_STATE')}!A1:C${rowCount+1}`,valueInputOption:'RAW',requestBody:{values:body}});
   }
   async loadDevelopment() { const [capsules, assignments] = await Promise.all([this.rows('DEVELOPMENT_CAPSULES'), this.rows('DEVELOPMENT_ASSIGNMENTS')]); return { capsules: (capsules || []).map(row => JSON.parse(row.data_json || '{}')), assignments: (assignments || []).map(row => JSON.parse(row.data_json || '{}')) }; }
   async saveDevelopment(capsules: any[], assignments: any[]) { await Promise.all([this.replace('DEVELOPMENT_CAPSULES', capsules.map(item => ({ id:item.id,status:item.status,data_json:JSON.stringify(item),created_at:item.createdAt,updated_at:item.updatedAt }))),this.replace('DEVELOPMENT_ASSIGNMENTS', assignments.map(item => ({ id:item.id,capsule_id:item.capsuleId,advisor_id:item.advisorId,status:item.status,data_json:JSON.stringify(item),created_at:item.assignedAt,updated_at:item.updatedAt })))]); }

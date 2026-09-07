@@ -160,8 +160,8 @@ function persistRepository(input: SharedRepository) {
       const previous=previousRow ? JSON.parse(previousRow.data_json) : null;
       const requestedOperationId=advisor.operationId || previous?.operationId || `op_legacy_${advisor.campaignId}`;
       const requestedOperation=db.prepare('SELECT * FROM operations WHERE id=? AND campaign_id=? AND status=?').get(requestedOperationId,advisor.campaignId,'ACTIVA') as any;
-      const operationId=requestedOperation ? requestedOperationId : `op_legacy_${advisor.campaignId}`;
-      const operation=db.prepare('SELECT * FROM operations WHERE id=?').get(operationId) as any;
+      const operation=requestedOperation || db.prepare('SELECT * FROM operations WHERE company_id=? AND campaign_id=? AND status=?').get('company_legacy',advisor.campaignId,'ACTIVA') as any;
+      const operationId=operation?.id;
       if(!operation) throw new Error(`No se pudo preservar la campaña de ${advisor.name}.`);
       const supervisor=advisor.supervisorId ? db.prepare('SELECT role,status FROM users WHERE id=?').get(advisor.supervisorId) as any : null;
       if(advisor.supervisorId && (!supervisor || supervisor.status!=='ACTIVO' || !['SUPERVISOR','FORMADOR','ADMINISTRADOR','CONSULTOR'].includes(supervisor.role))) throw new Error(`Supervisor inválido para ${advisor.name}.`);
@@ -601,7 +601,7 @@ async function startServer() {
     if (['ASESOR','SUPERVISOR','MONITOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'Este rol no puede sobrescribir el estado global.' });
     const now = new Date().toISOString();
     const normalizedState = normalizePlatformState(req.body);
-    try { if (googleStorage.enabled) { await googleStorage.savePlatformState(normalizedState); for (const evaluation of (normalizedState?.evaluations || [])) if (evaluation?.id && evaluation?.advisorId && evaluation?.evaluatorId && ['QUALITY','D3C'].includes(evaluation?.evaluationType)) await googleStorage.saveEvaluation(evaluation); } }
+    try { if (googleStorage.enabled) await googleStorage.savePlatformState(normalizedState); }
     catch (error) { console.error('[google-storage] No fue posible guardar el estado de plataforma.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible sincronizar el estado con Google Sheets.' }); }
     db.prepare(`INSERT INTO app_state (id,payload_json,updated_at) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,updated_at=excluded.updated_at`).run('global', JSON.stringify(normalizedState), now);
     for (const evaluation of (normalizedState?.evaluations || [])) { if (!evaluation?.id || !evaluation?.advisorId || !evaluation?.evaluatorId || !['QUALITY','D3C'].includes(evaluation?.evaluationType)) continue; try { db.prepare(`INSERT OR IGNORE INTO evaluations (id,advisor_id,evaluator_id,evaluation_type,evaluated_at,payload_json,created_at) VALUES (?,?,?,?,?,?,?)`).run(evaluation.id, evaluation.advisorId, evaluation.evaluatorId, evaluation.evaluationType, `${evaluation.date}T${evaluation.time || '00:00'}:00`, JSON.stringify(evaluation), evaluation.createdAt || now); } catch {} }
