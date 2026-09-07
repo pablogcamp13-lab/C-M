@@ -251,11 +251,11 @@ async function startServer() {
     if (!emailService.enabled) return res.status(503).json({ error: 'El servicio de correo no está configurado.' });
     try {
       await emailService.sendEvaluationNotification({ recipient, advisorName: 'Prueba de notificación', campaignName: 'Migraciones Bitel', date: new Date().toLocaleDateString('es-PE'), result: 'Prueba técnica', evaluatorName: 'Calidad y Mejora Continua', evaluationId: 'prueba-correo' });
-      return res.json({ ok: true, diagnostics: emailService.safeDiagnostics });
+      return res.json({ ok: true });
     } catch (error) {
       const detail = error instanceof Error ? error.message : 'Error desconocido de Gmail.';
       console.error('[email] Falló el correo de prueba.', detail);
-      return res.status(502).json({ error: 'Gmail rechazó el correo de prueba.', detail, diagnostics: emailService.safeDiagnostics });
+      return res.status(502).json({ error: 'Gmail rechazó el correo de prueba.', detail });
     }
   });
   app.post('/api/admin/users', requireAuth, async (req, res) => {
