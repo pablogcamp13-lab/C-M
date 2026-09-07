@@ -145,6 +145,10 @@ function persistRepository(input: SharedRepository) {
     const source = input;
     for (const company of source.companies || []) db.prepare('INSERT INTO companies (id,name,status,created_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,status=excluded.status').run(company.id,company.name,company.status,company.createdAt||now);
     for (const campaign of source.campaigns || []) db.prepare(`INSERT INTO campaigns (id,name,client,status,products_json,description,background_image,quality_guidelines_json,quality_criterion_weights_json,quality_critical_errors_json) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,client=excluded.client,status=excluded.status,products_json=excluded.products_json,description=excluded.description,background_image=excluded.background_image,quality_guidelines_json=excluded.quality_guidelines_json,quality_criterion_weights_json=excluded.quality_criterion_weights_json,quality_critical_errors_json=excluded.quality_critical_errors_json`).run(campaign.id, campaign.name, campaign.client, campaign.status, JSON.stringify(campaign.products || []), campaign.description || null, campaign.backgroundImage || null, JSON.stringify(campaign.qualityGuidelines || []), JSON.stringify(campaign.qualityCriterionWeights || null), JSON.stringify(campaign.qualityCriticalErrors || []));
+    // Las campañas históricas llegan desde Sheets sin empresa/operación. Se crea su
+    // operación LEGACY antes de validar asesores para conservar toda la dotación.
+    db.prepare('INSERT OR IGNORE INTO companies (id,name,status,created_at) VALUES (?,?,?,?)').run('company_legacy','LEGACY','INACTIVA',now);
+    for (const campaign of source.campaigns || []) db.prepare('INSERT OR IGNORE INTO operations (id,company_id,campaign_id,name,status,legacy) VALUES (?,?,?,?,?,1)').run(`op_legacy_${campaign.id}`,'company_legacy',campaign.id,`LEGACY / ${campaign.name}`,'ACTIVA');
     for (const operation of source.operations || []) db.prepare('INSERT INTO operations (id,company_id,campaign_id,name,status,legacy) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET company_id=excluded.company_id,campaign_id=excluded.campaign_id,name=excluded.name,status=excluded.status').run(operation.id,operation.companyId,operation.campaignId,operation.name,operation.status,operation.legacy?1:0);
     for (const user of source.users || []) {
       const existing = db.prepare('SELECT password_hash,must_change_password FROM users WHERE id=?').get(user.id);
@@ -154,9 +158,11 @@ function persistRepository(input: SharedRepository) {
     for (const advisor of source.advisors || []) {
       const previousRow=db.prepare('SELECT data_json FROM advisors WHERE id=?').get(advisor.id) as any;
       const previous=previousRow ? JSON.parse(previousRow.data_json) : null;
-      const operationId=advisor.operationId || previous?.operationId || `op_legacy_${advisor.campaignId}`;
-      const operation=db.prepare('SELECT * FROM operations WHERE id=? AND campaign_id=? AND status=?').get(operationId,advisor.campaignId,'ACTIVA') as any;
-      if(!operation) throw new Error(`Operación inválida para ${advisor.name}.`);
+      const requestedOperationId=advisor.operationId || previous?.operationId || `op_legacy_${advisor.campaignId}`;
+      const requestedOperation=db.prepare('SELECT * FROM operations WHERE id=? AND campaign_id=? AND status=?').get(requestedOperationId,advisor.campaignId,'ACTIVA') as any;
+      const operationId=requestedOperation ? requestedOperationId : `op_legacy_${advisor.campaignId}`;
+      const operation=db.prepare('SELECT * FROM operations WHERE id=?').get(operationId) as any;
+      if(!operation) throw new Error(`No se pudo preservar la campaña de ${advisor.name}.`);
       const supervisor=advisor.supervisorId ? db.prepare('SELECT role,status FROM users WHERE id=?').get(advisor.supervisorId) as any : null;
       if(advisor.supervisorId && (!supervisor || supervisor.status!=='ACTIVO' || !['SUPERVISOR','FORMADOR','ADMINISTRADOR','CONSULTOR'].includes(supervisor.role))) throw new Error(`Supervisor inválido para ${advisor.name}.`);
       db.prepare(`INSERT INTO advisors (id,dni,employee_code,name,campaign_id,team_id,supervisor_id,data_json) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET dni=excluded.dni,employee_code=excluded.employee_code,name=excluded.name,campaign_id=excluded.campaign_id,team_id=excluded.team_id,supervisor_id=excluded.supervisor_id,data_json=excluded.data_json`).run(advisor.id, advisor.dni, advisor.employeeCode || '', advisor.name, advisor.campaignId, advisor.teamId || null, advisor.supervisorId || null, JSON.stringify({...advisor,operationId}));
