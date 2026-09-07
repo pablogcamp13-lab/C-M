@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { google } from 'googleapis';
 
-const BRAND = 'Calidad y Mejora Continua';
+const BRAND = 'C&M Calidad y Mejora Continua';
 const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[character]!);
 const base64Url = (value: string) => Buffer.from(value, 'utf8').toString('base64url');
 const encodedHeader = (value: string) => `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`;
