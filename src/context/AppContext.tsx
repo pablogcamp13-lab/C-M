@@ -863,7 +863,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const destinationOperation=payload.operationId ? operations.find(operation=>operation.id===payload.operationId && operation.status==='ACTIVA') : undefined;
       const campaignId = destinationOperation?.campaignId || rowCampaign?.id || payload.campaignId;
       const campaignName = rowCampaign?.name || payload.campaignName;
-      let campaignTeam = teams.find(team => team.campaignId === campaignId);
+      let campaignTeam = teams.find(team => team.campaignId === campaignId && (!destinationOperation || team.operationId === destinationOperation.id));
       if (!campaignTeam) {
         campaignTeam = teamsToAdd.find(team => team.campaignId === campaignId);
       }
@@ -890,6 +890,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           employeeCode: newEmployeeCode,
           name: row.name,
           campaignId,
+          operationId: destinationOperation?.id,
           sourceCampaignName: row.campaignName || row.sheetName,
           teamId: campaignTeam.id,
           supervisorId: row.supervisorId || defaultSupervisor.id,
@@ -965,6 +966,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } else if (row.actionType === 'UPDATE') {
         updateCount++;
         const updatedAdvisor: Advisor = { ...existingAdv };
+        if (destinationOperation) {
+          updatedAdvisor.operationId = destinationOperation.id;
+          updatedAdvisor.campaignId = destinationOperation.campaignId;
+          updatedAdvisor.teamId = campaignTeam.id;
+        }
         if (row.schedule) updatedAdvisor.schedule = row.schedule;
         if (row.supervisorId) updatedAdvisor.supervisorId = row.supervisorId;
         if (row.supervisorRaw) updatedAdvisor.supervisor = row.supervisorRaw;
@@ -1030,6 +1036,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       fileName: payload.fileName,
       fileSize: payload.fileSize,
       user: currentUser.name,
+      recordType: 'DOTACION',
       campaign: payload.usesSheetCampaigns ? [...new Set(payload.rows.filter(row => row.status !== 'ERROR').map(row => row.campaignName))].join(', ') : payload.campaignName,
       period: payload.periodName,
       cutoffDate: payload.cutoffDate,
