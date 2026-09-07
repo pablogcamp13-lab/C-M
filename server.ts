@@ -244,6 +244,19 @@ async function startServer() {
     res.status(204).end();
   });
   const requireAdmin = (req: express.Request, res: express.Response) => (req as any).authUser?.role === 'ADMINISTRADOR' || res.status(403).json({ error: 'Acceso restringido a administración.' });
+  app.post('/api/admin/email/test', requireAuth, async (req, res) => {
+    if (requireAdmin(req, res) !== true) return;
+    const recipient = String(req.body?.recipient || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) return res.status(400).json({ error: 'Correo de prueba inválido.' });
+    if (!emailService.enabled) return res.status(503).json({ error: 'El servicio de correo no está configurado.' });
+    try {
+      await emailService.sendSupervisorNotification({ recipient, subject: 'Calidad y Mejora Continua: Prueba de notificaciones', title: 'Configuración de correo validada', description: 'El envío automático de correos desde la plataforma C&M está funcionando correctamente.', advisorName: 'Prueba técnica', campaignName: 'C&M', actionLabel: 'Abrir plataforma', path: '/' });
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error('[email] Falló el correo de prueba.', error instanceof Error ? error.message : '');
+      return res.status(502).json({ error: 'Gmail rechazó el correo de prueba. Revisa el token y sus permisos.' });
+    }
+  });
   app.post('/api/admin/users', requireAuth, async (req, res) => {
     if (requireAdmin(req, res) !== true) return;
     const body = req.body || {}; const name = String(body.name || '').trim(); const email = String(body.email || '').trim().toLowerCase();
