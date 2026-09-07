@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { google } from 'googleapis';
+import { createHash } from 'node:crypto';
 
 const BRAND = 'Calidad y Mejora Continua';
 const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[character]!);
@@ -13,18 +14,34 @@ const platformUrl = () => {
 };
 
 class EmailService {
-  get enabled() { return Boolean((process.env.GMAIL_CLIENT_ID || process.env.GOOGLE_CLIENT_ID) && (process.env.GMAIL_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET) && (process.env.GMAIL_REFRESH_TOKEN || process.env.GOOGLE_REFRESH_TOKEN)); }
+  private diagnostics: { tokenFingerprint: string; scopes: string[]; checkedAt: string } | null = null;
+  get enabled() { return Boolean(process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_REFRESH_TOKEN); }
+  get safeDiagnostics() { return this.diagnostics; }
 
-  private auth() {
-    const auth = new google.auth.OAuth2(process.env.GMAIL_CLIENT_ID || process.env.GOOGLE_CLIENT_ID, process.env.GMAIL_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET);
-    auth.setCredentials({ refresh_token: process.env.GMAIL_REFRESH_TOKEN || process.env.GOOGLE_REFRESH_TOKEN });
+  private async auth() {
+    const refreshToken = process.env.GMAIL_REFRESH_TOKEN!;
+    const fingerprint = createHash('sha256').update(refreshToken).digest('hex').slice(0, 12);
+    const auth = new google.auth.OAuth2(process.env.GMAIL_CLIENT_ID, process.env.GMAIL_CLIENT_SECRET);
+    auth.setCredentials({ refresh_token: refreshToken });
+    this.diagnostics = { tokenFingerprint: fingerprint, scopes: [], checkedAt: new Date().toISOString() };
+    try {
+      const accessToken = await auth.getAccessToken();
+      if (!accessToken.token) throw new Error('Gmail no devolvió un access token.');
+      const tokenInfo = await auth.getTokenInfo(accessToken.token);
+      const scopes = tokenInfo.scopes || [];
+      this.diagnostics = { tokenFingerprint: fingerprint, scopes, checkedAt: new Date().toISOString() };
+      console.info(`[gmail-auth] refresh_token_sha256=${fingerprint} scopes=${scopes.join(',') || 'none'}`);
+    } catch (error) {
+      console.error(`[gmail-auth] refresh_token_sha256=${fingerprint} scopes=unavailable error=${error instanceof Error ? error.message : 'unknown'}`);
+      throw error;
+    }
     return auth;
   }
 
   async sendEvaluationNotification(input: { recipient: string; advisorName: string; campaignName: string; date: string; result: string; evaluatorName: string; evaluationId: string }) {
     if (!this.enabled) return false;
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.recipient)) return false;
-    const gmail = google.gmail({ version: 'v1', auth: this.auth() });
+    const gmail = google.gmail({ version: 'v1', auth: await this.auth() });
     const profile = await gmail.users.getProfile({ userId: 'me' });
     const sender = profile.data.emailAddress;
     if (!sender) throw new Error('Gmail no devolvió una cuenta remitente.');
@@ -41,7 +58,7 @@ class EmailService {
 
   async sendSupervisorNotification(input: { recipient: string; subject: string; title: string; description: string; advisorName: string; campaignName: string; actionLabel: string; path: string }) {
     if (!this.enabled || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.recipient)) return false;
-    const gmail = google.gmail({ version: 'v1', auth: this.auth() });
+    const gmail = google.gmail({ version: 'v1', auth: await this.auth() });
     const profile = await gmail.users.getProfile({ userId: 'me' });
     const sender = profile.data.emailAddress;
     if (!sender) throw new Error('Gmail no devolvió una cuenta remitente.');
