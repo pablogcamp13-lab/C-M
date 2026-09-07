@@ -899,6 +899,9 @@ export const AdminSettingsView: React.FC = () => {
                     <option value="CONSULTOR">
                       CONSULTOR (Auditoría 3C y calidad)
                     </option>
+                    <option value="MONITOR">
+                      MONITOR (Evaluaciones, feedbacks y cápsulas propias)
+                    </option>
                     <option value="ADMINISTRADOR">
                       ADMINISTRADOR (Acceso total)
                     </option>

@@ -11,21 +11,28 @@ const navigation: Array<{ label: string; section: NavigationSection }> = [
   { label: 'Desarrollo', section: 'development' },
   { label: 'Analítica', section: 'pareto' }, { label: 'Configuración', section: 'admin' }
 ];
+const monitorNavigation: Array<{ label: string; section: NavigationSection }> = [
+  { label: 'Evaluar', section: 'evaluations' },
+  { label: 'Feedbacks', section: 'feedback' },
+  { label: 'Resultados', section: 'monitor_results' },
+  { label: 'Cápsulas', section: 'development' },
+  { label: 'Mis avances', section: 'monitor_progress' },
+];
 
 export const Navbar: React.FC<{ onOpenNewEvaluation: () => void }> = ({ onOpenNewEvaluation }) => {
   const { currentSection, setCurrentSection, currentUser, filters, setFilters, logout } = useApp();
   const [open, setOpen] = useState(false);
   const [menu, setMenu] = useState(false);
-  const visibleNavigation = currentUser.role === 'ASESOR'
+  const visibleNavigation = currentUser.role === 'MONITOR' ? monitorNavigation : currentUser.role === 'ASESOR'
     ? navigation.filter(item => ['home', 'evaluations', 'feedback', 'action_plans', 'quality_alerts', 'development'].includes(item.section))
     : currentUser.role === 'SUPERVISOR'
       ? navigation.filter(item => ['home', 'evaluations', 'feedback', 'action_plans', 'quality_alerts', 'calibrations'].includes(item.section))
       : navigation.filter(item => item.section !== 'development' || currentUser.role === 'ADMINISTRADOR');
-  const canCreateEvaluation = ['ADMINISTRADOR', 'CONSULTOR'].includes(currentUser.role);
+  const canCreateEvaluation = ['ADMINISTRADOR', 'CONSULTOR', 'MONITOR'].includes(currentUser.role);
 
   return <header className="cm-navbar">
     <div className="cm-navbar__inner">
-      <button onClick={() => setCurrentSection('home')} className="cm-navbar__brand">
+      <button onClick={() => setCurrentSection(currentUser.role === 'MONITOR' ? 'monitor_progress' : 'home')} className="cm-navbar__brand">
         <span className="cm-navbar__brand-mark">C&amp;M</span><span className="cm-navbar__divider hidden sm:block" />
         <span className="cm-navbar__subtitle hidden sm:block">Calidad y<br />Mejora Continua</span>
       </button>

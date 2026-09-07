@@ -1,4 +1,4 @@
-export type UserRole = 'ADMINISTRADOR' | 'CONSULTOR' | 'SUPERVISOR' | 'FORMADOR' | 'GERENCIA' | 'ASESOR';
+export type UserRole = 'ADMINISTRADOR' | 'CONSULTOR' | 'MONITOR' | 'SUPERVISOR' | 'FORMADOR' | 'GERENCIA' | 'ASESOR';
 
 export interface User {
   id: string;
@@ -214,6 +214,7 @@ export interface Evaluation {
   id: string;
   advisorId: string;
   evaluatorId: string;
+  evaluatorName?: string;
   campaignId: string;
   teamId: string;
   supervisorId: string;
@@ -461,4 +462,6 @@ export type NavigationSection =
   | 'impact' 
   | 'reports' 
   | 'admin'
-  | 'development';
+  | 'development'
+  | 'monitor_results'
+  | 'monitor_progress';

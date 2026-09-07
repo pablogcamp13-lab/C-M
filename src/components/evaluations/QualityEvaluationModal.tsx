@@ -74,7 +74,7 @@ export const QualityEvaluationModal: React.FC<{
   const advisor = advisors.find((a) => a.id === advisorId);
   const supervisor = users.find((u) => u.id === advisor?.supervisorId);
   const team = teams.find((t) => t.id === advisor?.teamId);
-  const evaluators = users.filter((u) => u.role !== "ASESOR");
+  const evaluators = currentUser.role === "MONITOR" ? [currentUser] : users.filter((u) => u.role !== "ASESOR");
   const campaign = campaigns.find((c) => c.id === advisor?.campaignId);
   const isMigracionesBitelCampaign = /(?:migraciones.*bitel|bitel.*migraciones)/i.test(campaign?.name || "");
   const criterionWeights = campaign?.qualityCriterionWeights || QUALITY_WEIGHTS;
@@ -299,6 +299,7 @@ export const QualityEvaluationModal: React.FC<{
                 <select
                   value={evaluatorId}
                   onChange={(e) => setEvaluatorId(e.target.value)}
+                  disabled={currentUser.role === "MONITOR"}
                   className="mt-1 w-full rounded-lg border border-[#D7E2E2] bg-white px-3 py-2 text-sm"
                 >
                   {evaluators.map((u) => (

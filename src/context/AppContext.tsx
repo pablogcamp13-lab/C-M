@@ -265,12 +265,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Persistencia incremental del repositorio único de dotación. Los demás módulos
   // siguen en su almacenamiento actual hasta sus fases de migración respectivas.
   useEffect(() => {
-    if (!isAuthenticated || ['ASESOR', 'SUPERVISOR'].includes(currentUser.role) || !rosterHydrated.current) return;
+    if (!isAuthenticated || ['ASESOR', 'SUPERVISOR', 'MONITOR'].includes(currentUser.role) || !rosterHydrated.current) return;
     void sharedRepositoryApi.sync({ users, campaigns, teams, advisors }).catch(error => console.error('No fue posible sincronizar la dotación', error));
   }, [users, campaigns, teams, advisors, isAuthenticated, currentUser.role]);
 
   useEffect(() => {
-    if (!isAuthenticated || ['ASESOR', 'SUPERVISOR'].includes(currentUser.role) || !platformStateHydrated.current) return;
+    if (!isAuthenticated || ['ASESOR', 'SUPERVISOR', 'MONITOR'].includes(currentUser.role) || !platformStateHydrated.current) return;
     void platformStateApi.save({ evaluations, actionPlans, interventions, advisorInterventions, operationalMeasurements, importHistory, config }).catch(error => console.error('No fue posible sincronizar el estado de plataforma', error));
   }, [evaluations, actionPlans, interventions, advisorInterventions, operationalMeasurements, importHistory, config, isAuthenticated, currentUser.role]);
 
@@ -380,6 +380,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (currentUser.role === 'SUPERVISOR') {
       if (ev.supervisorId !== currentUser.id && (!currentUser.teamId || ev.teamId !== currentUser.teamId)) return false;
     }
+
+    if (currentUser.role === 'MONITOR' && ev.evaluatorId !== currentUser.id) return false;
 
     if (filters.searchQuery) {
       const q = filters.searchQuery.toLowerCase();
@@ -589,6 +591,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateEvaluation = (id: string, evalData: Partial<Evaluation>) => {
+    if (currentUser.role === 'MONITOR' && !evaluations.some(e => e.id === id && e.evaluatorId === currentUser.id)) return;
     setEvaluations(prev => prev.map(e => {
       if (e.id === id) {
         const merged = { ...e, ...evalData };
@@ -613,6 +616,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteEvaluation = (id: string) => {
+    if (currentUser.role === 'MONITOR') return;
     setEvaluations(prev => prev.filter(e => e.id !== id));
   };
 

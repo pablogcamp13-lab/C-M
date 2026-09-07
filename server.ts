@@ -261,7 +261,7 @@ async function startServer() {
   app.post('/api/admin/users', requireAuth, async (req, res) => {
     if (requireAdmin(req, res) !== true) return;
     const body = req.body || {}; const name = String(body.name || '').trim(); const email = String(body.email || '').trim().toLowerCase();
-    const validRoles = ['ADMINISTRADOR','CONSULTOR','SUPERVISOR','FORMADOR','GERENCIA','ASESOR']; const role = validRoles.includes(body.role) ? body.role : 'ASESOR'; const status = body.status === 'INACTIVO' ? 'INACTIVO' : 'ACTIVO';
+    const validRoles = ['ADMINISTRADOR','CONSULTOR','MONITOR','SUPERVISOR','FORMADOR','GERENCIA','ASESOR']; const role = validRoles.includes(body.role) ? body.role : 'ASESOR'; const status = body.status === 'INACTIVO' ? 'INACTIVO' : 'ACTIVO';
     if (!name || !email) return res.status(400).json({ error: 'Nombre y correo son obligatorios.' });
     if (role === 'SUPERVISOR' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'El supervisor debe tener un correo válido.' });
     if (db.prepare('SELECT 1 FROM users WHERE lower(email)=lower(?)').get(email)) return res.status(409).json({ error: 'El correo ya está registrado.' });
@@ -276,7 +276,7 @@ async function startServer() {
   app.patch('/api/admin/users/:id', requireAuth, async (req, res) => {
     if (requireAdmin(req, res) !== true) return;
     const current = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id) as any; if (!current) return res.status(404).json({ error: 'Usuario no encontrado.' });
-    const body = req.body || {}; const next = { name: String(body.name ?? current.name).trim(), email: String(body.email ?? current.email).trim(), username: String((body.username ?? current.username) || '').trim() || null, role: body.role ?? current.role, status: body.status ?? current.status, teamId: body.teamId ?? current.team_id, advisorId: body.advisorId ?? current.advisor_id };
+    const body = req.body || {}; const validRoles = ['ADMINISTRADOR','CONSULTOR','MONITOR','SUPERVISOR','FORMADOR','GERENCIA','ASESOR']; const next = { name: String(body.name ?? current.name).trim(), email: String(body.email ?? current.email).trim(), username: String((body.username ?? current.username) || '').trim() || null, role: validRoles.includes(body.role) ? body.role : current.role, status: body.status ?? current.status, teamId: body.teamId ?? current.team_id, advisorId: body.advisorId ?? current.advisor_id };
     if (!next.name || !next.email) return res.status(400).json({ error: 'Nombre y correo son obligatorios.' });
     if (next.role === 'SUPERVISOR' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.email)) return res.status(400).json({ error: 'El supervisor debe tener un correo válido.' });
     try { db.prepare('UPDATE users SET name=?,email=?,username=?,role=?,status=?,team_id=?,advisor_id=? WHERE id=?').run(next.name, next.email, next.username, next.role, next.status, next.teamId || null, next.advisorId || null, current.id); if (googleStorage.enabled) await googleStorage.saveRepository(repository(), passwordHashes()); return res.json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(current.id)) }); }
@@ -300,6 +300,11 @@ async function startServer() {
 
   app.get('/api/shared-repository', requireAuth, async (req, res) => {
     const source = await readRepository(); const user = (req as any).authUser as User;
+    if (user.role === 'MONITOR') {
+      const advisors = source.advisors.filter(item => item.active !== false && item.status === 'ACTIVO');
+      const campaignIds = new Set(advisors.map(item => item.campaignId));
+      return res.json({ repository: { advisors, campaigns: source.campaigns.filter(item => item.status === 'ACTIVA' && campaignIds.has(item.id)), teams: source.teams.filter(item => campaignIds.has(item.campaignId)), users: source.users.filter(item => item.id === user.id || item.role === 'SUPERVISOR') } });
+    }
     if (user.role === 'SUPERVISOR') {
       const advisors = source.advisors.filter(item => item.supervisorId === user.id || (user.teamId && item.teamId === user.teamId));
       const campaignIds = new Set(advisors.map(item => item.campaignId)); const teamIds = new Set(advisors.map(item => item.teamId).filter(Boolean));
@@ -338,12 +343,16 @@ async function startServer() {
     } catch (error: any) { res.status(400).json({ error: error.message || 'No se pudo eliminar la campaña.' }); }
   });
   app.post('/api/evaluations', requireAuth, async (req, res) => {
-    if (!['ADMINISTRADOR','CONSULTOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'Solo Calidad o Administración puede crear evaluaciones.' });
+    const authUser = (req as any).authUser as User;
+    if (!['ADMINISTRADOR','CONSULTOR','MONITOR'].includes(authUser.role)) return res.status(403).json({ error: 'Solo Calidad, Monitor o Administración puede crear evaluaciones.' });
     let evaluation = req.body;
     if (!evaluation?.id || !evaluation?.advisorId || !evaluation?.evaluatorId || !['QUALITY', 'D3C'].includes(evaluation?.evaluationType)) return res.status(400).json({ error: 'Evaluación inválida.' });
     const evaluatedAt = `${evaluation.date}T${evaluation.time || '00:00'}:00`;
     try {
       const directory = googleStorage.enabled ? await readRepository() : repository();
+      const advisor = directory.advisors.find(item => item.id === evaluation.advisorId);
+      if (!advisor || advisor.active === false || advisor.status !== 'ACTIVO') return res.status(400).json({ error: 'El asesor no está habilitado para evaluación.' });
+      if (authUser.role === 'MONITOR') evaluation = { ...evaluation, evaluatorId: authUser.id, evaluatorName: authUser.name };
       evaluation = correctMigracionesQualityEvaluation(evaluation, directory.campaigns);
       const localDuplicate = (db.prepare('SELECT payload_json FROM evaluations WHERE advisor_id=? AND evaluation_type=? AND evaluated_at=?').all(evaluation.advisorId,evaluation.evaluationType,evaluatedAt) as any[]).flatMap(row=>{try{return [JSON.parse(row.payload_json)];}catch{return [];}}).find(item=>evaluationIdentity(item)===evaluationIdentity(evaluation));
       if (localDuplicate) return res.status(200).json({ evaluation: localDuplicate, deduplicated: true });
@@ -377,13 +386,14 @@ async function startServer() {
   });
   app.get('/api/feedbacks', requireAuth, async (req, res) => {
     const user = (req as any).authUser as User;
-    const onlyOwn = (feedbacks: any[]) => user.role === 'ASESOR' ? feedbacks.filter(feedback => feedback.advisor_id === user.advisorId) : user.role === 'SUPERVISOR' ? feedbacks.filter(feedback => feedback.supervisor_id === user.id) : feedbacks;
+    const onlyOwn = (feedbacks: any[]) => user.role === 'ASESOR' ? feedbacks.filter(feedback => feedback.advisor_id === user.advisorId) : user.role === 'SUPERVISOR' ? feedbacks.filter(feedback => feedback.supervisor_id === user.id) : user.role === 'MONITOR' ? feedbacks.filter(feedback => feedback.evaluator_id === user.id) : feedbacks;
     try { const remote = googleStorage.enabled ? await googleStorage.loadFeedbacks() : null; if (remote) return res.json({ feedbacks: onlyOwn(remote) }); }
     catch (error) { console.error('[google-storage] No fue posible leer feedbacks.', error instanceof Error ? error.message : ''); }
     res.json({ feedbacks: onlyOwn(db.prepare('SELECT * FROM feedbacks ORDER BY updated_at DESC').all() as any[]) });
   });
   app.post('/api/feedbacks', requireAuth, async (req, res) => {
-    if ((req as any).authUser.role === 'ASESOR') return res.status(403).json({ error: 'Un asesor no puede crear feedbacks.' });
+    const authUser = (req as any).authUser as User;
+    if (authUser.role === 'ASESOR') return res.status(403).json({ error: 'Un asesor no puede crear feedbacks.' });
     const body = req.body || {}; const evaluation = db.prepare('SELECT * FROM evaluations WHERE id=?').get(body.evaluation_id) as any;
     let ev = evaluation ? JSON.parse(evaluation.payload_json) : null;
     if (!ev && googleStorage.enabled) {
@@ -391,6 +401,7 @@ async function startServer() {
       catch (error) { console.error('[google-storage] No fue posible recuperar la evaluación origen.', error instanceof Error ? error.message : ''); }
     }
     if (!ev) return res.status(400).json({ error: 'La evaluación origen no existe.' });
+    if (authUser.role === 'MONITOR' && ev.evaluatorId !== authUser.id) return res.status(403).json({ error: 'Solo puedes crear feedback de evaluaciones propias.' });
     const now = new Date().toISOString(); const feedback = { feedback_id: `fb_${randomBytes(8).toString('hex')}`, evaluation_id: ev.id, advisor_id: ev.advisorId, supervisor_id: ev.supervisorId, evaluator_id: ev.evaluatorId, evaluation_type: ev.evaluationType, feedback_text: String(body.feedback_text || ''), advisor_response: null, advisor_evidence_url: null, supervisor_closure_comment: null, status: 'PENDIENTE', created_at: now, advisor_action_at: null, closed_at: null, updated_at: now };
     try {
       if (googleStorage.enabled) {
@@ -420,9 +431,11 @@ async function startServer() {
     const body = req.body || {}; const status = body.status || current.status; const user = (req as any).authUser as User;
     if (user.role === 'ASESOR' && (user.advisorId !== current.advisor_id || !['VALIDADO_ASESOR', 'OBSERVADO_ASESOR'].includes(status))) return res.status(403).json({ error: 'No tienes permiso para cerrar o modificar este feedback.' });
     if (user.role === 'SUPERVISOR' && current.supervisor_id !== user.id) return res.status(403).json({ error: 'Este feedback no pertenece a tu equipo.' });
+    if (user.role === 'MONITOR' && current.evaluator_id !== user.id) return res.status(403).json({ error: 'Este feedback pertenece a otro monitor.' });
+    if (user.role === 'MONITOR' && status !== current.status) return res.status(403).json({ error: 'El cambio de estado corresponde al asesor o supervisor.' });
     const valid = (current.status === 'PENDIENTE' && ['VALIDADO_ASESOR','OBSERVADO_ASESOR'].includes(status)) || (['VALIDADO_ASESOR','OBSERVADO_ASESOR'].includes(current.status) && status === 'CERRADO_SUPERVISOR') || status === current.status;
     if (!valid || (status === 'CERRADO_SUPERVISOR' && current.status === 'OBSERVADO_ASESOR' && !String(body.supervisor_closure_comment || current.supervisor_closure_comment || '').trim())) return res.status(400).json({ error: 'Transición de feedback no permitida o falta comentario de cierre.' });
-    const now = new Date().toISOString(); const feedback = { ...current, status, feedback_text: user.role === 'ADMINISTRADOR' ? String(body.feedback_text ?? current.feedback_text).trim() : current.feedback_text, advisor_response: body.advisor_response ?? current.advisor_response, advisor_evidence_url: body.advisor_evidence_url ?? current.advisor_evidence_url, supervisor_closure_comment: body.supervisor_closure_comment ?? current.supervisor_closure_comment, advisor_action_at: current.status === 'PENDIENTE' && ['VALIDADO_ASESOR','OBSERVADO_ASESOR'].includes(status) ? now : current.advisor_action_at, closed_at: current.status !== 'CERRADO_SUPERVISOR' && status === 'CERRADO_SUPERVISOR' ? now : current.closed_at, updated_at: now };
+    const now = new Date().toISOString(); const canEditText = user.role === 'ADMINISTRADOR' || (user.role === 'MONITOR' && current.status === 'PENDIENTE'); const feedback = { ...current, status, feedback_text: canEditText ? String(body.feedback_text ?? current.feedback_text).trim() : current.feedback_text, advisor_response: user.role === 'ASESOR' ? body.advisor_response ?? current.advisor_response : current.advisor_response, advisor_evidence_url: user.role === 'ASESOR' ? body.advisor_evidence_url ?? current.advisor_evidence_url : current.advisor_evidence_url, supervisor_closure_comment: user.role === 'SUPERVISOR' || user.role === 'ADMINISTRADOR' ? body.supervisor_closure_comment ?? current.supervisor_closure_comment : current.supervisor_closure_comment, advisor_action_at: current.status === 'PENDIENTE' && ['VALIDADO_ASESOR','OBSERVADO_ASESOR'].includes(status) ? now : current.advisor_action_at, closed_at: current.status !== 'CERRADO_SUPERVISOR' && status === 'CERRADO_SUPERVISOR' ? now : current.closed_at, updated_at: now };
     if (!feedback.feedback_text) return res.status(400).json({ error: 'El contenido del feedback no puede quedar vacío.' });
     try {
       if (googleStorage.enabled) await googleStorage.saveFeedback(feedback);
@@ -441,7 +454,9 @@ async function startServer() {
   app.get('/api/platform-state', requireAuth, async (req, res) => {
     const user = (req as any).authUser as User; const directory = await readRepository();
     const onlyOwn = (state: any) => {
-      if (!state || !['ASESOR','SUPERVISOR'].includes(user.role)) return state;
+      if (!state) return state;
+      if (user.role === 'MONITOR') return { ...state, evaluations: (state.evaluations || []).filter((item: any) => item.evaluatorId === user.id), actionPlans: [], advisorInterventions: [], operationalMeasurements: [], importHistory: [] };
+      if (!['ASESOR','SUPERVISOR'].includes(user.role)) return state;
       const advisorIds = user.role === 'ASESOR' && user.advisorId ? new Set([user.advisorId]) : new Set(directory.advisors.filter(item => item.supervisorId === user.id || (user.teamId && item.teamId === user.teamId)).map(item => item.id));
       const mine = (items: any[] | undefined) => (items || []).filter(item => advisorIds.has(item.advisorId));
       const visibleEvaluations = mine(state.evaluations).filter((item: any) => !item.validationStatus || ['VALIDADO','AJUSTADO_VALIDADO'].includes(item.validationStatus));
@@ -469,7 +484,7 @@ async function startServer() {
     res.json({ state: onlyOwn(corrected) });
   });
   app.put('/api/platform-state', requireAuth, async (req, res) => {
-    if (['ASESOR','SUPERVISOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'Este rol no puede sobrescribir el estado global.' });
+    if (['ASESOR','SUPERVISOR','MONITOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'Este rol no puede sobrescribir el estado global.' });
     const now = new Date().toISOString();
     const normalizedState = normalizePlatformState(req.body);
     try { if (googleStorage.enabled) { await googleStorage.savePlatformState(normalizedState); for (const evaluation of (normalizedState?.evaluations || [])) if (evaluation?.id && evaluation?.advisorId && evaluation?.evaluatorId && ['QUALITY','D3C'].includes(evaluation?.evaluationType)) await googleStorage.saveEvaluation(evaluation); } }
@@ -513,6 +528,7 @@ async function startServer() {
 
   app.get('/api/quality-alerts', requireAuth, async (req, res) => {
     const user = (req as any).authUser as User; let alerts = alertRows();
+    if (user.role === 'MONITOR') return res.status(403).json({ error:'Acceso denegado.' });
     try { const remote = googleStorage.enabled ? await googleStorage.loadQualityAlerts() : []; if (remote.length) { alerts = remote; remote.forEach(persistAlert); } } catch {}
     if (user.role === 'ASESOR') alerts = alerts.filter(item => item.advisorId === user.advisorId);
     if (user.role === 'SUPERVISOR') alerts = alerts.filter(item => item.supervisorId === user.id);
@@ -552,7 +568,7 @@ async function startServer() {
   // @ts-ignore Los identificadores se normalizan a texto al persistir.
   const withAffinity=(item:any)=>{const expert=item.expertResponse;if(!expert)return item;const critical=new Set((item.caseSnapshot?.items||[]).filter((row:any)=>row.qualityGuideline?.critical||String(row.classification||'').startsWith('CRITICO_')).map((row:any)=>row.criterionId));const participants=(item.participants||[]).map((p:any)=>{if(!p.response)return p;const keys=Object.keys(expert.answers||{}),match=keys.length?keys.filter(k=>p.response.answers?.[k]===expert.answers[k]).length/keys.length*100:0,note=Math.max(0,100-Math.abs(Number(p.response.score)-Number(expert.score))),typ=p.response.typification===expert.typification?100:0,crit=[...critical],critMatch=crit.length?crit.filter(k=>p.response.answers?.[k]===expert.answers[k]).length/crit.length*100:100,affinity=Math.round((match*.5+note*.25+typ*.15+critMatch*.1)*10)/10,level=affinity>=90?'Muy calibrado':affinity>=80?'Calibrado':affinity>=70?'Requiere ajuste':'No calibrado',differences=keys.filter(k=>p.response.answers?.[k]!==expert.answers[k]).map(k=>item.attributeLabels?.[k]||k);return{...p,answers:p.response.answers,agreement:Math.round(match),affinity,affinityLevel:level,deviation:Math.round((Number(p.response.score)-Number(expert.score))*10)/10,mainDifferences:differences.slice(0,5)};});return{...item,participants};};
   const audited=(item:any,action:string,userId:string,extra:any={})=>({...item,...extra,audit:[...(item.audit||[]),{action,userId,at:new Date().toISOString()}],updatedAt:new Date().toISOString()});
-  app.get('/api/calibrations',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(['ASESOR','GERENCIA'].includes(user.role))return res.json({calibrations:[]});let rows=(await loadCalibrations()).map(withAffinity);if(['SUPERVISOR','FORMADOR'].includes(user.role))rows=rows.filter(i=>i.expertId===user.id||i.participants?.some((p:any)=>p.supervisorId===user.id));rows=rows.map(i=>{if(calibrationManagers(user.role)||i.status==='CERRADA')return i;const{expertResponse,officialAnswers,results,...safe}=i;return safe;});res.json({calibrations:rows});});
+  app.get('/api/calibrations',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(['ASESOR','GERENCIA','MONITOR'].includes(user.role))return res.json({calibrations:[]});let rows=(await loadCalibrations()).map(withAffinity);if(['SUPERVISOR','FORMADOR'].includes(user.role))rows=rows.filter(i=>i.expertId===user.id||i.participants?.some((p:any)=>p.supervisorId===user.id));rows=rows.map(i=>{if(calibrationManagers(user.role)||i.status==='CERRADA')return i;const{expertResponse,officialAnswers,results,...safe}=i;return safe;});res.json({calibrations:rows});});
   app.post('/api/calibrations',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(!calibrationManagers(user.role))return res.status(403).json({error:'Acceso denegado.'});const b=req.body||{},e=b.evaluation,repo=repository(),participantIds=[...new Set((b.participantIds||b.supervisorIds||[]).filter(Boolean))] as string[];if(!e?.id||e.evaluationType!=='QUALITY')return res.status(400).json({error:'Selecciona una evaluación de Calidad.'});if(!b.expertId||!repo.users.some(u=>u.id===b.expertId&&u.status==='ACTIVO'))return res.status(400).json({error:'Selecciona un Referente Experto activo.'});const validIds=participantIds.filter(id=>id!==b.expertId&&repo.users.some(u=>u.id===id&&u.status==='ACTIVO'));if(!validIds.length)return res.status(400).json({error:'Selecciona participantes activos.'});const now=new Date().toISOString(),labels=Object.fromEntries((e.items||[]).map((x:any)=>[x.criterionId,x.qualityGuideline?.name||x.attribute||x.criterionId])),item={id:`cal_${randomBytes(8).toString('hex')}`,evaluationId:e.id,campaignId:e.campaignId,title:String(b.title||`Calibración ${e.callId}`),description:String(b.description||''),callType:b.callType||(e.sale?'VENTA':'NO_VENTA'),scheduledAt:b.scheduledAt||'',dueAt:b.dueAt||'',status:'BORRADOR',expertId:b.expertId,participants:validIds.map(supervisorId=>({supervisorId,status:'PENDIENTE'})),attributeLabels:labels,caseSnapshot:{callId:e.callId,date:e.date,time:e.time,advisorId:e.advisorId,product:e.product,typification:e.noSaleReason||e.saleResult,result:e.qualityResult,observation:b.observation||e.comments,audioUrl:e.audioUrl,audioFileName:e.audioFileName,audioDurationSeconds:e.audioDurationSeconds,items:e.items||[]},createdBy:user.id,createdAt:now,updatedAt:now,audit:[{action:'CREADA',userId:user.id,at:now}]};try{await saveCalibration(item);res.status(201).json({calibration:item});}catch{res.status(502).json({error:'No fue posible crear la calibración.'});}});
   app.patch('/api/calibrations/:id',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(!calibrationManagers(user.role))return res.status(403).json({error:'Acceso denegado.'});const current=(await loadCalibrations()).find(i=>i.id===req.params.id);if(!current)return res.status(404).json({error:'Calibración no encontrada.'});if(['CERRADA','ANULADA'].includes(current.status)&&user.role!=='ADMINISTRADOR')return res.status(403).json({error:'Solo Admin puede corregir registros cerrados o anulados.'});const allowed=['title','description','callType','scheduledAt','dueAt','expertId','participants'],changes=Object.fromEntries(allowed.filter(k=>req.body?.[k]!==undefined).map(k=>[k,req.body[k]]));if(changes.participants)changes.participants=(changes.participants as any[]).filter(p=>p.supervisorId!==(changes.expertId||current.expertId));const next=audited(current,'EDITADA',user.id,changes);await saveCalibration(next);res.json({calibration:next});});
   app.patch('/api/calibrations/:id/state',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(!calibrationManagers(user.role))return res.status(403).json({error:'Acceso denegado.'});const current=(await loadCalibrations()).find(i=>i.id===req.params.id);if(!current)return res.status(404).json({error:'Calibración no encontrada.'});if(['CERRADA','ANULADA'].includes(current.status)&&user.role!=='ADMINISTRADOR')return res.status(403).json({error:'Solo Admin puede corregir este estado.'});const target=String(req.body?.status||''),transitions:Record<string,string[]>={BORRADOR:['PROGRAMADA','ANULADA'],PROGRAMADA:['EN_VIVO','ANULADA'],EN_VIVO:['FINALIZADA','ANULADA'],FINALIZADA:['CERRADA','ANULADA'],CERRADA:[],ANULADA:[]};if(!(transitions[current.status]||[]).includes(target)&&user.role!=='ADMINISTRADOR')return res.status(400).json({error:'Transición no permitida.'});if(target==='EN_VIVO'&&(!current.title||!current.campaignId||!current.caseSnapshot?.callId||!current.caseSnapshot?.audioUrl||!current.expertId||!current.participants?.length))return res.status(400).json({error:'Completa obligatorios, audio, referente y participantes.'});if(target==='CERRADA'&&!current.expertResponse)return res.status(400).json({error:'No se puede cerrar sin evaluación del Referente Experto.'});let next=withAffinity(audited(current,target,user.id,{status:target}));if(target==='CERRADA'){const values=next.participants.filter((p:any)=>p.affinity!==undefined).map((p:any)=>p.affinity);next={...next,results:{patternScore:next.expertResponse.score,averageAffinity:values.length?Math.round(values.reduce((a:number,b:number)=>a+b,0)/values.length*10)/10:0,highestAffinity:values.length?Math.max(...values):0,lowestAffinity:values.length?Math.min(...values):0,closedAt:new Date().toISOString()}};}await saveCalibration(next);res.json({calibration:next});});
@@ -583,7 +599,8 @@ async function startServer() {
     finally { developmentHydration = null; }
   };
   app.get('/api/development/capsules', requireAuth, async (req, res) => {
-    const user = (req as any).authUser as User; if (!['ADMINISTRADOR','ASESOR'].includes(user.role)) return res.status(403).json({ error:'Acceso denegado.' }); try{await hydrateDevelopment();}catch(error){console.error('[google-storage] No fue posible cargar desarrollo.',error instanceof Error?error.message:'');} const capsules = capsuleRows();
+    const user = (req as any).authUser as User; if (!['ADMINISTRADOR','MONITOR','ASESOR'].includes(user.role)) return res.status(403).json({ error:'Acceso denegado.' }); try{await hydrateDevelopment();}catch(error){console.error('[google-storage] No fue posible cargar desarrollo.',error instanceof Error?error.message:'');} const capsules = capsuleRows();
+    if (user.role === 'MONITOR') return res.json({ capsules: capsules.filter(item => item.createdByUserId === user.id) });
     if (user.role !== 'ASESOR') return res.json({ capsules });
     const ids = new Set(assignmentRows().filter(item => item.advisorId === user.advisorId).map(item => item.capsuleId));
     return res.json({ capsules: capsules.filter(item => item.status === 'PUBLICADA' && ids.has(item.id)) });
@@ -607,23 +624,23 @@ async function startServer() {
     return res.json({ posts });
   });
   app.post('/api/development/capsules', requireAuth, async (req, res) => {
-    if (developmentAdmin(req, res) !== true) return; const now = new Date().toISOString(); const body = req.body || {};
-    const capsule = { ...body, id: `cap_${randomBytes(8).toString('hex')}`, status: 'BORRADOR', createdAt: now, updatedAt: now };
+    const user = (req as any).authUser as User; if (!['ADMINISTRADOR','MONITOR'].includes(user.role)) return res.status(403).json({ error:'Acceso denegado.' }); const now = new Date().toISOString(); const body = req.body || {};
+    const capsule = { ...body, id: `cap_${randomBytes(8).toString('hex')}`, status: 'BORRADOR', createdByUserId: user.id, createdByName: user.name, createdAt: now, updatedAt: now };
     if (!capsule.title || !capsule.content?.type || !['FORMULARIO','FORO'].includes(capsule.evaluation?.type)) return res.status(400).json({ error: 'Datos de cápsula incompletos.' });
     db.prepare('INSERT INTO development_capsules (id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?)').run(capsule.id, capsule.status, JSON.stringify(capsule), now, now); await syncDevelopment(); return res.status(201).json({ capsule });
   });
   app.patch('/api/development/capsules/:id', requireAuth, async (req, res) => {
-    if (developmentAdmin(req, res) !== true) return; const row = db.prepare('SELECT data_json FROM development_capsules WHERE id=?').get(req.params.id) as any; if (!row) return res.status(404).json({ error: 'Cápsula no encontrada.' });
-    const now = new Date().toISOString(); const capsule = { ...JSON.parse(row.data_json), ...req.body, id: req.params.id, updatedAt: now };
+    const user = (req as any).authUser as User; if (!['ADMINISTRADOR','MONITOR'].includes(user.role)) return res.status(403).json({ error:'Acceso denegado.' }); const row = db.prepare('SELECT data_json FROM development_capsules WHERE id=?').get(req.params.id) as any; if (!row) return res.status(404).json({ error: 'Cápsula no encontrada.' }); const current = JSON.parse(row.data_json); if (user.role === 'MONITOR' && current.createdByUserId !== user.id) return res.status(403).json({ error:'Esta cápsula pertenece a otro creador.' });
+    const now = new Date().toISOString(); const capsule = { ...current, ...req.body, id: req.params.id, createdByUserId: current.createdByUserId, createdByName: current.createdByName, updatedAt: now };
     db.prepare('UPDATE development_capsules SET status=?,data_json=?,updated_at=? WHERE id=?').run(capsule.status, JSON.stringify(capsule), now, capsule.id); await syncDevelopment(); return res.json({ capsule });
   });
   app.post('/api/development/capsules/:id/duplicate', requireAuth, async (req, res) => {
-    if (developmentAdmin(req, res) !== true) return; const row = db.prepare('SELECT data_json FROM development_capsules WHERE id=?').get(req.params.id) as any; if (!row) return res.status(404).json({ error: 'Cápsula no encontrada.' });
-    const now = new Date().toISOString(); const capsule = { ...JSON.parse(row.data_json), id: `cap_${randomBytes(8).toString('hex')}`, title: `${JSON.parse(row.data_json).title} · Copia`, status: 'BORRADOR', createdAt: now, updatedAt: now };
+    const user = (req as any).authUser as User; if (!['ADMINISTRADOR','MONITOR'].includes(user.role)) return res.status(403).json({ error:'Acceso denegado.' }); const row = db.prepare('SELECT data_json FROM development_capsules WHERE id=?').get(req.params.id) as any; if (!row) return res.status(404).json({ error: 'Cápsula no encontrada.' }); const source = JSON.parse(row.data_json); if (user.role === 'MONITOR' && source.createdByUserId !== user.id) return res.status(403).json({ error:'Esta cápsula pertenece a otro creador.' });
+    const now = new Date().toISOString(); const capsule = { ...source, id: `cap_${randomBytes(8).toString('hex')}`, title: `${source.title} · Copia`, status: 'BORRADOR', createdByUserId: user.id, createdByName: user.name, createdAt: now, updatedAt: now };
     db.prepare('INSERT INTO development_capsules (id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?)').run(capsule.id, capsule.status, JSON.stringify(capsule), now, now); await syncDevelopment(); return res.status(201).json({ capsule });
   });
-  app.delete('/api/development/capsules/:id', requireAuth, async (req, res) => { if (developmentAdmin(req, res) !== true) return; db.prepare('DELETE FROM development_assignments WHERE capsule_id=?').run(req.params.id); db.prepare('DELETE FROM development_capsules WHERE id=?').run(req.params.id); await syncDevelopment(); return res.status(204).end(); });
-  app.get('/api/development/assignments', requireAuth, async (req, res) => { const user = (req as any).authUser as User; if(!['ADMINISTRADOR','ASESOR'].includes(user.role))return res.status(403).json({error:'Acceso denegado.'});try{await hydrateDevelopment();}catch{} const assignments = assignmentRows().map(item=>item.dueAt&&new Date(item.dueAt)<new Date()&&!['COMPLETADA','VENCIDA'].includes(item.status)?{...item,status:'VENCIDA'}:item); return res.json({ assignments: user.role === 'ASESOR' ? assignments.filter(item => item.advisorId === user.advisorId) : assignments }); });
+  app.delete('/api/development/capsules/:id', requireAuth, async (req, res) => { const user=(req as any).authUser as User;if(!['ADMINISTRADOR','MONITOR'].includes(user.role))return res.status(403).json({error:'Acceso denegado.'});const row=db.prepare('SELECT data_json FROM development_capsules WHERE id=?').get(req.params.id) as any;if(!row)return res.status(404).json({error:'Cápsula no encontrada.'});if(user.role==='MONITOR'&&JSON.parse(row.data_json).createdByUserId!==user.id)return res.status(403).json({error:'Esta cápsula pertenece a otro creador.'});db.prepare('DELETE FROM development_assignments WHERE capsule_id=?').run(req.params.id); db.prepare('DELETE FROM development_capsules WHERE id=?').run(req.params.id); await syncDevelopment(); return res.status(204).end(); });
+  app.get('/api/development/assignments', requireAuth, async (req, res) => { const user = (req as any).authUser as User; if(!['ADMINISTRADOR','MONITOR','ASESOR'].includes(user.role))return res.status(403).json({error:'Acceso denegado.'});try{await hydrateDevelopment();}catch{} let assignments = assignmentRows().map(item=>item.dueAt&&new Date(item.dueAt)<new Date()&&!['COMPLETADA','VENCIDA'].includes(item.status)?{...item,status:'VENCIDA'}:item);if(user.role==='MONITOR'){const ids=new Set(capsuleRows().filter(item=>item.createdByUserId===user.id).map(item=>item.id));assignments=assignments.filter(item=>ids.has(item.capsuleId));}return res.json({ assignments: user.role === 'ASESOR' ? assignments.filter(item => item.advisorId === user.advisorId) : assignments }); });
   app.post('/api/development/assignments', requireAuth, async (req, res) => {
     if (developmentAdmin(req, res) !== true) return; const body = req.body || {}; const capsule = db.prepare('SELECT id FROM development_capsules WHERE id=? AND status=?').get(body.capsuleId, 'PUBLICADA'); if (!capsule) return res.status(400).json({ error: 'La cápsula debe estar publicada.' });
     const directory = await readRepository();

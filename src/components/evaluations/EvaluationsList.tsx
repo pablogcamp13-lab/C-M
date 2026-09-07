@@ -30,6 +30,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
   const [stateFilter, setStateFilter] = useState<'ALL' | 'PENDIENTE' | 'FINALIZADA'>('ALL');
   const isAdvisor = currentUser.role === 'ASESOR';
   const isReadOnly = ['ASESOR', 'SUPERVISOR'].includes(currentUser.role);
+  const canDelete = !isReadOnly && currentUser.role !== 'MONITOR';
   const visibleEvaluations = filteredEvaluations.filter(ev => {
     if (typeFilter !== 'ALL' && ev.evaluationType !== typeFilter) return false;
     if (resultFilter !== 'ALL' && (ev.sale ? 'VENTA' : 'NO_VENTA') !== resultFilter) return false;
@@ -220,7 +221,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                             >
                               <Eye className="w-4 h-4" />
                             </button>
-                            {!isReadOnly && <button
+                            {canDelete && <button
                               onClick={() => setDeleteConfirmId(ev.id)}
                               className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                               title="Eliminar evaluación"

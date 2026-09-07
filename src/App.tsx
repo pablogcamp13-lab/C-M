@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Navbar } from './components/layout/Navbar';
 import { DashboardView } from './components/dashboard/DashboardView';
@@ -24,6 +24,7 @@ import { ReportsExportView } from './components/reports/ReportsExportView';
 import { AdminSettingsView } from './components/admin/AdminSettingsView';
 import { FeedbackView } from './components/feedback/FeedbackView';
 import { DevelopmentView } from './components/development/DevelopmentView';
+import { MonitorProgressView, MonitorResultsView } from './components/monitor/MonitorViews';
 import { Evaluation, Advisor, Campaign } from './types';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { ForcePasswordChange } from './components/auth/ForcePasswordChange';
@@ -31,6 +32,10 @@ import { ChevronRight, ShieldCheck, TrendingUp, X } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
   const { currentSection, setCurrentSection, evaluations, advisors, campaigns, currentUser } = useApp();
+  useEffect(() => {
+    const allowed = ['evaluations', 'feedback', 'monitor_results', 'development', 'monitor_progress'];
+    if (currentUser.role === 'MONITOR' && !allowed.includes(currentSection)) setCurrentSection('monitor_progress');
+  }, [currentSection, currentUser.role, setCurrentSection]);
 
   // Modals state
   const [isNewEvalModalOpen, setIsNewEvalModalOpen] = useState(false);
@@ -110,6 +115,8 @@ const MainLayout: React.FC = () => {
           {currentSection === 'quality_alerts' && <QualityAlertsView />}
           {currentSection === 'calibrations' && <CalibrationsView />}
           {currentSection === 'development' && <DevelopmentView />}
+          {currentSection === 'monitor_results' && currentUser.role === 'MONITOR' && <MonitorResultsView onSelectEvaluation={setSelectedEvaluationForDetail} />}
+          {currentSection === 'monitor_progress' && currentUser.role === 'MONITOR' && <MonitorProgressView onSelectEvaluation={setSelectedEvaluationForDetail} onNavigate={setCurrentSection} />}
 
           {currentSection === 'advisors' && (
             <AdvisorsList

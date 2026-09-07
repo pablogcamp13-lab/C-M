@@ -38,6 +38,9 @@ type Capsule = {
   availableAt?: string;
   dueAt?: string;
   completionCriterion: string;
+  createdByUserId?: string;
+  createdByName?: string;
+  createdAt?: string;
 };
 type AssignmentStatus = "PENDIENTE" | "EN_CURSO" | "COMPLETADA" | "VENCIDA";
 type Assignment = {
@@ -202,7 +205,9 @@ const ContentFrame: React.FC<{
 export const DevelopmentView: React.FC = () => {
   const { currentUser } = useApp();
   const admin = currentUser.role === "ADMINISTRADOR";
-  const [tabs, setTab] = useState(admin ? "PANEL" : "PENDIENTE");
+  const monitor = currentUser.role === "MONITOR";
+  const manager = admin || monitor;
+  const [tabs, setTab] = useState(manager ? "PANEL" : "PENDIENTE");
   const [capsules, setCapsules] = useState<Capsule[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [advisors, setAdvisors] = useState<any[]>([]);
@@ -243,11 +248,11 @@ export const DevelopmentView: React.FC = () => {
         <header className="cm-page-heading flex items-center justify-between">
           <div>
             <p className="text-xs font-bold uppercase tracking-widest text-[var(--cm-primary)]">
-              {admin ? "Gestión de Desarrollo" : "Mi Desarrollo"}
+              {admin ? "Gestión de Desarrollo" : monitor ? "Mis cápsulas" : "Mi Desarrollo"}
             </p>
             <h1 className="mt-1 text-2xl font-bold">Cápsulas de desarrollo</h1>
           </div>
-          {admin && (
+          {manager && (
             <button
               onClick={() => setCreating(true)}
               className="cm-button-primary px-4 py-2"
@@ -258,8 +263,8 @@ export const DevelopmentView: React.FC = () => {
           )}
         </header>
         <nav className="cm-tabs mt-5 flex gap-2">
-          {(admin
-            ? ["PANEL", "CÁPSULAS", "ASIGNACIONES", "SEGUIMIENTO"]
+          {(manager
+            ? (admin ? ["PANEL", "CÁPSULAS", "ASIGNACIONES", "SEGUIMIENTO"] : ["PANEL", "CÁPSULAS"])
             : advisorTabs
           ).map((t) => (
             <button
@@ -267,13 +272,13 @@ export const DevelopmentView: React.FC = () => {
               onClick={() => setTab(t)}
               className={tabs === t ? "active" : ""}
             >
-              {admin
+              {manager
                 ? t[0] + t.slice(1).toLowerCase()
                 : `${statusLabel[t]} (${counts(t)})`}
             </button>
           ))}
         </nav>
-        {admin && tabs === "PANEL" && (
+        {manager && tabs === "PANEL" && (
           <section className="mt-5 grid gap-3 sm:grid-cols-3">
             <Metric label="Cápsulas" value={capsules.length} />
             <Metric
@@ -290,7 +295,7 @@ export const DevelopmentView: React.FC = () => {
             />
           </section>
         )}
-        {admin && tabs === "CÁPSULAS" && (
+        {manager && tabs === "CÁPSULAS" && (
           <section className="mt-5 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
             {capsules.map((c) => (
               <article key={c.id} className="cm-card p-4">
@@ -336,13 +341,13 @@ export const DevelopmentView: React.FC = () => {
                   )}
                   {c.status === "PUBLICADA" && (
                     <>
-                      <button
+                      {admin && <button
                         onClick={() => setAssigning(c)}
                         className="cm-button-primary px-2 py-1 text-xs"
                       >
                         <Send className="h-3 w-3" />
                         Asignar
-                      </button>
+                      </button>}
                       <button
                         onClick={() =>
                           void patchCapsule(c, { status: "ARCHIVADA" })
@@ -377,7 +382,7 @@ export const DevelopmentView: React.FC = () => {
             campaigns={campaigns}
           />
         )}{" "}
-        {!admin && (
+        {!manager && (
           <section className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {myAssignments
               .filter((a) => a.status === tabs)

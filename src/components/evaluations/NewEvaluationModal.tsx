@@ -54,10 +54,10 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
   const { advisors, users, campaigns, teams, currentUser, config, addEvaluation } = useApp();
 
   // Evaluators (exclude ASESOR role)
-  const evaluators = useMemo(() => users.filter(u => u.role !== 'ASESOR'), [users]);
+  const evaluators = useMemo(() => currentUser.role === 'MONITOR' ? [currentUser] : users.filter(u => u.role !== 'ASESOR'), [users, currentUser]);
 
   // Form State
-  const campaignAdvisors = advisors.filter(advisor => !preselectedCampaignId || advisor.campaignId === preselectedCampaignId);
+  const campaignAdvisors = advisors.filter(advisor => advisor.status === 'ACTIVO' && advisor.active !== false && (!preselectedCampaignId || advisor.campaignId === preselectedCampaignId));
   const [selectedAdvisorId, setSelectedAdvisorId] = useState<string>(preselectedAdvisor?.id || campaignAdvisors[0]?.id || '');
   const [selectedCampaignId] = useState<string>(preselectedCampaignId || preselectedAdvisor?.campaignId || campaigns[0]?.id || 'camp_bitel_migra');
   const [product, setProduct] = useState<string>(COMMERCIAL_PLANS[1]?.name || 'Plan Ilimitado S/ 39.90');
@@ -432,6 +432,7 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
                 <select
                   value={evaluatorId}
                   onChange={(e) => setEvaluatorId(e.target.value)}
+                  disabled={currentUser.role === 'MONITOR'}
                   className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-teal-500 font-medium text-slate-800"
                   required
                 >
