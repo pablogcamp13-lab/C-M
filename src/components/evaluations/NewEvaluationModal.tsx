@@ -41,6 +41,7 @@ interface NewEvaluationModalProps {
   onSuccess?: (evaluation: Evaluation) => void;
   onOpenActionPlanWithEval?: (evaluation: Evaluation) => void;
   preselectedCampaignId?: string;
+  preselectedOperationId?: string | null;
   preselectedAdvisor?: Advisor | null;
 }
 
@@ -49,6 +50,7 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
   onSuccess,
   onOpenActionPlanWithEval,
   preselectedCampaignId,
+  preselectedOperationId,
   preselectedAdvisor
 }) => {
   const { advisors, users, campaigns, teams, currentUser, config, addEvaluation } = useApp();
@@ -57,7 +59,7 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
   const evaluators = useMemo(() => currentUser.role === 'MONITOR' ? [currentUser] : users.filter(u => u.role !== 'ASESOR'), [users, currentUser]);
 
   // Form State
-  const campaignAdvisors = advisors.filter(advisor => advisor.status === 'ACTIVO' && advisor.active !== false && (!preselectedCampaignId || advisor.campaignId === preselectedCampaignId));
+  const campaignAdvisors = advisors.filter(advisor => advisor.status === 'ACTIVO' && advisor.active !== false && (!preselectedCampaignId || advisor.campaignId === preselectedCampaignId) && (!preselectedOperationId || advisor.operationId === preselectedOperationId));
   const [selectedAdvisorId, setSelectedAdvisorId] = useState<string>(preselectedAdvisor?.id || campaignAdvisors[0]?.id || '');
   const [selectedCampaignId] = useState<string>(preselectedCampaignId || preselectedAdvisor?.campaignId || campaigns[0]?.id || 'camp_bitel_migra');
   const [product, setProduct] = useState<string>(COMMERCIAL_PLANS[1]?.name || 'Plan Ilimitado S/ 39.90');

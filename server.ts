@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS staffing_movements (id TEXT PRIMARY KEY, advisor_id T
 CREATE INDEX IF NOT EXISTS idx_advisors_campaign ON advisors(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_operations_company_campaign ON operations(company_id,campaign_id);
 CREATE INDEX IF NOT EXISTS idx_assignments_operation_active ON operation_assignments(operation_id,active);
+CREATE INDEX IF NOT EXISTS idx_assignments_advisor_active ON operation_assignments(advisor_id,active);
+CREATE INDEX IF NOT EXISTS idx_movements_advisor_occurred ON staffing_movements(advisor_id,occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_evaluations_advisor_type ON evaluations(advisor_id, evaluation_type);
 CREATE INDEX IF NOT EXISTS idx_quality_alerts_supervisor ON quality_alerts(supervisor_id, status);
 CREATE INDEX IF NOT EXISTS idx_calibrations_status ON calibrations(status);`);
@@ -149,7 +151,23 @@ function persistRepository(input: SharedRepository) {
       db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar`).run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt || now, existing?.password_hash || hashPassword(user.password || INITIAL_PASSWORD), existing ? existing.must_change_password : 1);
     }
     for (const team of source.teams || []) db.prepare(`INSERT INTO teams (id,campaign_id,supervisor_id,name) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET campaign_id=excluded.campaign_id,supervisor_id=excluded.supervisor_id,name=excluded.name`).run(team.id, team.campaignId, team.supervisorId, team.name);
-    for (const advisor of source.advisors || []) db.prepare(`INSERT INTO advisors (id,dni,employee_code,name,campaign_id,team_id,supervisor_id,data_json) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET dni=excluded.dni,employee_code=excluded.employee_code,name=excluded.name,campaign_id=excluded.campaign_id,team_id=excluded.team_id,supervisor_id=excluded.supervisor_id,data_json=excluded.data_json`).run(advisor.id, advisor.dni, advisor.employeeCode || '', advisor.name, advisor.campaignId, advisor.teamId || null, advisor.supervisorId || null, JSON.stringify(advisor));
+    for (const advisor of source.advisors || []) {
+      const previousRow=db.prepare('SELECT data_json FROM advisors WHERE id=?').get(advisor.id) as any;
+      const previous=previousRow ? JSON.parse(previousRow.data_json) : null;
+      const operationId=advisor.operationId || previous?.operationId || `op_legacy_${advisor.campaignId}`;
+      const operation=db.prepare('SELECT * FROM operations WHERE id=? AND campaign_id=? AND status=?').get(operationId,advisor.campaignId,'ACTIVA') as any;
+      if(!operation) throw new Error(`Operación inválida para ${advisor.name}.`);
+      const supervisor=advisor.supervisorId ? db.prepare('SELECT role,status FROM users WHERE id=?').get(advisor.supervisorId) as any : null;
+      if(advisor.supervisorId && (!supervisor || supervisor.status!=='ACTIVO' || !['SUPERVISOR','FORMADOR','ADMINISTRADOR','CONSULTOR'].includes(supervisor.role))) throw new Error(`Supervisor inválido para ${advisor.name}.`);
+      db.prepare(`INSERT INTO advisors (id,dni,employee_code,name,campaign_id,team_id,supervisor_id,data_json) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET dni=excluded.dni,employee_code=excluded.employee_code,name=excluded.name,campaign_id=excluded.campaign_id,team_id=excluded.team_id,supervisor_id=excluded.supervisor_id,data_json=excluded.data_json`).run(advisor.id, advisor.dni, advisor.employeeCode || '', advisor.name, advisor.campaignId, advisor.teamId || null, advisor.supervisorId || null, JSON.stringify({...advisor,operationId}));
+      const changed=!previous || previous.operationId!==operationId || previous.supervisorId!==advisor.supervisorId || previous.teamId!==advisor.teamId;
+      if(changed){
+        db.prepare('UPDATE operation_assignments SET active=0,end_date=? WHERE advisor_id=? AND active=1').run(now.slice(0,10),advisor.id);
+        const assignmentId=`assignment_${advisor.id}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+        db.prepare('INSERT INTO operation_assignments (id,advisor_id,operation_id,team_id,supervisor_id,role,operational_status,start_date,active,source,actor_id,observation) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(assignmentId,advisor.id,operationId,advisor.teamId||null,advisor.supervisorId||null,'ASESOR',advisor.status==='INACTIVO'?'BAJA':'PRODUCCION',now.slice(0,10),1,previous?'MANUAL':'MIGRACION',null,previous?'Cambio organizacional de Dotación':'Asignación inicial');
+        db.prepare('INSERT INTO staffing_movements (id,advisor_id,assignment_id,type,occurred_at,origin,destination,actor_id,observation) VALUES (?,?,?,?,?,?,?,?,?)').run(`movement_${advisor.id}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,advisor.id,assignmentId,previous?'CAMBIO_ASIGNACION':'ALTA',now,previous?JSON.stringify({operationId:previous.operationId||`op_legacy_${previous.campaignId}`,supervisorId:previous.supervisorId||null}):null,JSON.stringify({operationId,supervisorId:advisor.supervisorId||null}),null,previous?'Before / after registrado automáticamente':'Alta inicial');
+      }
+    }
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
@@ -422,6 +440,15 @@ async function startServer() {
       }
       return res.status(201).json({ evaluation, notificationSent });
     } catch (error: any) { console.error('[google-storage] No fue posible guardar la evaluación.', error instanceof Error ? error.message : ''); return res.status(400).json({ error: error.message || 'No fue posible guardar la evaluación.' }); }
+  });
+  // Dotación: el historial se entrega sólo al alcance del rol. Los cambios se
+  // registran al persistir la asignación activa; evaluaciones nunca se tocan.
+  app.get('/api/staffing/:advisorId/history', requireAuth, (req, res) => {
+    const actor=(req as any).authUser as User; const advisor=db.prepare('SELECT supervisor_id FROM advisors WHERE id=?').get(req.params.advisorId) as any;
+    if(!advisor) return res.status(404).json({error:'Colaborador no encontrado.'});
+    if(!['ADMINISTRADOR','CONSULTOR','MONITOR','FORMADOR'].includes(actor.role) && !(actor.role==='SUPERVISOR' && advisor.supervisor_id===actor.id)) return res.status(403).json({error:'No tienes acceso al historial de este colaborador.'});
+    const rows=db.prepare('SELECT * FROM staffing_movements WHERE advisor_id=? ORDER BY occurred_at DESC').all(req.params.advisorId) as any[];
+    return res.json({movements:rows.map(row=>({...row,origin:row.origin?JSON.parse(row.origin):null,destination:row.destination?JSON.parse(row.destination):null}))});
   });
   const loadEvaluationById = async (id: string) => {
     const local = db.prepare('SELECT payload_json FROM evaluations WHERE id=?').get(id) as any;

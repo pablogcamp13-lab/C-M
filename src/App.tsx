@@ -25,13 +25,13 @@ import { AdminSettingsView } from './components/admin/AdminSettingsView';
 import { FeedbackView } from './components/feedback/FeedbackView';
 import { DevelopmentView } from './components/development/DevelopmentView';
 import { MonitorProgressView, MonitorResultsView } from './components/monitor/MonitorViews';
-import { Evaluation, Advisor, Campaign } from './types';
+import { Evaluation, Advisor, Campaign, Company, Operation } from './types';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { ForcePasswordChange } from './components/auth/ForcePasswordChange';
 import { ChevronRight, ShieldCheck, TrendingUp, X } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
-  const { currentSection, setCurrentSection, evaluations, advisors, campaigns, currentUser, authenticatedUserId } = useApp();
+  const { currentSection, setCurrentSection, evaluations, advisors, campaigns, companies, operations, currentUser, authenticatedUserId } = useApp();
   useEffect(() => {
     const allowed = ['evaluations', 'feedback', 'monitor_results', 'development', 'monitor_progress'];
     if (currentUser.role === 'MONITOR' && !allowed.includes(currentSection)) setCurrentSection('monitor_progress');
@@ -40,6 +40,8 @@ const MainLayout: React.FC = () => {
   // Modals state
   const [isNewEvalModalOpen, setIsNewEvalModalOpen] = useState(false);
   const [newEvaluationCampaignId, setNewEvaluationCampaignId] = useState<string | null>(null);
+  const [newEvaluationCompanyId, setNewEvaluationCompanyId] = useState<string | null>(null);
+  const [newEvaluationOperationId, setNewEvaluationOperationId] = useState<string | null>(null);
   const [newEvaluationModule, setNewEvaluationModule] = useState<'QUALITY' | 'D3C' | null>(null);
   const [preselectedAdvisorForEval, setPreselectedAdvisorForEval] = useState<Advisor | null>(null);
   
@@ -54,6 +56,9 @@ const MainLayout: React.FC = () => {
     } else {
       setPreselectedAdvisorForEval(null);
     }
+    const operation=operations.find(item=>item.id===advisor?.operationId);
+    setNewEvaluationCompanyId(operation?.companyId || null);
+    setNewEvaluationOperationId(operation?.id || null);
     setNewEvaluationCampaignId(advisor?.campaignId || null);
     setNewEvaluationModule(null);
     setIsNewEvalModalOpen(true);
@@ -164,14 +169,17 @@ const MainLayout: React.FC = () => {
 
       {/* Global Modals */}
       {isNewEvalModalOpen && (
-        newEvaluationCampaignId === null ? <CampaignPicker onSelect={setNewEvaluationCampaignId} onClose={() => setIsNewEvalModalOpen(false)} /> : newEvaluationModule === null ? <EvaluationModulePicker campaign={campaigns.find(item => item.id === newEvaluationCampaignId)} onBack={() => setNewEvaluationCampaignId(null)} onSelect={setNewEvaluationModule} onClose={() => setIsNewEvalModalOpen(false)} /> : newEvaluationModule === 'QUALITY' ? <QualityEvaluationModal campaignId={newEvaluationCampaignId} onClose={() => { setIsNewEvalModalOpen(false); setNewEvaluationCampaignId(null); setNewEvaluationModule(null); }} onSuccess={(evaluation) => setSelectedEvaluationForDetail(evaluation)} /> : <NewEvaluationModal
+        newEvaluationCompanyId === null ? <CompanyPicker companies={companies} onSelect={setNewEvaluationCompanyId} onClose={() => setIsNewEvalModalOpen(false)} /> : newEvaluationOperationId === null ? <CampaignPicker companyId={newEvaluationCompanyId} operations={operations} onSelect={(operationId) => { const operation=operations.find(item=>item.id===operationId);setNewEvaluationOperationId(operationId);setNewEvaluationCampaignId(operation?.campaignId||null); }} onBack={() => setNewEvaluationCompanyId(null)} onClose={() => setIsNewEvalModalOpen(false)} /> : newEvaluationModule === null ? <EvaluationModulePicker campaign={campaigns.find(item => item.id === newEvaluationCampaignId)} onBack={() => {setNewEvaluationOperationId(null);setNewEvaluationCampaignId(null);}} onSelect={setNewEvaluationModule} onClose={() => setIsNewEvalModalOpen(false)} /> : newEvaluationModule === 'QUALITY' ? <QualityEvaluationModal campaignId={newEvaluationCampaignId} operationId={newEvaluationOperationId} onClose={() => { setIsNewEvalModalOpen(false); setNewEvaluationCompanyId(null);setNewEvaluationOperationId(null);setNewEvaluationCampaignId(null); setNewEvaluationModule(null); }} onSuccess={(evaluation) => setSelectedEvaluationForDetail(evaluation)} /> : <NewEvaluationModal
           onClose={() => {
             setIsNewEvalModalOpen(false);
-            setNewEvaluationCampaignId(null);
+          setNewEvaluationCampaignId(null);
+            setNewEvaluationCompanyId(null);
+            setNewEvaluationOperationId(null);
             setNewEvaluationModule(null);
             setPreselectedAdvisorForEval(null);
           }}
           preselectedCampaignId={newEvaluationCampaignId}
+          preselectedOperationId={newEvaluationOperationId}
           preselectedAdvisor={preselectedAdvisorForEval}
           onOpenActionPlanWithEval={(evalData) => {
             handleOpenActionPlanWithEval(evalData);
@@ -221,11 +229,10 @@ const MainLayout: React.FC = () => {
 
 const campaignImage = (campaign: Campaign) => campaign.backgroundImage || (/retenciones/i.test(campaign.name) ? '/home/mejora-continua.png' : '/home/calidad.png');
 
-const CampaignPicker: React.FC<{ onSelect: (campaignId: string) => void; onClose: () => void }> = ({ onSelect, onClose }) => {
-  const { campaigns } = useApp();
-  const available = campaigns.filter(campaign => campaign.status === 'ACTIVA');
-  const [selected, setSelected] = useState(available[0]?.id || '');
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm"><div role="dialog" aria-modal="true" className="cm-modal w-full max-w-3xl overflow-hidden"><header className="flex items-start justify-between border-b border-[var(--cm-border)] px-7 pb-5 pt-6"><div><p className="cm-eyebrow">NUEVA EVALUACIÓN</p><h2 className="text-xl font-bold">Selecciona la campaña</h2><p className="mt-1 text-sm text-[var(--cm-text-secondary)]">La ficha y los lineamientos se cargarán según la campaña elegida.</p></div><button onClick={onClose} className="cm-navbar__icon-button" aria-label="Cerrar"><X className="h-5 w-5" /></button></header><div className="grid max-h-[62vh] gap-4 overflow-y-auto p-7 sm:grid-cols-2 lg:grid-cols-3">{available.map(campaign => <button key={campaign.id} onClick={() => setSelected(campaign.id)} className={`group relative aspect-square overflow-hidden rounded-2xl border text-left transition-all ${selected===campaign.id?'border-[var(--cm-primary)] shadow-[0_0_0_2px_rgba(31,214,255,.22)]':'border-[var(--cm-border)] hover:border-[var(--cm-primary)]'}`}><img src={campaignImage(campaign)} alt="" className="absolute inset-0 h-full w-full object-cover opacity-45 transition-transform group-hover:scale-105"/><span className="absolute inset-0 bg-gradient-to-t from-[#041426] via-[#071b30]/75 to-transparent"/>{selected===campaign.id&&<span className="absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-full bg-[var(--cm-primary)] font-bold text-[#031326]">✓</span>}<span className="absolute inset-x-0 bottom-0 p-5"><small className="font-bold uppercase tracking-wider text-[var(--cm-primary)]">{campaign.client}</small><strong className="mt-1 block text-lg text-white">{campaign.name}</strong><span className="mt-1 block text-xs text-slate-300">{campaign.description || `${campaign.client} · campaña activa`}</span></span></button>)}{!available.length&&<p className="col-span-full py-10 text-center text-sm text-[var(--cm-text-secondary)]">No existen campañas activas.</p>}</div><footer className="flex items-center justify-between border-t border-[var(--cm-border)] px-7 py-4"><button onClick={onClose} className="cm-button-secondary px-4 py-2 text-sm">Cancelar</button><button disabled={!selected} onClick={() => selected && onSelect(selected)} className="cm-button-primary px-4 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-50">Continuar <ChevronRight className="h-4 w-4" /></button></footer></div></div>;
+const CompanyPicker:React.FC<{companies:Company[];onSelect:(id:string)=>void;onClose:()=>void}>=({companies,onSelect,onClose})=>{const available=companies.filter(c=>c.status==='ACTIVA');const [selected,setSelected]=useState(available[0]?.id||'');return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm"><div className="cm-modal w-full max-w-2xl overflow-hidden"><header className="flex items-start justify-between border-b border-[var(--cm-border)] px-7 pb-5 pt-6"><div><p className="cm-eyebrow">NUEVA EVALUACIÓN</p><h2 className="text-xl font-bold">Selecciona la empresa</h2><p className="mt-1 text-sm text-[var(--cm-text-secondary)]">Primero define la empresa operadora.</p></div><button onClick={onClose} className="cm-navbar__icon-button"><X className="h-5 w-5"/></button></header><div className="grid gap-3 p-7 sm:grid-cols-3">{available.map(c=><button key={c.id} onClick={()=>setSelected(c.id)} className={`rounded-xl border p-5 text-left font-bold ${selected===c.id?'border-[var(--cm-primary)] bg-[var(--cm-surface-elevated)]':'border-[var(--cm-border)]'}`}>{c.name}</button>)}</div><footer className="flex justify-between border-t border-[var(--cm-border)] px-7 py-4"><button onClick={onClose} className="cm-button-secondary px-4 py-2">Cancelar</button><button disabled={!selected} onClick={()=>onSelect(selected)} className="cm-button-primary px-4 py-2">Continuar <ChevronRight className="h-4 w-4"/></button></footer></div></div>};
+const CampaignPicker: React.FC<{companyId:string;operations:Operation[];onSelect:(operationId:string)=>void;onBack:()=>void;onClose:()=>void}> = ({ companyId,operations,onSelect,onBack,onClose }) => {
+  const { campaigns } = useApp(); const available=operations.filter(o=>o.companyId===companyId&&o.status==='ACTIVA'); const [selected,setSelected]=useState(available[0]?.id||'');
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm"><div role="dialog" aria-modal="true" className="cm-modal w-full max-w-3xl overflow-hidden"><header className="flex items-start justify-between border-b border-[var(--cm-border)] px-7 pb-5 pt-6"><div><p className="cm-eyebrow">NUEVA EVALUACIÓN</p><h2 className="text-xl font-bold">Selecciona la campaña</h2><p className="mt-1 text-sm text-[var(--cm-text-secondary)]">Sólo se muestran campañas asociadas a la empresa seleccionada.</p></div><button onClick={onClose} className="cm-navbar__icon-button"><X className="h-5 w-5" /></button></header><div className="grid max-h-[62vh] gap-4 overflow-y-auto p-7 sm:grid-cols-2 lg:grid-cols-3">{available.map(operation=>{const campaign=campaigns.find(c=>c.id===operation.campaignId)!;return <button key={operation.id} onClick={()=>setSelected(operation.id)} className={`group relative aspect-square overflow-hidden rounded-2xl border text-left ${selected===operation.id?'border-[var(--cm-primary)]':'border-[var(--cm-border)]'}`}><img src={campaignImage(campaign)} alt="" className="absolute inset-0 h-full w-full object-cover opacity-45"/><span className="absolute inset-0 bg-gradient-to-t from-[#041426] via-[#071b30]/75 to-transparent"/><span className="absolute inset-x-0 bottom-0 p-5"><small className="font-bold text-[var(--cm-primary)]">CAMPAÑA</small><strong className="mt-1 block text-lg text-white">{campaign.name}</strong></span></button>})}</div><footer className="flex justify-between border-t border-[var(--cm-border)] px-7 py-4"><button onClick={onBack} className="cm-button-secondary px-4 py-2">← Volver</button><button disabled={!selected} onClick={()=>onSelect(selected)} className="cm-button-primary px-4 py-2">Continuar <ChevronRight className="h-4 w-4"/></button></footer></div></div>;
 };
 
 const EvaluationModulePicker: React.FC<{ campaign?: Campaign; onSelect: (module: 'QUALITY' | 'D3C') => void; onBack: () => void; onClose: () => void }> = ({ campaign, onSelect, onBack, onClose }) => {

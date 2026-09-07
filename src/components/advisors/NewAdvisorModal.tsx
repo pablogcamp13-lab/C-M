@@ -10,11 +10,13 @@ interface NewAdvisorModalProps {
 }
 
 export const NewAdvisorModal: React.FC<NewAdvisorModalProps> = ({ onClose, onSuccess }) => {
-  const { campaigns, teams, users, addAdvisor } = useApp();
+  const { companies, operations, campaigns, teams, users, addAdvisor } = useApp();
 
   const [name, setName] = useState('');
   const [employeeCode, setEmployeeCode] = useState(`ADV-${Math.floor(100 + Math.random() * 900)}`);
   const [dni, setDni] = useState('');
+  const [companyId, setCompanyId] = useState('');
+  const [operationId, setOperationId] = useState('');
   const [campaignId, setCampaignId] = useState('');
   const [teamId, setTeamId] = useState('');
   const [supervisorId, setSupervisorId] = useState(users.find(u => u.role === 'SUPERVISOR')?.id || '');
@@ -30,15 +32,16 @@ export const NewAdvisorModal: React.FC<NewAdvisorModalProps> = ({ onClose, onSuc
   const [baselineDate, setBaselineDate] = useState(new Date().toISOString().split('T')[0]);
   const [baselinePeriod, setBaselinePeriod] = useState('Línea Base Inicial');
 
-  const supervisors = users.filter(u => u.role === 'SUPERVISOR');
-  const campaignTeams = teams.filter(team => team.campaignId === campaignId);
+  const availableOperations=operations.filter(operation=>operation.status==='ACTIVA'&&operation.companyId===companyId);
+  const supervisors = users.filter(u => u.status==='ACTIVO' && ['SUPERVISOR','FORMADOR','ADMINISTRADOR','CONSULTOR'].includes(u.role));
+  const campaignTeams = teams.filter(team => team.campaignId === campaignId && (!team.operationId || team.operationId===operationId));
 
   const generatedUsername = name.trim() ? formatAdvisorUsername(name) : 'nombre.apellido';
   const generatedPassword = dni.trim() || 'DNI del asesor';
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !dni.trim() || !campaignId) return;
+    if (!name.trim() || !dni.trim() || !companyId || !operationId || !campaignId || !supervisorId) return;
 
     const sphNum = parseFloat(baselineSph) || 0.20;
     const connMinutes = parseTimeToMinutes(baselineConnectionTime) || 360;
@@ -48,6 +51,7 @@ export const NewAdvisorModal: React.FC<NewAdvisorModalProps> = ({ onClose, onSuc
       employeeCode,
       dni: dni.trim(),
       campaignId,
+      operationId,
       teamId,
       supervisorId,
       shift,
@@ -124,23 +128,28 @@ export const NewAdvisorModal: React.FC<NewAdvisorModalProps> = ({ onClose, onSuc
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block font-semibold text-slate-700 mb-1">Campaña *</label>
+            <label className="block font-semibold text-slate-700 mb-1">Empresa *</label>
             <select
               required
-              value={campaignId}
+              value={companyId}
               onChange={(e) => {
-                const nextCampaignId = e.target.value;
-                const firstTeam = teams.find(team => team.campaignId === nextCampaignId);
-                setCampaignId(nextCampaignId);
-                setTeamId(firstTeam?.id || '');
-                if (firstTeam?.supervisorId) setSupervisorId(firstTeam.supervisorId);
+                setCompanyId(e.target.value); setOperationId(''); setCampaignId(''); setTeamId('');
               }}
               className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#031E3C] font-medium text-slate-800"
             >
-              <option value="" disabled>Selecciona una campaña</option>
-              {campaigns.filter(campaign => campaign.status === 'ACTIVA').map(campaign => <option key={campaign.id} value={campaign.id}>{campaign.name} ({campaign.client})</option>)}
+              <option value="" disabled>Selecciona empresa</option>
+              {companies.filter(company=>company.status==='ACTIVA').map(company => <option key={company.id} value={company.id}>{company.name}</option>)}
             </select>
+          </div>
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">Campaña *</label>
+            <select required disabled={!companyId} value={operationId} onChange={e=>{const operation=operations.find(item=>item.id===e.target.value);setOperationId(e.target.value);setCampaignId(operation?.campaignId||'');setTeamId('');}} className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#031E3C] font-medium text-slate-800">
+              <option value="" disabled>Selecciona campaña</option>
+              {availableOperations.map(operation=><option key={operation.id} value={operation.id}>{campaigns.find(c=>c.id===operation.campaignId)?.name||operation.name}</option>)}
+            </select>
+          </div>
           </div>
 
           <div>

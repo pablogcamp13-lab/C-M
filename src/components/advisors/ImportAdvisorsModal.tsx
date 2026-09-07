@@ -36,13 +36,15 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
   onClose, 
   onSuccess 
 }) => {
-  const { campaigns, users, advisors, importAdvisorsBatch } = useApp();
+  const { companies, operations, campaigns, users, advisors, importAdvisorsBatch } = useApp();
 
   // Wizard step: 1 = Cargar & Parámetros, 2 = Validar & Previsualización, 3 = Confirmar / Resultado
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
   // Import Parameters
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
+  const [selectedOperationId, setSelectedOperationId] = useState<string>('');
   const [periodName, setPeriodName] = useState<string>('Agosto 2026');
   const [cutoffDate, setCutoffDate] = useState<string>(
     new Date().toISOString().split('T')[0]
@@ -163,6 +165,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
   // Confirm and execute import
   const handleExecuteImport = () => {
     if (!validationResult) return;
+    if (!selectedOperationId) { setParseError('Selecciona una empresa y una campaña de destino válidas antes de importar.'); setStep(1); return; }
 
     // Apply supervisor mappings to rows
     const rowsWithMappedSupervisors = validationResult.rows.map(row => {
@@ -176,6 +179,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
     const summary = importAdvisorsBatch({
       campaignId: selectedCampaign?.id || '',
       campaignName: selectedCampaign?.name || 'Campaña importada',
+      operationId: selectedOperationId || undefined,
       periodName: periodName.trim() || 'Periodo Actual',
       cutoffDate,
       isBaseline,
@@ -344,7 +348,15 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                   </h4>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">Empresa destino</label>
+                    <select value={selectedCompanyId} onChange={e=>{setSelectedCompanyId(e.target.value);setSelectedOperationId('');setSelectedCampaignId('');}} className="w-full bg-[#F6F7F9] border border-[#E5E8EC] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#031E3C]"><option value="">Según archivo</option>{companies.filter(c=>c.status==='ACTIVA').map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">Campaña destino</label>
+                    <select value={selectedOperationId} disabled={!selectedCompanyId} onChange={e=>{const operation=operations.find(o=>o.id===e.target.value);setSelectedOperationId(e.target.value);setSelectedCampaignId(operation?.campaignId||'');}} className="w-full bg-[#F6F7F9] border border-[#E5E8EC] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#031E3C]"><option value="">Según archivo</option>{operations.filter(o=>o.status==='ACTIVA'&&o.companyId===selectedCompanyId).map(o=><option key={o.id} value={o.id}>{campaigns.find(c=>c.id===o.campaignId)?.name||o.name}</option>)}</select>
+                  </div>
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-700 mb-1">
                       Campaña de destino

@@ -123,6 +123,7 @@ interface AppContextType {
   importAdvisorsBatch: (payload: {
     campaignId: string;
     campaignName: string;
+    operationId?: string;
     periodName: string;
     cutoffDate: string;
     isBaseline: boolean;
@@ -274,8 +275,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // siguen en su almacenamiento actual hasta sus fases de migración respectivas.
   useEffect(() => {
     if (!isAuthenticated || ['ASESOR', 'SUPERVISOR', 'MONITOR'].includes(currentUser.role) || !rosterHydrated.current) return;
-    void sharedRepositoryApi.sync({ users, campaigns, teams, advisors }).catch(error => console.error('No fue posible sincronizar la dotación', error));
-  }, [users, campaigns, teams, advisors, isAuthenticated, currentUser.role]);
+    void sharedRepositoryApi.sync({ users, campaigns, companies, operations, teams, advisors }).catch(error => console.error('No fue posible sincronizar la dotación', error));
+  }, [users, campaigns, companies, operations, teams, advisors, isAuthenticated, currentUser.role]);
 
   useEffect(() => {
     if (!isAuthenticated || ['ASESOR', 'SUPERVISOR', 'MONITOR'].includes(currentUser.role) || !platformStateHydrated.current) return;
@@ -803,6 +804,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const importAdvisorsBatch = (payload: {
     campaignId: string;
     campaignName: string;
+    operationId?: string;
     periodName: string;
     cutoffDate: string;
     isBaseline: boolean;
@@ -857,7 +859,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ? campaigns.find(campaign => campaign.id === payload.campaignMappings?.[String(row.campaignName || row.sheetName || '')])
           || campaignByName.get(normalizeCampaign(String(row.campaignName || row.sheetName || '')))
         : undefined;
-      const campaignId = rowCampaign?.id || payload.campaignId;
+      const destinationOperation=payload.operationId ? operations.find(operation=>operation.id===payload.operationId && operation.status==='ACTIVA') : undefined;
+      const campaignId = destinationOperation?.campaignId || rowCampaign?.id || payload.campaignId;
       const campaignName = rowCampaign?.name || payload.campaignName;
       let campaignTeam = teams.find(team => team.campaignId === campaignId);
       if (!campaignTeam) {
@@ -867,6 +870,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         campaignTeam = {
           id: `team_excel_${nowTimestamp}_${teamsToAdd.length}`,
           campaignId,
+          operationId: destinationOperation?.id,
           supervisorId: row.supervisorId || defaultSupervisor.id,
           name: `Equipo ${campaignName}`
         };

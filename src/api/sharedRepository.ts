@@ -114,6 +114,10 @@ export const platformStateApi = {
   async save(state: any) { return json(await fetch('/api/platform-state', { method: 'PUT', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(state) })); }
 };
 
+export const staffingApi = {
+  async history(advisorId:string) { return json<{movements:any[]}>(await fetch(`/api/staffing/${advisorId}/history`, { headers:headers() })); }
+};
+
 export const developmentApi = {
   async capsules() { return json<{ capsules: any[] }>(await fetch('/api/development/capsules', { headers: headers() })); },
   async createCapsule(data: any) { return json<{ capsule: any }>(await fetch('/api/development/capsules', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(data) })); },
