@@ -149,6 +149,7 @@ export interface ImportHistoryLog {
   fileName: string;
   fileSize: number;
   user: string;
+  recordType?: 'DOTACION';
   campaign: string;
   period: string;
   cutoffDate: string;

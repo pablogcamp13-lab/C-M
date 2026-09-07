@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useApp } from '../../context/AppContext';
 import { 
   parseAndValidateExcel, 
+  getExcelSheetNames,
   generateSampleExcelTemplate, 
   ExcelValidationResult, 
   NormalizedAdvisorRow 
@@ -56,6 +57,8 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [isParsing, setIsParsing] = useState<boolean>(false);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [sheetCount, setSheetCount] = useState<number | null>(null);
   const [validationResult, setValidationResult] = useState<ExcelValidationResult | null>(null);
 
   // Supervisor mapping adjustments in Step 2
@@ -101,10 +104,6 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
 
     try {
       const result = await parseAndValidateExcel(file, advisors, users);
-      if (!result.usesSheetCampaigns && !selectedCampaignId) {
-        setParseError('Selecciona la campaña de destino para archivos de una sola hoja.');
-        return;
-      }
       setValidationResult(result);
       const normalized = (value: string) => value.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
       setCampaignMappings(Object.fromEntries(result.detectedCampaigns.map(name => [
@@ -130,6 +129,28 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
     }
   };
 
+  const handleSelectedFile = async (file: File) => {
+    const name=file.name.toLowerCase();
+    if(!name.endsWith('.xlsx')&&!name.endsWith('.xls')&&!name.endsWith('.csv')) { setParseError('Formato de archivo no compatible. Por favor sube un archivo .xlsx, .xls o .csv.'); return; }
+    if(file.size>20*1024*1024) { setParseError('El archivo excede el tamaño máximo permitido de 20 MB.'); return; }
+    setParseError(null); setPendingFile(file);
+    try {
+      const names=await getExcelSheetNames(file); setSheetCount(names.length);
+      if(names.length===1&&file.name.toLowerCase()==='plantilla_importacion_asesores_3c_completada.xlsx') {
+        const company=companies.find(item=>item.name.trim().toLocaleLowerCase('es')==='talent up');
+        const operation=operations.find(item=>item.companyId===company?.id&&campaigns.find(campaign=>campaign.id===item.campaignId)?.name.trim().toLocaleLowerCase('es')==='migra');
+        if(company&&operation) { setSelectedCompanyId(company.id);setSelectedOperationId(operation.id);setSelectedCampaignId(operation.campaignId); }
+      }
+      if(names.length>1) await handleProcessFile(file);
+    } catch(err:any) { setParseError(err?.message||'Error al leer la estructura del archivo.'); }
+  };
+
+  const handleContinueSingleSheet = () => {
+    if(!pendingFile)return;
+    if(!selectedOperationId) { setParseError('Selecciona la campaña de destino antes de continuar.'); return; }
+    void handleProcessFile(pendingFile);
+  };
+
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -144,13 +165,13 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleProcessFile(e.dataTransfer.files[0]);
+      void handleSelectedFile(e.dataTransfer.files[0]);
     }
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      handleProcessFile(e.target.files[0]);
+      void handleSelectedFile(e.target.files[0]);
     }
   };
 
@@ -165,7 +186,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
   // Confirm and execute import
   const handleExecuteImport = () => {
     if (!validationResult) return;
-    if (!selectedOperationId) { setParseError('Selecciona una empresa y una campaña de destino válidas antes de importar.'); setStep(1); return; }
+    if (!validationResult.usesSheetCampaigns && !selectedOperationId) { setParseError('Selecciona la campaña de destino antes de continuar.'); setStep(1); return; }
 
     // Apply supervisor mappings to rows
     const rowsWithMappedSupervisors = validationResult.rows.map(row => {
@@ -359,24 +380,6 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                   </div>
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                      Campaña de destino
-                    </label>
-                    <select
-                      value={selectedCampaignId}
-                      onChange={(e) => setSelectedCampaignId(e.target.value)}
-                      className="w-full bg-[#F6F7F9] border border-[#E5E8EC] rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#031E3C] focus:outline-none focus:ring-1 focus:ring-[#031E3C]"
-                    >
-                      <option value="">Automática según cada hoja</option>
-                      {campaigns.map(c => (
-                        <option key={c.id} value={c.id}>
-                          {c.name} ({c.client})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
                       Periodo de Información *
                     </label>
                     <input
@@ -481,6 +484,8 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                   Formatos soportados: <span className="font-mono font-semibold text-[#031E3C]">.xlsx, .xls, .csv</span> (hasta 20 MB)
                 </p>
 
+                {pendingFile && <p className="mt-2 text-xs font-bold text-emerald-700">Archivo seleccionado: {pendingFile.name}{sheetCount===1?' · 1 hoja':''}</p>}
+
                 <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-[#031E3C] text-white text-xs font-semibold rounded-lg shadow-xs hover:bg-[#0B2B50] transition-colors">
                   <FileSpreadsheet className="w-4 h-4 text-[#FF6B00]" />
                   <span>Explorar Archivo</span>
@@ -500,7 +505,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                 <div className="flex items-start gap-2.5 p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                   <div>
-                    <span className="font-bold block">Error al leer el archivo:</span>
+                    <span className="font-bold block">{parseError.startsWith('Selecciona la campaña')?'Campaña requerida:':'Error al leer el archivo:'}</span>
                     <span>{parseError}</span>
                   </div>
                 </div>
@@ -956,6 +961,12 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                 className="px-4 py-2 border border-[#E5E8EC] hover:bg-white text-slate-600 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
               >
                 Cancelar
+              </button>
+            )}
+
+            {step === 1 && pendingFile && sheetCount === 1 && (
+              <button type="button" onClick={handleContinueSingleSheet} disabled={isParsing} className="flex items-center gap-1.5 rounded-lg bg-[#031E3C] px-5 py-2 text-xs font-semibold text-white disabled:bg-slate-300">
+                <span>Continuar</span><ArrowRight className="h-3.5 w-3.5 text-[#FF6B00]" />
               </button>
             )}
 

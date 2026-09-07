@@ -507,6 +507,12 @@ export async function parseAndValidateExcel(
   };
 }
 
+export async function getExcelSheetNames(file: File): Promise<string[]> {
+  const arrayBuffer = await file.arrayBuffer();
+  const workbook = XLSX.read(arrayBuffer, { type: 'array', bookSheets: true });
+  return workbook.SheetNames;
+}
+
 // Generate template Excel file for users to download
 export function generateSampleExcelTemplate(): void {
   const headers = [
