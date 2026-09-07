@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Evaluation } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { CRITERIA_DEFINITIONS } from '../../data/criteriaData';
@@ -26,14 +26,23 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   onClose,
   onOpenNewActionPlan 
 }) => {
-  const { advisors, users } = useApp();
+  const { advisors, users, currentUser } = useApp();
   const [expandedCriterion, setExpandedCriterion] = useState<string | null>(null);
+  const [agentDetail,setAgentDetail]=useState<any>(null); const [commitment,setCommitment]=useState(''); const [commitmentDate,setCommitmentDate]=useState(''); const [savingCommitment,setSavingCommitment]=useState(false); const [commitmentError,setCommitmentError]=useState('');
+
+  useEffect(()=>{
+    if(!evaluation||currentUser.role!=='ASESOR')return;
+    const token=sessionStorage.getItem('CONTACT_CENTER_AUTH_TOKEN');
+    void fetch(`/api/evaluations/${evaluation.id}/agent-detail`,{headers:token?{Authorization:`Bearer ${token}`}:{}}).then(async response=>{if(!response.ok)throw new Error((await response.json()).error);return response.json();}).then(data=>{setAgentDetail(data);setCommitment(data.commitment?.text||'');setCommitmentDate(data.commitment?.date||'');}).catch(error=>setCommitmentError(error.message));
+  },[evaluation,currentUser.role]);
 
   if (!evaluation) return null;
 
   const advisor = advisors.find(a => a.id === evaluation.advisorId);
   const evaluator = users.find(u => u.id === evaluation.evaluatorId);
   const supervisor = users.find(u => u.id === evaluation.supervisorId);
+  const isAgent = currentUser.role === 'ASESOR';
+  const saveCommitment=async()=>{setSavingCommitment(true);setCommitmentError('');try{const token=sessionStorage.getItem('CONTACT_CENTER_AUTH_TOKEN');const response=await fetch(`/api/evaluations/${evaluation.id}/commitment`,{method:'PATCH',headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify({commitment,commitmentDate})});const data=await response.json();if(!response.ok)throw new Error(data.error);setAgentDetail((value:any)=>({...value,commitment:data.commitment}));}catch(error:any){setCommitmentError(error.message||'No fue posible guardar el compromiso.');}finally{setSavingCommitment(false);}};
   const isQuality = evaluation.evaluationType === 'QUALITY' || evaluation.items.some(item => QUALITY_ATTRIBUTES.some(attribute => attribute.id === item.criterionId));
   const advisorName = advisor?.name || 'Asesor no disponible';
   const qualityScores = isQuality ? ['C1', 'C2', 'C3', 'C4'].map(criterion => {
@@ -177,11 +186,20 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
                 </span>
               </div>
               <AudioPlayer
-                audioUrl={evaluation.audioUrl}
+                audioUrl={isAgent ? `/api/evaluations/${evaluation.id}/audio` : evaluation.audioUrl}
                 audioFileName={evaluation.audioFileName || `${evaluation.recordingCode}.mp3`}
                 audioDurationSeconds={evaluation.audioDurationSeconds || 380}
                 readOnly={true}
               />
+            </div>
+          )}
+
+          {isAgent && (
+            <div className="cm-card rounded-xl p-4 sm:p-5">
+              <h4 className="font-bold text-xs uppercase tracking-wider">Compromiso y conformidad</h4>
+              <div className="mt-3 grid gap-3 md:grid-cols-[1fr_220px]"><label className="text-xs font-semibold">Mi compromiso<textarea value={commitment} onChange={event=>setCommitment(event.target.value)} maxLength={2000} rows={3} className="cm-input mt-1 p-3 font-normal" placeholder="Describe la acción concreta que realizarás."/></label><label className="text-xs font-semibold">Fecha compromiso<input type="date" value={commitmentDate} onChange={event=>setCommitmentDate(event.target.value)} className="cm-input mt-1 p-3 font-normal"/></label></div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-[var(--cm-text-secondary)]">Firma de conformidad: <b>{agentDetail?.signature?.signedAt ? `Registrada el ${String(agentDetail.signature.signedAt).replace('T',' ').slice(0,16)}` : 'Pendiente'}</b> · Feedback: <b>{agentDetail?.feedback?.status?.replaceAll('_',' ') || 'Sin feedback'}</b></p><button disabled={savingCommitment||commitment.trim().length<3||!commitmentDate} onClick={()=>void saveCommitment()} className="cm-button-primary px-4 py-2 text-xs disabled:opacity-50">{savingCommitment?'Guardando…':'Guardar compromiso'}</button></div>
+              {commitmentError&&<p className="mt-2 text-xs text-[var(--cm-danger)]">{commitmentError}</p>}
             </div>
           )}
 

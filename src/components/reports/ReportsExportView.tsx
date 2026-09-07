@@ -15,7 +15,7 @@ import {
 import { calculateImpactAnalysis, generateExecutiveInsights, calculatePareto } from '../../utils/calculations';
 
 export const ReportsExportView: React.FC = () => {
-  const { filteredEvaluations, filteredAdvisors, actionPlans, interventions, config } = useApp();
+  const { filteredEvaluations, filteredAdvisors, actionPlans, interventions, config, currentUser } = useApp();
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
 
   const impact = calculateImpactAnalysis(filteredEvaluations, filteredAdvisors);
@@ -35,6 +35,7 @@ export const ReportsExportView: React.FC = () => {
     setDownloadSuccess(filename);
     setTimeout(() => setDownloadSuccess(null), 3000);
   };
+  const downloadXlsx = async (kind: 'evaluations'|'commitments'|'calibrations'|'alerts') => { const token=sessionStorage.getItem('CONTACT_CENTER_AUTH_TOKEN');const response=await fetch(`/api/reports/${kind}.xlsx`,{headers:token?{Authorization:`Bearer ${token}`}:{}});if(!response.ok)return alert((await response.json()).error||'No fue posible generar el archivo.');const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download=`${kind}.xlsx`;link.click();URL.revokeObjectURL(url);setDownloadSuccess(`${kind}.xlsx`); };
 
   // Export 1: Evaluations CSV
   const exportEvaluationsCsv = () => {
@@ -162,11 +163,11 @@ export const ReportsExportView: React.FC = () => {
             </div>
 
             <button
-              onClick={exportEvaluationsCsv}
+              onClick={() => void downloadXlsx('evaluations')}
               className="mt-4 w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 rounded-lg text-xs font-bold transition-colors"
             >
               <Download className="w-4 h-4" />
-              <span>Exportar Evaluaciones (CSV)</span>
+              <span>Exportar Evaluaciones (XLSX)</span>
             </button>
           </div>
 
@@ -210,15 +211,20 @@ export const ReportsExportView: React.FC = () => {
             </div>
 
             <button
-              onClick={exportActionPlansCsv}
+              onClick={() => void downloadXlsx('commitments')}
               className="mt-4 w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 rounded-lg text-xs font-bold transition-colors"
             >
               <Download className="w-4 h-4" />
-              <span>Exportar Planes (CSV)</span>
+              <span>Exportar Compromisos (XLSX)</span>
             </button>
           </div>
 
         </div>
+
+        {currentUser.role !== 'SUPERVISOR' && <section className="grid gap-4 md:grid-cols-2">
+          <button onClick={() => void downloadXlsx('calibrations')} className="rounded-xl border border-teal-200 bg-teal-50 p-4 text-left text-xs font-bold text-teal-800">Descargar historial de calibraciones (XLSX)</button>
+          {currentUser.role === 'ADMINISTRADOR' && <button onClick={() => void downloadXlsx('alerts')} className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-left text-xs font-bold text-amber-800">Descargar alertas de calidad (XLSX)</button>}
+        </section>}
 
         {/* Printable Executive Report Preview */}
         <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-xs space-y-6 print:shadow-none print:border-none">

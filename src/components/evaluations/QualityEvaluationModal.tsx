@@ -201,6 +201,7 @@ export const QualityEvaluationModal: React.FC<{
       type: evaluationType,
       evaluationType: "QUALITY",
       qualityStatus: "FINALIZED",
+      origin: "MANUAL",
       qualityCriticalErrorIds: critical,
       qualityCriticalErrorSnapshot: criticalErrors.filter((error) => critical.includes(error.id)),
       sale: false,
@@ -327,6 +328,7 @@ export const QualityEvaluationModal: React.FC<{
                   <option value="CERTIFICACION">Certificación</option>
                 </select>
               </label>
+              <div className="rounded-lg border border-dashed border-[#9DBFC0] bg-[#F3FAFA] px-3 py-2 text-xs text-[#43565A]"><b className="text-[#006B6B]">Origen: Manual</b><br/>Speech Analytics: integración pendiente de API.</div>
               <label className="font-semibold text-[#43565A]">
                 Hora de llamada
                 <input

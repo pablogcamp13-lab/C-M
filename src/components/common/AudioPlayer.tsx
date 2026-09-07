@@ -65,7 +65,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   useEffect(() => {
     const driveId = audioUrl?.match(/\/d\/([^/?]+)/)?.[1] || audioUrl?.match(/[?&]id=([^&]+)/)?.[1];
     const source = audioUrl?.startsWith('/api/files/') ? audioUrl : driveId ? `/api/files/${driveId}/content` : audioUrl;
-    if (!source?.startsWith('/api/files/')) {
+    if (!source?.startsWith('/api/files/') && !source?.startsWith('/api/quality-alerts/')) {
       setPlayableUrl(source);
       setPlaybackError(null);
       return;

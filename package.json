@@ -15,7 +15,9 @@
     "clean": "rm -rf dist server.js",
     "seed:demo": "node scripts/seed-demo.mjs",
     "import:roster": "tsx scripts/replace-roster.ts",
-    "lint": "npm run typecheck"
+    "lint": "npm run typecheck",
+    "test:phase1": "node scripts/test-phase1.mjs",
+    "test:phase2": "node scripts/test-phase2.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

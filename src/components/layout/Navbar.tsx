@@ -9,7 +9,7 @@ const navigation: Array<{ label: string; section: NavigationSection }> = [
   { label: 'Feedback', section: 'feedback' }, { label: 'PDA', section: 'action_plans' },
   { label: 'Alertas', section: 'quality_alerts' }, { label: 'Calibraciones', section: 'calibrations' },
   { label: 'Desarrollo', section: 'development' },
-  { label: 'Analítica', section: 'pareto' }, { label: 'Configuración', section: 'admin' }
+  { label: 'Analítica', section: 'pareto' }, { label: 'Reportes', section: 'reports' }, { label: 'Configuración', section: 'admin' }
 ];
 const monitorNavigation: Array<{ label: string; section: NavigationSection }> = [
   { label: 'Evaluar', section: 'evaluations' },
@@ -26,7 +26,7 @@ export const Navbar: React.FC<{ onOpenNewEvaluation: () => void }> = ({ onOpenNe
   const visibleNavigation = currentUser.role === 'MONITOR' ? monitorNavigation : currentUser.role === 'ASESOR'
     ? navigation.filter(item => ['home', 'evaluations', 'feedback', 'action_plans', 'quality_alerts', 'development'].includes(item.section))
     : currentUser.role === 'SUPERVISOR'
-      ? navigation.filter(item => ['home', 'evaluations', 'feedback', 'action_plans', 'quality_alerts', 'calibrations'].includes(item.section))
+      ? navigation.filter(item => ['home', 'evaluations', 'feedback', 'action_plans', 'quality_alerts', 'calibrations', 'reports'].includes(item.section))
       : navigation.filter(item => item.section !== 'development' || currentUser.role === 'ADMINISTRADOR');
   const canCreateEvaluation = ['ADMINISTRADOR', 'CONSULTOR', 'MONITOR'].includes(currentUser.role);
 

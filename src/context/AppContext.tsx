@@ -352,7 +352,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Filtered dataset computed dynamically
   const filteredEvaluations = evaluations.filter(ev => {
-    const validatedForOperationalUse = !ev.validationStatus || ['VALIDADO', 'AJUSTADO_VALIDADO'].includes(ev.validationStatus);
+    const validatedForOperationalUse = !ev.validationStatus || ['VALIDATED', 'VALIDADO', 'AJUSTADO_VALIDADO'].includes(ev.validationStatus);
     if (['ASESOR', 'SUPERVISOR'].includes(currentUser.role) && !validatedForOperationalUse) return false;
     if (filters.dateFrom && ev.date < filters.dateFrom) return false;
     if (filters.dateTo && ev.date > filters.dateTo) return false;

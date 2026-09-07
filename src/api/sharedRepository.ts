@@ -93,7 +93,8 @@ export const filesApi = {
 export const qualityAlertsApi = {
   async list() { return json<{ alerts: QualityAlert[] }>(await fetch('/api/quality-alerts', { headers: headers() })); },
   async create(data: Partial<QualityAlert>) { return json<{ alert: QualityAlert }>(await fetch('/api/quality-alerts', { method:'POST', headers:{'Content-Type':'application/json',...headers()}, body:JSON.stringify(data) })); },
-  async update(id: string, data: Partial<QualityAlert>) { return json<{ alert: QualityAlert }>(await fetch(`/api/quality-alerts/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json',...headers()}, body:JSON.stringify(data) })); }
+  async update(id: string, data: Partial<QualityAlert>) { return json<{ alert: QualityAlert }>(await fetch(`/api/quality-alerts/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json',...headers()}, body:JSON.stringify(data) })); },
+  async remove(id: string) { return json<{ ok:boolean }>(await fetch(`/api/quality-alerts/${id}`, { method:'DELETE', headers:headers() })); }
 };
 
 export const calibrationsApi = {
@@ -101,6 +102,7 @@ export const calibrationsApi = {
   async create(data: Record<string,unknown>) { return json<{ calibration:Calibration }>(await fetch('/api/calibrations', { method:'POST', headers:{'Content-Type':'application/json',...headers()}, body:JSON.stringify(data) })); },
   async update(id:string,data:Record<string,unknown>) { return json<{calibration:Calibration}>(await fetch(`/api/calibrations/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json',...headers()},body:JSON.stringify(data)})); },
   async transition(id:string,status:string) { return json<{calibration:Calibration}>(await fetch(`/api/calibrations/${id}/state`,{method:'PATCH',headers:{'Content-Type':'application/json',...headers()},body:JSON.stringify({status})})); },
+  async invite(id:string) { return json<{calibration:Calibration;results:any[]}>(await fetch(`/api/calibrations/${id}/invitations`,{method:'POST',headers:headers()})); },
   async respond(id:string,data:Record<string,unknown>) { return json<{calibration:Calibration}>(await fetch(`/api/calibrations/${id}/respond`,{method:'PATCH',headers:{'Content-Type':'application/json',...headers()},body:JSON.stringify(data)})); },
   async remove(id:string) { return json<{ok:boolean}>(await fetch(`/api/calibrations/${id}`,{method:'DELETE',headers:headers()})); }
 };

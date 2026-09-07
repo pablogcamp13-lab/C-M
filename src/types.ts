@@ -228,6 +228,11 @@ export interface Evaluation {
   qualityCriticalErrorIds?: string[];
   qualityCriticalErrorSnapshot?: QualityCriticalError[];
   qualityStatus?: 'DRAFT' | 'FINALIZED';
+  validationStatus?: 'AUTOMATIC_PENDING' | 'VALIDATED' | 'PENDIENTE_AUTOMATICO' | 'VALIDADO' | 'AJUSTADO_VALIDADO';
+  origin?: 'MANUAL' | 'SPEECH_ANALYTICS';
+  agentCommitment?: string;
+  agentCommitmentDate?: string;
+  agentCommitmentUpdatedAt?: string;
   technicalScore?: number | null;
   qualityResult?: 'APROBADA' | 'REPROBADA';
   criticalReason?: string;
@@ -291,6 +296,8 @@ export interface QualityAlert {
   detail: string;
   advisorId: string;
   supervisorId: string;
+  /** Backward-compatible multi-supervisor scope. supervisorId remains the primary legacy owner. */
+  supervisorIds?: string[];
   campaignId: string;
   validUntil: string;
   criticality: 'BAJA' | 'MEDIA' | 'ALTA' | 'CRITICA';
@@ -302,6 +309,7 @@ export interface QualityAlert {
   managedAt?: string;
   closedAt?: string;
   elapsedMinutes?: number;
+  supervisorResponses?: Array<{ supervisorId: string; feedbackPerformed?: boolean; managementDetail?: string; evidenceUrl?: string; status: 'PENDIENTE_GESTION' | 'GESTIONADA'; managedAt?: string; elapsedMinutes?: number; updatedAt: string }>;
   createdBy: string;
   updatedAt: string;
 }
