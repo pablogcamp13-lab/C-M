@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Bell, ChevronDown, Menu, Plus, Search, X } from 'lucide-react';
+import { Bell, ChevronDown, Menu, Plus, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import type { NavigationSection } from '../../types';
 
@@ -20,7 +20,7 @@ const monitorNavigation: Array<{ label: string; section: NavigationSection }> = 
 ];
 
 export const Navbar: React.FC<{ onOpenNewEvaluation: () => void }> = ({ onOpenNewEvaluation }) => {
-  const { currentSection, setCurrentSection, currentUser, filters, setFilters, logout } = useApp();
+  const { currentSection, setCurrentSection, currentUser, logout } = useApp();
   const [open, setOpen] = useState(false);
   const [menu, setMenu] = useState(false);
   const visibleNavigation = currentUser.role === 'MONITOR' ? monitorNavigation : currentUser.role === 'ASESOR'
@@ -40,7 +40,6 @@ export const Navbar: React.FC<{ onOpenNewEvaluation: () => void }> = ({ onOpenNe
         {visibleNavigation.map(item => <button key={item.section} onClick={() => setCurrentSection(item.section)} className="cm-navbar__link" aria-current={currentSection === item.section ? 'page' : undefined}>{item.label}</button>)}
       </nav>
       <div className="cm-navbar__actions ml-auto flex items-center gap-2">
-        <label className="cm-navbar__search hidden 2xl:flex"><Search className="h-4 w-4" /><input value={filters.searchQuery} onChange={event => setFilters(value => ({ ...value, searchQuery: event.target.value }))} placeholder="Buscar..." className="cm-input" aria-label="Buscar" /></label>
         <button className="cm-navbar__icon-button" aria-label="Notificaciones"><Bell className="h-5 w-5" /><span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#1fa8ff]" /></button>
         <button onClick={() => setMenu(!menu)} className="cm-navbar__profile hidden sm:flex" aria-expanded={menu}><span className="cm-navbar__avatar">{currentUser.name.charAt(0)}</span><span className="max-w-28 text-left text-[11px] leading-tight"><b className="block truncate">{currentUser.name}</b><span className="text-[#c2dddd]">{currentUser.role}</span></span><ChevronDown className="h-3 w-3" /></button>
         {canCreateEvaluation && <button onClick={onOpenNewEvaluation} className="cm-navbar__new-evaluation cm-button-primary hidden items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold md:inline-flex"><Plus className="h-4 w-4 shrink-0" /><span>Nueva evaluación</span></button>}
