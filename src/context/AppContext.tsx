@@ -59,6 +59,8 @@ interface AppContextType {
   setUserRole: (role: UserRole) => void;
 
   users: User[];
+  companies: import('../types').Company[];
+  operations: import('../types').Operation[];
   campaigns: Campaign[];
   teams: Team[];
   advisors: Advisor[];
@@ -153,6 +155,8 @@ const initialFilters: FilterState = {
   dateFrom: '',
   dateTo: '',
   campaignId: '',
+  companyId: '',
+  operationId: '',
   productId: '',
   supervisorId: '',
   advisorId: '',
@@ -183,6 +187,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [campaigns, setCampaigns] = useState<Campaign[]>(() => {
     return [];
   });
+  const [companies, setCompanies] = useState<import('../types').Company[]>([]);
+  const [operations, setOperations] = useState<import('../types').Operation[]>([]);
 
   const [teams, setTeams] = useState<Team[]>(() => {
     return [];
@@ -249,7 +255,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const persisted = await sharedRepositoryApi.load();
         rosterHydrated.current = true;
-        setUsers(persisted.users); setCampaigns(persisted.campaigns); setTeams(persisted.teams); setAdvisors(persisted.advisors);
+        setUsers(persisted.users); setCampaigns(persisted.campaigns); setCompanies(persisted.companies || []); setOperations(persisted.operations || []); setTeams(persisted.teams); setAdvisors(persisted.advisors);
         const persistedState = await platformStateApi.load();
         const state = persistedState;
         if (state) {
@@ -355,11 +361,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Filtered dataset computed dynamically
   const filteredEvaluations = evaluations.filter(ev => {
+    const operation=operations.find(item=>item.id===(ev.operationId || advisors.find(a=>a.id===ev.advisorId)?.operationId));
     const validatedForOperationalUse = !ev.validationStatus || ['VALIDATED', 'VALIDADO', 'AJUSTADO_VALIDADO'].includes(ev.validationStatus);
     if (['ASESOR', 'SUPERVISOR'].includes(currentUser.role) && !validatedForOperationalUse) return false;
     if (filters.dateFrom && ev.date < filters.dateFrom) return false;
     if (filters.dateTo && ev.date > filters.dateTo) return false;
     if (filters.campaignId && ev.campaignId !== filters.campaignId) return false;
+    if (filters.operationId && operation?.id !== filters.operationId) return false;
+    if (filters.companyId && operation?.companyId !== filters.companyId) return false;
     if (filters.productId && ev.product !== filters.productId) return false;
     if (filters.supervisorId && ev.supervisorId !== filters.supervisorId) return false;
     if (filters.advisorId && ev.advisorId !== filters.advisorId) return false;
@@ -401,7 +410,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const filteredAdvisors = advisors.filter(adv => {
+    const operation=operations.find(item=>item.id===adv.operationId);
     if (filters.campaignId && adv.campaignId !== filters.campaignId) return false;
+    if (filters.operationId && adv.operationId !== filters.operationId) return false;
+    if (filters.companyId && operation?.companyId !== filters.companyId) return false;
     if (filters.supervisorId && adv.supervisorId !== filters.supervisorId) return false;
     if (filters.advisorId && adv.id !== filters.advisorId) return false;
     
@@ -434,6 +446,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!advisor) return false;
 
     if (filters.campaignId && advisor.campaignId !== filters.campaignId) return false;
+    const operation=operations.find(item=>item.id===advisor.operationId);
+    if (filters.operationId && advisor.operationId !== filters.operationId) return false;
+    if (filters.companyId && operation?.companyId !== filters.companyId) return false;
     if (filters.supervisorId && advisor.supervisorId !== filters.supervisorId) return false;
 
     if (currentUser.role === 'ASESOR' && currentUser.advisorId) {
@@ -1099,6 +1114,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentUser,
         setUserRole,
         users,
+        companies,
+        operations,
         campaigns,
         teams,
         advisors,

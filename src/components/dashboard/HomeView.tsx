@@ -12,7 +12,7 @@ const averageOf = (values: Array<number | null>) => {
 };
 
 export const HomeView: React.FC = () => {
-  const { filteredEvaluations, advisors, actionPlans, operationalMeasurements, setCurrentSection } = useApp();
+  const { filteredEvaluations, advisors, actionPlans, operationalMeasurements, setCurrentSection, companies, filters, setFilters } = useApp();
   const [activeSummary, setActiveSummary] = useState<'D3C' | 'QUALITY'>('D3C');
   const d3c = filteredEvaluations.filter(evaluation => evaluation.evaluationType !== 'QUALITY');
   const scores = d3c.map(evaluation => evaluation.scoreTotal).filter((value): value is number => value !== null);
@@ -36,6 +36,7 @@ export const HomeView: React.FC = () => {
   ];
 
   return <main className="cm-home px-4 py-3 lg:px-7"><div className="mx-auto max-w-[1620px] space-y-3">
+    {companies.filter(company=>company.status==='ACTIVA').length>0&&<section className="flex flex-wrap items-center gap-2"><span className="text-xs font-bold text-[var(--cm-text-secondary)]">Empresa:</span><button onClick={()=>setFilters(previous=>({...previous,companyId:'',operationId:'',campaignId:''}))} className={`cm-button-secondary px-3 py-1.5 text-xs ${!filters.companyId?'border-[var(--cm-primary)] text-[var(--cm-primary)]':''}`}>Todas</button>{companies.filter(company=>company.status==='ACTIVA').map(company=><button key={company.id} onClick={()=>setFilters(previous=>({...previous,companyId:company.id,operationId:'',campaignId:''}))} className={`cm-button-secondary px-3 py-1.5 text-xs ${filters.companyId===company.id?'border-[var(--cm-primary)] text-[var(--cm-primary)]':''}`}>{company.name}</button>)}</section>}
     <FiltersBar />
 
     <section className="grid gap-2 lg:grid-cols-2">

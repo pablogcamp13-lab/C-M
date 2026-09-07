@@ -30,6 +30,14 @@ export interface Campaign {
   qualityCriticalErrors?: QualityCriticalError[];
 }
 
+/** La campaña es el servicio comercial; la operación es su instancia por empresa. */
+export interface Company { id:string; name:string; status:'ACTIVA'|'INACTIVA'; createdAt:string; }
+export interface Operation { id:string; companyId:string; campaignId:string; name:string; status:'ACTIVA'|'INACTIVA'; legacy?:boolean; }
+export type OperationalStatus='PRE_INGRESO'|'CAPACITACION'|'OJT'|'PRODUCCION'|'LICENCIA'|'SUSPENDIDO'|'BAJA';
+export interface OperationAssignment { id:string; advisorId:string; operationId:string; teamId?:string; supervisorId?:string; role:UserRole; operationalStatus:OperationalStatus; startDate:string; endDate?:string; active:boolean; source:'MIGRACION'|'MANUAL'|'IMPORTACION'; actorId?:string; observation?:string; }
+export interface StaffingPlan { id:string; operationId:string; period:string; targetHeadcount:number; createdAt:string; }
+export interface StaffingMovement { id:string; advisorId:string; assignmentId?:string; type:string; occurredAt:string; origin?:string; destination?:string; actorId?:string; observation?:string; }
+
 export interface QualityCriticalError {
   id: string;
   name: string;
@@ -59,6 +67,7 @@ export interface QualityGuideline {
 export interface Team {
   id: string;
   campaignId: string;
+  operationId?: string;
   supervisorId: string;
   name: string;
 }
@@ -71,6 +80,7 @@ export interface Advisor {
   employeeCode: string;
   name: string;
   campaignId: string;
+  operationId?: string;
   sourceCampaignName?: string;
   teamId: string;
   supervisorId: string;
@@ -218,6 +228,10 @@ export interface Evaluation {
   evaluatorId: string;
   evaluatorName?: string;
   campaignId: string;
+  operationId?: string;
+  assignmentId?: string;
+  companyId?: string;
+  supervisorAtEvaluation?: string;
   teamId: string;
   supervisorId: string;
   product: string;
@@ -301,6 +315,7 @@ export interface QualityAlert {
   /** Backward-compatible multi-supervisor scope. supervisorId remains the primary legacy owner. */
   supervisorIds?: string[];
   campaignId: string;
+  operationId?: string;
   validUntil: string;
   criticality: 'BAJA' | 'MEDIA' | 'ALTA' | 'CRITICA';
   status: QualityAlertStatus;
@@ -445,6 +460,8 @@ export interface FilterState {
   dateFrom: string;
   dateTo: string;
   campaignId: string;
+  companyId?: string;
+  operationId?: string;
   productId: string;
   supervisorId: string;
   advisorId: string;

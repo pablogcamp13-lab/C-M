@@ -5,7 +5,7 @@ import { emailService } from "./server/emailService";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import type { Advisor, Campaign, Team, User } from "./src/types";
+import type { Advisor, Campaign, Company, Operation, Team, User } from "./src/types";
 // @ts-ignore node:sqlite está disponible en Node 22.5+; el proyecto conserva
 // @types/node 22 para el resto del código existente.
 import { DatabaseSync } from "node:sqlite";
@@ -14,7 +14,7 @@ import * as XLSX from 'xlsx';
 const PORT = Number(process.env.PORT || 3001);
 const isProduction = process.env.NODE_ENV === 'production' || process.argv[1]?.includes('dist/server.cjs');
 
-type SharedRepository = { users: User[]; campaigns: Campaign[]; teams: Team[]; advisors: Advisor[] };
+type SharedRepository = { users: User[]; campaigns: Campaign[]; teams: Team[]; advisors: Advisor[]; companies?:Company[]; operations?:Operation[] };
 const sqlitePath = process.env.SQLITE_PATH || join(process.cwd(), 'data', 'contact-center.sqlite');
 mkdirSync(path.dirname(sqlitePath), { recursive: true });
 const db = new DatabaseSync(sqlitePath);
@@ -34,7 +34,14 @@ CREATE TABLE IF NOT EXISTS development_capsules (id TEXT PRIMARY KEY, status TEX
 CREATE TABLE IF NOT EXISTS development_assignments (id TEXT PRIMARY KEY, capsule_id TEXT NOT NULL REFERENCES development_capsules(id), advisor_id TEXT NOT NULL REFERENCES advisors(id), status TEXT NOT NULL CHECK(status IN ('PENDIENTE','EN_CURSO','COMPLETADA','VENCIDA')), data_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(capsule_id,advisor_id));
 CREATE TABLE IF NOT EXISTS quality_alerts (id TEXT PRIMARY KEY, status TEXT NOT NULL, advisor_id TEXT NOT NULL, supervisor_id TEXT NOT NULL, campaign_id TEXT NOT NULL, data_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS calibrations (id TEXT PRIMARY KEY, status TEXT NOT NULL, evaluation_id TEXT NOT NULL, campaign_id TEXT NOT NULL, data_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS companies (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, status TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, company_id TEXT NOT NULL REFERENCES companies(id), campaign_id TEXT NOT NULL REFERENCES campaigns(id), name TEXT NOT NULL, status TEXT NOT NULL, legacy INTEGER NOT NULL DEFAULT 0, UNIQUE(company_id,campaign_id));
+CREATE TABLE IF NOT EXISTS operation_assignments (id TEXT PRIMARY KEY, advisor_id TEXT NOT NULL REFERENCES advisors(id), operation_id TEXT NOT NULL REFERENCES operations(id), team_id TEXT, supervisor_id TEXT, role TEXT NOT NULL, operational_status TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT, active INTEGER NOT NULL, source TEXT NOT NULL, actor_id TEXT, observation TEXT);
+CREATE TABLE IF NOT EXISTS staffing_plans (id TEXT PRIMARY KEY, operation_id TEXT NOT NULL REFERENCES operations(id), period TEXT NOT NULL, target_headcount INTEGER NOT NULL, created_at TEXT NOT NULL, UNIQUE(operation_id,period));
+CREATE TABLE IF NOT EXISTS staffing_movements (id TEXT PRIMARY KEY, advisor_id TEXT NOT NULL REFERENCES advisors(id), assignment_id TEXT, type TEXT NOT NULL, occurred_at TEXT NOT NULL, origin TEXT, destination TEXT, actor_id TEXT, observation TEXT);
 CREATE INDEX IF NOT EXISTS idx_advisors_campaign ON advisors(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_operations_company_campaign ON operations(company_id,campaign_id);
+CREATE INDEX IF NOT EXISTS idx_assignments_operation_active ON operation_assignments(operation_id,active);
 CREATE INDEX IF NOT EXISTS idx_evaluations_advisor_type ON evaluations(advisor_id, evaluation_type);
 CREATE INDEX IF NOT EXISTS idx_quality_alerts_supervisor ON quality_alerts(supervisor_id, status);
 CREATE INDEX IF NOT EXISTS idx_calibrations_status ON calibrations(status);`);
@@ -99,12 +106,34 @@ function seedDatabase() {
 }
 seedDatabase();
 
+/** Migración aditiva: preserva campañas/IDs legacy y crea operaciones únicas por empresa. */
+function seedOrganization() {
+  const now=new Date().toISOString();
+  const companies=[['company_techcenter','TECHCENTER'],['company_talent_up','TALENT UP'],['company_konectados','KONECTADOS']] as const;
+  for(const [id,name] of companies) db.prepare('INSERT OR IGNORE INTO companies (id,name,status,created_at) VALUES (?,?,?,?)').run(id,name,'ACTIVA',now);
+  const matrix:{companyId:string;name:string}[]=[
+    {companyId:'company_techcenter',name:'Migraciones Bitel'},{companyId:'company_techcenter',name:'Retenciones Bitel'},{companyId:'company_techcenter',name:'Portabilidad Bitel'},
+    {companyId:'company_talent_up',name:'Migraciones Bitel'},{companyId:'company_talent_up',name:'Portabilidad Bitel'},{companyId:'company_talent_up',name:'WIN'},{companyId:'company_talent_up',name:'Carsa'},{companyId:'company_talent_up',name:'Prosegur'},
+    {companyId:'company_konectados',name:'Migraciones Bitel'},{companyId:'company_konectados',name:'Portabilidad Bitel'}];
+  for(const row of matrix){let campaign=db.prepare('SELECT id FROM campaigns WHERE lower(name)=lower(?)').get(row.name) as any;if(!campaign){const id=`service_${row.name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')}`;db.prepare('INSERT OR IGNORE INTO campaigns (id,name,client,status,products_json,description) VALUES (?,?,?,?,?,?)').run(id,row.name,'Bitel','ACTIVA','[]','Servicio normalizado para operación multiempresa.');campaign=db.prepare('SELECT id FROM campaigns WHERE id=?').get(id) as any;}const operationId=`op_${row.companyId.replace('company_','')}_${campaign.id.replace(/^service_|^camp_/,'')}`;db.prepare('INSERT OR IGNORE INTO operations (id,company_id,campaign_id,name,status,legacy) VALUES (?,?,?,?,?,0)').run(operationId,row.companyId,campaign.id,`${companies.find(item=>item[0]===row.companyId)?.[1]} / ${row.name}`,'ACTIVA');}
+  const legacyCompany='company_legacy';db.prepare('INSERT OR IGNORE INTO companies (id,name,status,created_at) VALUES (?,?,?,?)').run(legacyCompany,'LEGACY','INACTIVA',now);
+  for(const c of db.prepare('SELECT id,name FROM campaigns').all() as any[]) db.prepare('INSERT OR IGNORE INTO operations (id,company_id,campaign_id,name,status,legacy) VALUES (?,?,?,?,?,1)').run(`op_legacy_${c.id}`,legacyCompany,c.id,`LEGACY / ${c.name}`,'ACTIVA');
+}
+seedOrganization();
+function migrateLegacyAssignments() {
+  const now=new Date().toISOString();
+  for(const row of db.prepare('SELECT id,data_json FROM advisors').all() as any[]){const advisor=JSON.parse(row.data_json);const operationId=advisor.operationId||`op_legacy_${advisor.campaignId}`;if(!db.prepare('SELECT 1 FROM operations WHERE id=?').get(operationId))continue;const id=`assignment_legacy_${advisor.id}`;db.prepare('INSERT OR IGNORE INTO operation_assignments (id,advisor_id,operation_id,team_id,supervisor_id,role,operational_status,start_date,active,source,observation) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(id,advisor.id,operationId,advisor.teamId||null,advisor.supervisorId||null,'ASESOR',advisor.status==='INACTIVO'?'BAJA':advisor.status==='EN_CAPACITACION'?'CAPACITACION':'PRODUCCION',advisor.hireDate||now.slice(0,10),advisor.status==='ACTIVO'&&advisor.active!==false?1:0,'MIGRACION','Contexto histórico no inferible: asignado a operación LEGACY.');}
+}
+migrateLegacyAssignments();
+
 function repository(): SharedRepository {
   const users = db.prepare('SELECT * FROM users ORDER BY created_at DESC').all().map(publicUser);
   const campaigns = db.prepare('SELECT * FROM campaigns ORDER BY name').all().map((r: any) => ({ id: r.id, name: r.name, client: r.client, status: r.status, products: JSON.parse(r.products_json), description: r.description || undefined, backgroundImage: r.background_image || undefined, qualityGuidelines: JSON.parse(r.quality_guidelines_json || '[]'), qualityCriterionWeights: JSON.parse(r.quality_criterion_weights_json || 'null') || undefined, qualityCriticalErrors: JSON.parse(r.quality_critical_errors_json || '[]') }));
-  const teams = db.prepare('SELECT * FROM teams ORDER BY name').all().map((r: any) => ({ id: r.id, campaignId: r.campaign_id, supervisorId: r.supervisor_id, name: r.name }));
-  const advisors = db.prepare('SELECT data_json FROM advisors ORDER BY name').all().map((r: any) => JSON.parse(r.data_json));
-  return { users, campaigns, teams, advisors };
+  const companies=db.prepare('SELECT id,name,status,created_at FROM companies ORDER BY name').all().map((r:any)=>({id:r.id,name:r.name,status:r.status,createdAt:r.created_at}));
+  const operations=db.prepare('SELECT id,company_id,campaign_id,name,status,legacy FROM operations ORDER BY name').all().map((r:any)=>({id:r.id,companyId:r.company_id,campaignId:r.campaign_id,name:r.name,status:r.status,legacy:Boolean(r.legacy)}));
+  const teams = db.prepare('SELECT * FROM teams ORDER BY name').all().map((r: any) => ({ id: r.id, campaignId: r.campaign_id, operationId:`op_legacy_${r.campaign_id}`, supervisorId: r.supervisor_id, name: r.name }));
+  const advisors = db.prepare('SELECT data_json FROM advisors ORDER BY name').all().map((r: any) => { const advisor=JSON.parse(r.data_json);return {...advisor,operationId:advisor.operationId||`op_legacy_${advisor.campaignId}`}; });
+  return { users, campaigns, teams, advisors, companies, operations };
 }
 
 function persistRepository(input: SharedRepository) {
@@ -112,7 +141,9 @@ function persistRepository(input: SharedRepository) {
   db.exec('BEGIN IMMEDIATE');
   try {
     const source = input;
+    for (const company of source.companies || []) db.prepare('INSERT INTO companies (id,name,status,created_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,status=excluded.status').run(company.id,company.name,company.status,company.createdAt||now);
     for (const campaign of source.campaigns || []) db.prepare(`INSERT INTO campaigns (id,name,client,status,products_json,description,background_image,quality_guidelines_json,quality_criterion_weights_json,quality_critical_errors_json) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,client=excluded.client,status=excluded.status,products_json=excluded.products_json,description=excluded.description,background_image=excluded.background_image,quality_guidelines_json=excluded.quality_guidelines_json,quality_criterion_weights_json=excluded.quality_criterion_weights_json,quality_critical_errors_json=excluded.quality_critical_errors_json`).run(campaign.id, campaign.name, campaign.client, campaign.status, JSON.stringify(campaign.products || []), campaign.description || null, campaign.backgroundImage || null, JSON.stringify(campaign.qualityGuidelines || []), JSON.stringify(campaign.qualityCriterionWeights || null), JSON.stringify(campaign.qualityCriticalErrors || []));
+    for (const operation of source.operations || []) db.prepare('INSERT INTO operations (id,company_id,campaign_id,name,status,legacy) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET company_id=excluded.company_id,campaign_id=excluded.campaign_id,name=excluded.name,status=excluded.status').run(operation.id,operation.companyId,operation.campaignId,operation.name,operation.status,operation.legacy?1:0);
     for (const user of source.users || []) {
       const existing = db.prepare('SELECT password_hash,must_change_password FROM users WHERE id=?').get(user.id);
       db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar`).run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt || now, existing?.password_hash || hashPassword(user.password || INITIAL_PASSWORD), existing ? existing.must_change_password : 1);
@@ -124,6 +155,7 @@ function persistRepository(input: SharedRepository) {
     db.exec('ROLLBACK');
     throw error;
   }
+  migrateLegacyAssignments();
   return repository();
 }
 
@@ -135,7 +167,7 @@ async function readRepository() {
   if (!googleStorage.enabled) return repository();
   try {
     const remote = await googleStorage.loadRepository();
-    if (remote && (remote.users.length || remote.campaigns.length || remote.teams.length || remote.advisors.length)) { persistRepository(remote); return remote; }
+    if (remote && (remote.users.length || remote.campaigns.length || remote.teams.length || remote.advisors.length)) { persistRepository(remote); return repository(); }
     const local = repository();
     await googleStorage.saveRepository(local, passwordHashes());
     console.log('[google-storage] Google Sheets inicializado con la persistencia local existente.');
@@ -306,12 +338,14 @@ async function startServer() {
     if (user.role === 'MONITOR') {
       const advisors = source.advisors.filter(item => item.active !== false && item.status === 'ACTIVO');
       const campaignIds = new Set(advisors.map(item => item.campaignId));
-      return res.json({ repository: { advisors, campaigns: source.campaigns.filter(item => item.status === 'ACTIVA' && campaignIds.has(item.id)), teams: source.teams.filter(item => campaignIds.has(item.campaignId)), users: source.users.filter(item => item.id === user.id || item.role === 'SUPERVISOR') } });
+      const operationIds=new Set(advisors.map(item=>item.operationId||`op_legacy_${item.campaignId}`)), operations=(source.operations||[]).filter(item=>operationIds.has(item.id)), companyIds=new Set(operations.map(item=>item.companyId));
+      return res.json({ repository: { advisors, campaigns: source.campaigns.filter(item => item.status === 'ACTIVA' && campaignIds.has(item.id)), companies:(source.companies||[]).filter(item=>companyIds.has(item.id)), operations, teams: source.teams.filter(item => campaignIds.has(item.campaignId)), users: source.users.filter(item => item.id === user.id || item.role === 'SUPERVISOR') } });
     }
     if (user.role === 'SUPERVISOR') {
       const advisors = source.advisors.filter(item => item.supervisorId === user.id || (user.teamId && item.teamId === user.teamId));
       const campaignIds = new Set(advisors.map(item => item.campaignId)); const teamIds = new Set(advisors.map(item => item.teamId).filter(Boolean));
-      return res.json({ repository: { advisors, campaigns: source.campaigns.filter(item => campaignIds.has(item.id)), teams: source.teams.filter(item => teamIds.has(item.id)), users: source.users.filter(item => item.id === user.id || item.advisorId && advisors.some(advisor => advisor.id === item.advisorId)) } });
+      const operationIds=new Set(advisors.map(item=>item.operationId||`op_legacy_${item.campaignId}`)), operations=(source.operations||[]).filter(item=>operationIds.has(item.id)), companyIds=new Set(operations.map(item=>item.companyId));
+      return res.json({ repository: { advisors, campaigns: source.campaigns.filter(item => campaignIds.has(item.id)), companies:(source.companies||[]).filter(item=>companyIds.has(item.id)), operations, teams: source.teams.filter(item => teamIds.has(item.id)), users: source.users.filter(item => item.id === user.id || item.advisorId && advisors.some(advisor => advisor.id === item.advisorId)) } });
     }
     if (user.role !== 'ASESOR' || !user.advisorId) return res.json({ repository: source });
     const advisor = source.advisors.filter(item => item.id === user.advisorId);
@@ -322,7 +356,7 @@ async function startServer() {
       advisors: advisor,
       campaigns: source.campaigns.filter(item => advisorCampaignIds.has(item.id)),
       teams: source.teams.filter(item => advisorTeamIds.has(item.id)),
-      users: source.users.filter(item => item.id === user.id || supervisorIds.has(item.id))
+      users: source.users.filter(item => item.id === user.id || supervisorIds.has(item.id)), companies:(source.companies||[]).filter(item=>(source.operations||[]).some(operation=>operation.companyId===item.id&&advisorCampaignIds.has(operation.campaignId))), operations:(source.operations||[]).filter(operation=>advisorCampaignIds.has(operation.campaignId))
     } });
   });
   app.post('/api/shared-repository/migrate', requireAuth, async (req, res) => {
@@ -356,7 +390,8 @@ async function startServer() {
       const advisor = directory.advisors.find(item => item.id === evaluation.advisorId);
       if (!advisor || advisor.active === false || advisor.status !== 'ACTIVO') return res.status(400).json({ error: 'El asesor no está habilitado para evaluación.' });
       if (authUser.role === 'MONITOR') evaluation = { ...evaluation, evaluatorId: authUser.id, evaluatorName: authUser.name };
-      evaluation = { ...evaluation, validationStatus: 'VALIDATED' };
+      const operation=directory.operations?.find(item=>item.id===(advisor.operationId||`op_legacy_${advisor.campaignId}`));
+      evaluation = { ...evaluation, campaignId:advisor.campaignId, teamId:advisor.teamId, supervisorId:advisor.supervisorId, operationId:operation?.id||`op_legacy_${advisor.campaignId}`, companyId:operation?.companyId||'company_legacy', supervisorAtEvaluation:evaluation.supervisorId||advisor.supervisorId, validationStatus: 'VALIDATED' };
       evaluation = correctMigracionesQualityEvaluation(evaluation, directory.campaigns);
       const localDuplicate = (db.prepare('SELECT payload_json FROM evaluations WHERE advisor_id=? AND evaluation_type=? AND evaluated_at=?').all(evaluation.advisorId,evaluation.evaluationType,evaluatedAt) as any[]).flatMap(row=>{try{return [JSON.parse(row.payload_json)];}catch{return [];}}).find(item=>evaluationIdentity(item)===evaluationIdentity(evaluation));
       if (localDuplicate) return res.status(200).json({ evaluation: localDuplicate, deduplicated: true });

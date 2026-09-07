@@ -4,12 +4,14 @@ import { useApp } from '../../context/AppContext';
 import { MoreFiltersDrawer } from './MoreFiltersDrawer';
 
 export const FiltersBar: React.FC = () => {
-  const { filters, setFilters, resetFilters, users, advisors, campaigns, filteredEvaluations, evaluations } = useApp();
+  const { filters, setFilters, resetFilters, users, advisors, campaigns, companies, operations, filteredEvaluations, evaluations } = useApp();
   const [isMoreDrawerOpen, setIsMoreDrawerOpen] = useState(false);
-  const secondaryFilterKeys = ['campaignId', 'supervisorId', 'advisorId', 'dateFrom', 'dateTo'];
+  const secondaryFilterKeys = ['companyId','operationId','campaignId', 'supervisorId', 'advisorId', 'dateFrom', 'dateTo'];
   const secondaryActiveCount = secondaryFilterKeys.filter(key => Boolean((filters as Record<string, unknown>)[key])).length;
 
   const activeChips: Array<{ key: string; label: string; onRemove: () => void }> = [];
+  if (filters.companyId) activeChips.push({ key:'company',label:`Empresa: ${companies.find(item=>item.id===filters.companyId)?.name||'Empresa'}`,onRemove:()=>setFilters(previous=>({...previous,companyId:'',operationId:'',campaignId:''})) });
+  if (filters.operationId) activeChips.push({ key:'operation',label:`Operación: ${operations.find(item=>item.id===filters.operationId)?.name||'Operación'}`,onRemove:()=>setFilters(previous=>({...previous,operationId:'',campaignId:''})) });
   if (filters.supervisorId) activeChips.push({ key: 'supervisor', label: `Supervisor: ${users.find(user => user.id === filters.supervisorId)?.name || 'Supervisor'}`, onRemove: () => setFilters(previous => ({ ...previous, supervisorId: '' })) });
   if (filters.advisorId) activeChips.push({ key: 'advisor', label: advisors.find(advisor => advisor.id === filters.advisorId)?.name || 'Asesor', onRemove: () => setFilters(previous => ({ ...previous, advisorId: '' })) });
   if (filters.campaignId) activeChips.push({ key: 'campaign', label: campaigns.find(campaign => campaign.id === filters.campaignId)?.name || 'Campaña', onRemove: () => setFilters(previous => ({ ...previous, campaignId: '' })) });

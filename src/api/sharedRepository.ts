@@ -1,4 +1,4 @@
-import type { Advisor, Campaign, Team, User } from '../types';
+import type { Advisor, Campaign, Company, Operation, Team, User } from '../types';
 import type { Calibration, Evaluation, QualityAlert } from '../types';
 
 const TOKEN_KEY = 'CONTACT_CENTER_AUTH_TOKEN';
@@ -8,6 +8,8 @@ export interface SharedRepository {
   campaigns: Campaign[];
   teams: Team[];
   advisors: Advisor[];
+  companies?: Company[];
+  operations?: Operation[];
 }
 
 const json = async <T>(response: Response): Promise<T> => {

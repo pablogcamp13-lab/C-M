@@ -7,10 +7,11 @@ interface FieldProps { label: string; children: React.ReactNode; icon?: boolean;
 const Field: React.FC<FieldProps> = ({ label, children, icon }) => <div><label className="cm-filterbar__label mb-1.5 flex items-center gap-1.5 text-xs font-semibold">{icon && <User className="h-3.5 w-3.5" />}{label}</label>{children}</div>;
 
 export const MoreFiltersDrawer: React.FC<MoreFiltersDrawerProps> = ({ isOpen, onClose }) => {
-  const { filters, setFilters, resetFilters, campaigns, users, advisors } = useApp();
+  const { filters, setFilters, resetFilters, campaigns, companies, operations, users, advisors } = useApp();
   if (!isOpen) return null;
   const supervisors = users.filter(user => user.role === 'SUPERVISOR');
-  const visibleAdvisors = advisors.filter(advisor => (!filters.campaignId || advisor.campaignId === filters.campaignId) && (!filters.supervisorId || advisor.supervisorId === filters.supervisorId));
+  const visibleOperations=operations.filter(operation=>(!filters.companyId||operation.companyId===filters.companyId)&&(!filters.campaignId||operation.campaignId===filters.campaignId));
+  const visibleAdvisors = advisors.filter(advisor => (!filters.operationId || advisor.operationId === filters.operationId) && (!filters.campaignId || advisor.campaignId === filters.campaignId) && (!filters.supervisorId || advisor.supervisorId === filters.supervisorId));
   const selectClass = 'cm-select px-3 py-2 text-xs';
 
   return <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true" aria-label="Filtros avanzados">
@@ -18,6 +19,8 @@ export const MoreFiltersDrawer: React.FC<MoreFiltersDrawerProps> = ({ isOpen, on
     <div className="absolute inset-y-0 right-0 flex max-w-full pl-10"><div className="cm-filterbar__drawer flex flex-col">
       <header className="cm-filterbar__drawer-header flex items-center justify-between border-b p-5"><div className="flex items-center gap-2.5"><div className="grid h-8 w-8 place-items-center rounded-lg bg-[rgba(31,214,255,.12)] text-[var(--cm-primary)]"><Filter className="h-4 w-4" /></div><div><h3 className="text-sm font-bold">Filtros avanzados</h3><p className="cm-filterbar__text-muted text-xs">Segmentación detallada de evaluaciones</p></div></div><button onClick={onClose} className="cm-navbar__icon-button" aria-label="Cerrar"><X className="h-5 w-5" /></button></header>
       <div className="flex-1 space-y-4 overflow-y-auto p-5">
+        <Field label="Empresa"><select value={filters.companyId||''} onChange={event => setFilters(previous => ({ ...previous, companyId:event.target.value, operationId:'', campaignId:'', advisorId:'' }))} className={selectClass}><option value="">Todas las empresas</option>{companies.filter(company=>company.status==='ACTIVA').map(company=><option key={company.id} value={company.id}>{company.name}</option>)}</select></Field>
+        <Field label="Operación"><select value={filters.operationId||''} onChange={event => {const operation=operations.find(item=>item.id===event.target.value);setFilters(previous => ({ ...previous, operationId:event.target.value, campaignId:operation?.campaignId||'', advisorId:'' }));}} className={selectClass}><option value="">Todas las operaciones</option>{visibleOperations.map(operation=><option key={operation.id} value={operation.id}>{operation.name}</option>)}</select></Field>
         <Field label="Campaña"><select value={filters.campaignId} onChange={event => setFilters(previous => ({ ...previous, campaignId: event.target.value, advisorId: '' }))} className={selectClass}><option value="">Todas las campañas</option>{campaigns.map(campaign => <option key={campaign.id} value={campaign.id}>{campaign.name} ({campaign.client})</option>)}</select></Field>
         <Field label="Supervisor" icon><select value={filters.supervisorId} onChange={event => setFilters(previous => ({ ...previous, supervisorId: event.target.value, advisorId: '' }))} className={selectClass}><option value="">Todos los supervisores</option>{supervisors.map(supervisor => <option key={supervisor.id} value={supervisor.id}>{supervisor.name}</option>)}</select></Field>
         <Field label="Asesor" icon><select value={filters.advisorId} onChange={event => setFilters(previous => ({ ...previous, advisorId: event.target.value }))} className={selectClass}><option value="">Todos los asesores</option>{visibleAdvisors.map(advisor => <option key={advisor.id} value={advisor.id}>{advisor.name}</option>)}</select></Field>
