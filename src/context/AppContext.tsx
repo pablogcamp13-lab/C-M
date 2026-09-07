@@ -689,6 +689,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return a;
     }));
+    if (data.name?.trim()) setUsers(prev => prev.map(user => user.advisorId === id ? { ...user, name: data.name!.trim() } : user));
   };
 
   const deleteAdvisor = (id: string) => {
