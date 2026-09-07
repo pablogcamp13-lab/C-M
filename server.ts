@@ -253,8 +253,9 @@ async function startServer() {
       await emailService.sendSupervisorNotification({ recipient, subject: 'Calidad y Mejora Continua: Prueba de notificaciones', title: 'Configuración de correo validada', description: 'El envío automático de correos desde la plataforma C&M está funcionando correctamente.', advisorName: 'Prueba técnica', campaignName: 'C&M', actionLabel: 'Abrir plataforma', path: '/' });
       return res.json({ ok: true });
     } catch (error) {
-      console.error('[email] Falló el correo de prueba.', error instanceof Error ? error.message : '');
-      return res.status(502).json({ error: 'Gmail rechazó el correo de prueba. Revisa el token y sus permisos.' });
+      const detail = error instanceof Error ? error.message : 'Error desconocido de Gmail.';
+      console.error('[email] Falló el correo de prueba.', detail);
+      return res.status(502).json({ error: 'Gmail rechazó el correo de prueba.', detail });
     }
   });
   app.post('/api/admin/users', requireAuth, async (req, res) => {
