@@ -167,6 +167,29 @@ function repository(): SharedRepository {
   return { users, campaigns, teams, advisors, companies, operations, operationSupervisors, operationAssignments, staffingMovements };
 }
 
+// Older imports can leave two active operation IDs for the same company and
+// campaign label. Keep the operation with the most active people, move only
+// current assignments to it, and preserve every historical evaluation/feedback.
+function reconcileEquivalentOperations(now: string) {
+  const groups = db.prepare(`SELECT o.company_id,lower(trim(ca.name)) campaign_key,COUNT(*) total FROM operations o JOIN campaigns ca ON ca.id=o.campaign_id WHERE o.legacy=0 AND o.status='ACTIVA' GROUP BY o.company_id,lower(trim(ca.name)) HAVING COUNT(*)>1`).all() as any[];
+  for (const group of groups) {
+    const candidates = db.prepare(`SELECT o.id,o.campaign_id,COALESCE((SELECT COUNT(*) FROM operation_assignments a WHERE a.operation_id=o.id AND a.active=1),0) active_count FROM operations o JOIN campaigns ca ON ca.id=o.campaign_id WHERE o.company_id=? AND o.legacy=0 AND o.status='ACTIVA' AND lower(trim(ca.name))=? ORDER BY active_count DESC,o.id`).all(group.company_id,group.campaign_key) as any[];
+    const [canonical, ...duplicates] = candidates;
+    if (!canonical) continue;
+    for (const duplicate of duplicates) {
+      const activeRows = db.prepare('SELECT a.id assignment_id,a.advisor_id,ad.data_json FROM operation_assignments a JOIN advisors ad ON ad.id=a.advisor_id WHERE a.operation_id=? AND a.active=1').all(duplicate.id) as any[];
+      for (const row of activeRows) {
+        const advisor = JSON.parse(row.data_json || '{}');
+        const normalizedAdvisor = { ...advisor, operationId: canonical.id, campaignId: canonical.campaign_id, teamId: '' };
+        db.prepare('UPDATE operation_assignments SET operation_id=?,team_id=NULL WHERE id=?').run(canonical.id,row.assignment_id);
+        db.prepare('UPDATE advisors SET campaign_id=?,team_id=NULL,data_json=? WHERE id=?').run(canonical.campaign_id,JSON.stringify(normalizedAdvisor),row.advisor_id);
+      }
+      db.prepare('UPDATE operations SET status=?,updated_at=? WHERE id=?').run('INACTIVA',now,duplicate.id);
+      console.warn(`[operations] Operación duplicada normalizada: ${duplicate.id} -> ${canonical.id} (${activeRows.length} colaboradores).`);
+    }
+  }
+}
+
 function persistRepository(input: SharedRepository) {
   const now = new Date().toISOString();
   db.exec('BEGIN IMMEDIATE');
@@ -213,6 +236,7 @@ function persistRepository(input: SharedRepository) {
     for(const link of source.operationSupervisors||[]) db.prepare('INSERT OR REPLACE INTO operation_supervisors (operation_id,supervisor_id,active,start_at,end_at) VALUES (?,?,?,?,?)').run(link.operationId,link.supervisorId,link.active?1:0,link.startAt,link.endAt||null);
     for(const assignment of source.operationAssignments||[]) db.prepare('INSERT OR REPLACE INTO operation_assignments (id,advisor_id,operation_id,team_id,supervisor_id,role,operational_status,start_date,end_date,active,source,actor_id,observation) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').run(assignment.id,assignment.advisorId,assignment.operationId,assignment.teamId||null,assignment.supervisorId||null,assignment.role,assignment.operationalStatus,assignment.startDate,assignment.endDate||null,assignment.active?1:0,assignment.source,assignment.actorId||null,assignment.observation||null);
     for(const movement of source.staffingMovements||[]) db.prepare('INSERT OR REPLACE INTO staffing_movements (id,advisor_id,assignment_id,type,occurred_at,effective_at,created_at,origin,destination,actor_id,observation,reversed_movement_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(movement.id,movement.advisorId,movement.assignmentId||null,movement.type,movement.createdAt||movement.occurredAt,movement.effectiveAt,movement.createdAt||movement.occurredAt,typeof movement.origin==='string'?movement.origin:JSON.stringify(movement.origin||null),typeof movement.destination==='string'?movement.destination:JSON.stringify(movement.destination||null),movement.actorId||null,movement.observation||null,movement.reversedMovementId||null);
+    reconcileEquivalentOperations(now);
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
@@ -226,12 +250,37 @@ function passwordHashes() {
   return new Map((db.prepare('SELECT id,password_hash FROM users').all() as any[]).map(row => [row.id, row.password_hash]));
 }
 
+function hasEquivalentActiveOperations(source: SharedRepository) {
+  const campaignNames = new Map((source.campaigns || []).map(campaign => [campaign.id, campaign.name]));
+  const seen = new Set<string>();
+  return (source.operations || []).some(operation => {
+    if (operation.legacy || operation.status !== 'ACTIVA') return false;
+    const key = `${operation.companyId}|${normalizeOperationName(campaignNames.get(operation.campaignId) || operation.name.split('/').pop() || operation.name)}`;
+    if (seen.has(key)) return true;
+    seen.add(key);
+    return false;
+  });
+}
+
 async function readRepository() {
   if (!googleStorage.enabled) return repository();
   try {
     const remote = await googleStorage.loadRepository();
     if (remote && (remote.users.length || remote.campaigns.length || remote.teams.length || remote.advisors.length)) {
-      try { persistRepository(remote); return repository(); }
+      const mustRepairOperationIndex = hasEquivalentActiveOperations(remote);
+      try {
+        persistRepository(remote);
+        const normalized = repository();
+        if (mustRepairOperationIndex) {
+          try {
+            await googleStorage.saveRepository(normalized, passwordHashes());
+            console.log('[operations] Operaciones duplicadas normalizadas y guardadas en Sheets.');
+          } catch (syncError) {
+            console.error('[operations] Se normalizó la caché local, pero no pudo guardarse la reparación en Sheets.', syncError instanceof Error ? syncError.message : '');
+          }
+        }
+        return normalized;
+      }
       catch (cacheError) {
         console.error('[google-storage] La caché local no pudo actualizarse; se entrega la dotación remota.', cacheError instanceof Error ? cacheError.message : '');
         const local=repository(),legacyOperations=remote.campaigns.map(campaign=>({id:`op_legacy_${campaign.id}`,companyId:'company_legacy',campaignId:campaign.id,name:`LEGACY / ${campaign.name}`,status:'ACTIVA' as const,legacy:true}));

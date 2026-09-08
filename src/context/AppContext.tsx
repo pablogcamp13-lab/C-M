@@ -238,6 +238,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authenticatedUserId, setAuthenticatedUserId] = useState<string | null>(null);
   const rosterHydrated = useRef(false);
+  const rosterSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rosterSyncQueue = useRef<Promise<unknown>>(Promise.resolve());
   const platformStateHydrated = useRef(false);
   const skipHydrationSave = useRef(false);
   const [platformLoadError, setPlatformLoadError] = useState('');
@@ -284,7 +286,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // siguen en su almacenamiento actual hasta sus fases de migración respectivas.
   useEffect(() => {
     if (!isAuthenticated || ['ASESOR', 'SUPERVISOR', 'MONITOR'].includes(currentUser.role) || !rosterHydrated.current) return;
-    void sharedRepositoryApi.sync({ users, campaigns, companies, operations, teams, advisors }).catch(error => console.error('No fue posible sincronizar la dotación', error));
+    const snapshot = { users, campaigns, companies, operations, teams, advisors };
+    // The import changes several collections at once. Debouncing and queuing
+    // sends the final complete snapshot once, rather than racing partial ones.
+    rosterSyncTimer.current = setTimeout(() => {
+      rosterSyncQueue.current = rosterSyncQueue.current
+        .catch(() => undefined)
+        .then(() => sharedRepositoryApi.sync(snapshot))
+        .catch(error => console.error('No fue posible sincronizar la dotación', error));
+    }, 350);
+    return () => {
+      if (rosterSyncTimer.current) clearTimeout(rosterSyncTimer.current);
+    };
   }, [users, campaigns, companies, operations, teams, advisors, isAuthenticated, currentUser.role]);
 
   useEffect(() => {
