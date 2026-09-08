@@ -90,7 +90,9 @@ interface AppContextType {
   // Campaign & Team management
   addCampaign: (campaign: Omit<Campaign, 'id'>) => Campaign;
   updateCampaign: (id: string, data: Partial<Campaign>) => void;
-  deleteCampaign: (id: string) => Promise<void>;
+  deleteCampaign: (id: string, companyId?: string) => Promise<void>;
+  addOperation: (operation: Omit<import('../types').Operation, 'id'>) => import('../types').Operation;
+  updateOperation: (id: string, data: Partial<import('../types').Operation>) => void;
   addTeam: (team: Omit<Team, 'id'>) => Team;
 
   // Mutators
@@ -544,10 +546,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCampaigns(prev => prev.map(campaign => campaign.id === id ? { ...campaign, ...data, id } : campaign));
   };
 
-  const deleteCampaign = async (id: string) => {
-    await adminCampaignsApi.remove(id);
-    setCampaigns(prev => prev.filter(campaign => campaign.id !== id));
-    setTeams(prev => prev.filter(team => team.campaignId !== id));
+  const addOperation = (operation: Omit<import('../types').Operation, 'id'>) => {
+    const created = { ...operation, id: `op_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
+    setOperations(previous => [...previous, created]);
+    return created;
+  };
+
+  const updateOperation = (id: string, data: Partial<import('../types').Operation>) => {
+    setOperations(previous => previous.map(operation => operation.id === id ? { ...operation, ...data, id } : operation));
+  };
+
+  const deleteCampaign = async (id: string, companyId?: string) => {
+    await adminCampaignsApi.remove(id, companyId);
+    if (companyId) {
+      setOperations(previous => previous.map(operation => operation.campaignId === id && operation.companyId === companyId && !operation.legacy ? { ...operation, status: 'INACTIVA' } : operation));
+      const hasAnotherActiveOperation = operations.some(operation => operation.campaignId === id && operation.companyId !== companyId && !operation.legacy && operation.status === 'ACTIVA');
+      if (!hasAnotherActiveOperation) setCampaigns(previous => previous.map(campaign => campaign.id === id ? { ...campaign, status: 'INACTIVA' } : campaign));
+      return;
+    }
+    setCampaigns(previous => previous.map(campaign => campaign.id === id ? { ...campaign, status: 'INACTIVA' } : campaign));
+    setOperations(previous => previous.map(operation => operation.campaignId === id && !operation.legacy ? { ...operation, status: 'INACTIVA' } : operation));
   };
 
   const addTeam = (team: Omit<Team, 'id'>): Team => {
@@ -1152,6 +1170,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addCampaign,
         updateCampaign,
         deleteCampaign,
+        addOperation,
+        updateOperation,
         addTeam,
         addEvaluation,
         updateEvaluation,

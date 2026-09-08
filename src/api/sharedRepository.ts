@@ -54,8 +54,9 @@ export const adminUsersApi = {
 };
 
 export const adminCampaignsApi = {
-  async remove(id: string) {
-    const response = await fetch(`/api/admin/campaigns/${id}`, { method: 'DELETE', headers: headers() });
+  async remove(id: string, companyId?: string) {
+    const query = companyId ? `?companyId=${encodeURIComponent(companyId)}` : '';
+    const response = await fetch(`/api/admin/campaigns/${id}${query}`, { method: 'DELETE', headers: headers() });
     if (!response.ok) throw new Error((await response.json()).error || 'No se pudo eliminar la campaña.');
   }
 };

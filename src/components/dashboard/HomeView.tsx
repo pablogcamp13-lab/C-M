@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Activity, BarChart3, CalendarDays, CheckSquare, ChevronDown, Download, Filter, Flag, Layers3, MessageCircle, PlusSquare, ShieldCheck, TrendingUp, UsersRound } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { calculatePareto } from '../../utils/calculations';
@@ -14,7 +14,14 @@ const averageOf = (values: Array<number | null>) => {
 export const HomeView: React.FC = () => {
   const { filteredEvaluations, advisors, actionPlans, operationalMeasurements, setCurrentSection, companies, filters, setFilters } = useApp();
   const [activeSummary, setActiveSummary] = useState<'D3C' | 'QUALITY'>('D3C');
+  const initialSummaryResolved = useRef(false);
   const d3c = filteredEvaluations.filter(evaluation => evaluation.evaluationType !== 'QUALITY');
+  const qualityCount = filteredEvaluations.filter(evaluation => evaluation.evaluationType === 'QUALITY').length;
+  useEffect(() => {
+    if (initialSummaryResolved.current || !filteredEvaluations.length) return;
+    initialSummaryResolved.current = true;
+    if (!d3c.length && qualityCount) setActiveSummary('QUALITY');
+  }, [d3c.length, filteredEvaluations.length, qualityCount]);
   const scores = d3c.map(evaluation => evaluation.scoreTotal).filter((value): value is number => value !== null);
   const average = averageOf(scores);
   const critical = d3c.filter(evaluation => (evaluation.scoreTotal ?? 100) < 60).length;

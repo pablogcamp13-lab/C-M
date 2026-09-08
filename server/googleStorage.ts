@@ -161,10 +161,12 @@ class GoogleStorage {
   }
   async loadPlatformState() {
     const rows = await this.rows('APP_STATE');
-    const legacy = rows?.find(item => item.id === 'global');
-    if (legacy?.payload_json) return JSON.parse(legacy.payload_json);
     const chunks=(rows || []).filter(item=>/^global_\d+$/.test(item.id || '')).sort((a,b)=>(a.id || '').localeCompare(b.id || ''));
-    return chunks.length ? JSON.parse(chunks.map(item=>item.payload_json || '').join('')) : null;
+    // El estado fragmentado es el formato vigente. Un registro legacy puede
+    // coexistir en Sheets y no debe ocultar información más reciente.
+    if(chunks.length) return JSON.parse(chunks.map(item=>item.payload_json || '').join(''));
+    const legacy = rows?.find(item => item.id === 'global');
+    return legacy?.payload_json ? JSON.parse(legacy.payload_json) : null;
   }
   async savePlatformState(state: unknown) {
     const payload=JSON.stringify(state),updatedAt=new Date().toISOString(),chunkSize=45000;

@@ -410,9 +410,32 @@ async function startServer() {
   app.delete('/api/admin/campaigns/:id', requireAuth, async (req, res) => {
     if (requireAdmin(req, res) !== true) return;
     try {
-      if ((db.prepare('SELECT COUNT(*) AS total FROM advisors WHERE campaign_id=?').get(req.params.id) as any).total) return res.status(409).json({ error: 'La campaña tiene asesores asignados.' });
-      db.prepare('DELETE FROM teams WHERE campaign_id=?').run(req.params.id);
-      db.prepare('DELETE FROM campaigns WHERE id=?').run(req.params.id);
+      const campaignId=req.params.id,companyId=String(req.query.companyId||'');
+      const now=new Date().toISOString(),today=now.slice(0,10);
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const selectedOperations=companyId
+          ? db.prepare('SELECT id FROM operations WHERE campaign_id=? AND company_id=? AND legacy=0 AND status=?').all(campaignId,companyId,'ACTIVA') as any[]
+          : db.prepare('SELECT id FROM operations WHERE campaign_id=? AND legacy=0 AND status=?').all(campaignId,'ACTIVA') as any[];
+        if(companyId&&!selectedOperations.length){db.exec('ROLLBACK');return res.status(404).json({error:'La campaña no está activa para esta empresa.'});}
+        db.prepare('INSERT OR IGNORE INTO companies (id,name,status,created_at) VALUES (?,?,?,?)').run('company_legacy','LEGACY','INACTIVA',now);
+        const campaign=db.prepare('SELECT name FROM campaigns WHERE id=?').get(campaignId) as any;
+        if(!campaign){db.exec('ROLLBACK');return res.status(404).json({error:'Campaña no encontrada.'});}
+        const legacyOperationId=`op_legacy_${campaignId}`;
+        db.prepare('INSERT OR IGNORE INTO operations (id,company_id,campaign_id,name,status,legacy) VALUES (?,?,?,?,?,1)').run(legacyOperationId,'company_legacy',campaignId,`LEGACY / ${campaign.name}`,'ACTIVA');
+        const selectedIds=new Set(selectedOperations.map(operation=>operation.id));
+        for(const row of db.prepare('SELECT id,data_json FROM advisors WHERE campaign_id=?').all(campaignId) as any[]){
+          const advisor=JSON.parse(row.data_json),currentOperation=advisor.operationId||legacyOperationId;
+          if(!selectedIds.has(currentOperation))continue;
+          db.prepare('UPDATE advisors SET data_json=? WHERE id=?').run(JSON.stringify({...advisor,operationId:legacyOperationId}),row.id);
+          db.prepare('UPDATE operation_assignments SET active=0,end_date=? WHERE advisor_id=? AND active=1').run(today,row.id);
+          db.prepare('INSERT INTO operation_assignments (id,advisor_id,operation_id,team_id,supervisor_id,role,operational_status,start_date,active,source,observation) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(`assignment_${row.id}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,row.id,legacyOperationId,advisor.teamId||null,advisor.supervisorId||null,'ASESOR',advisor.status==='INACTIVO'?'BAJA':'PRODUCCION',today,1,'MANUAL','Campaña retirada de la empresa; se preserva el registro histórico.');
+        }
+        for(const operation of selectedOperations)db.prepare('UPDATE operations SET status=? WHERE id=?').run('INACTIVA',operation.id);
+        const active=(db.prepare('SELECT COUNT(*) total FROM operations WHERE campaign_id=? AND legacy=0 AND status=?').get(campaignId,'ACTIVA') as any).total;
+        if(!active)db.prepare('UPDATE campaigns SET status=? WHERE id=?').run('INACTIVA',campaignId);
+        db.exec('COMMIT');
+      }catch(error){db.exec('ROLLBACK');throw error;}
       if (googleStorage.enabled) await googleStorage.saveRepository(repository(), passwordHashes());
       res.status(204).end();
     } catch (error: any) { res.status(400).json({ error: error.message || 'No se pudo eliminar la campaña.' }); }
