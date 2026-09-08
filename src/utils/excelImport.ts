@@ -84,6 +84,14 @@ export function normalizeHeaderKey(header: string): string {
     .replace(/[^a-z0-9%]/g, ''); // remove punctuation/spaces, keep %
 }
 
+// The downloadable template contains hidden catalog sheets used exclusively by
+// Excel dropdowns. They are not operational campaigns and must never alter the
+// single-sheet versus multi-sheet import decision.
+const isImportSupportSheet = (sheetName: string): boolean => {
+  const normalizedName = normalizeHeaderKey(sheetName);
+  return ['listas', 'instrucciones', 'catalogos', 'catalogo'].includes(normalizedName);
+};
+
 // Standard header dictionary matcher
 const HEADER_PATTERNS: Record<string, string[]> = {
   dni: ['dni', 'documento', 'docidentidad', 'cedula', 'idasesor', 'documentoidentidad', 'nrodocumento'],
@@ -278,9 +286,10 @@ export async function parseAndValidateExcel(
     dateNF: 'yyyy-mm-dd'
   });
 
-  if (!workbook.SheetNames.length) throw new Error('El archivo seleccionado está vacío.');
+  const importSheetNames = workbook.SheetNames.filter(sheetName => !isImportSupportSheet(sheetName));
+  if (!importSheetNames.length) throw new Error('El archivo seleccionado no contiene una hoja de dotación.');
 
-  const usesSheetCampaigns = workbook.SheetNames.length > 1;
+  const usesSheetCampaigns = importSheetNames.length > 1;
   const columnMappingSummary: Record<string, string> = {};
   const supervisorsList = existingUsers.filter(u => u.role === 'SUPERVISOR' || u.role === 'ADMINISTRADOR');
   const supervisorCounts: Record<string, { count: number; matchedId?: string; matchedName?: string }> = {};
@@ -293,7 +302,7 @@ export async function parseAndValidateExcel(
   const dniSeenInFile = new Set<string>();
   const normalizedRows: NormalizedAdvisorRow[] = [];
 
-  for (const sheetName of workbook.SheetNames) {
+  for (const sheetName of importSheetNames) {
     const worksheet = workbook.Sheets[sheetName];
     const rawGrid: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: true });
     if (!rawGrid.length) continue;
@@ -340,7 +349,12 @@ export async function parseAndValidateExcel(
     const supervisorRaw = String(rowObj.supervisor || '').trim();
     const schedule = rowObj.schedule ? String(rowObj.schedule).trim() : undefined;
     const importedTenureLabel = rowObj.tenureLabel ? String(rowObj.tenureLabel).trim() : undefined;
-    const campaignName = cleanAdvisorName(rowObj.campaign) || sheetName.trim();
+    // A real multi-sheet file uses each sheet name as its campaign. A single
+    // dotación sheet uses the row campaign (when present) and later requires an
+    // explicit destination campaign in the UI.
+    const campaignName = usesSheetCampaigns
+      ? sheetName.trim()
+      : cleanAdvisorName(rowObj.campaign) || sheetName.trim();
 
     const hireDateParsed = parseExcelDate(rowObj.hireDate);
     const campaignDateParsed = parseExcelDate(rowObj.campaignStartDate);
@@ -502,7 +516,7 @@ export async function parseAndValidateExcel(
     duplicateCount,
     invalidCount,
     usesSheetCampaigns,
-    detectedCampaigns: workbook.SheetNames.filter(name => normalizedRows.some(row => row.sheetName === name)),
+    detectedCampaigns: [...new Set(normalizedRows.map(row => row.campaignName || row.sheetName))],
     rows: normalizedRows,
     detectedSupervisors,
     columnMappingSummary
@@ -512,7 +526,7 @@ export async function parseAndValidateExcel(
 export async function getExcelSheetNames(file: File): Promise<string[]> {
   const arrayBuffer = await file.arrayBuffer();
   const workbook = XLSX.read(arrayBuffer, { type: 'array', bookSheets: true });
-  return workbook.SheetNames;
+  return workbook.SheetNames.filter(sheetName => !isImportSupportSheet(sheetName));
 }
 
 export type StaffingTemplateSource = {
