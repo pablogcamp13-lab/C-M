@@ -137,7 +137,7 @@ interface AppContextType {
     usesSheetCampaigns?: boolean;
     campaignMappings?: Record<string, string>;
     rows: any[];
-  }) => {
+  }) => Promise<{
     newCount: number;
     updateCount: number;
     measurementsCount: number;
@@ -145,7 +145,7 @@ interface AppContextType {
     warningCount: number;
     duplicateCount: number;
     invalidCount: number;
-  };
+  }>;
   deleteImportHistoryLog: (id: string) => void;
 
   updateConfig: (newConfig: Partial<MethodologyConfig>) => void;
@@ -846,7 +846,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Import Advisors Batch from Excel Payload
-  const importAdvisorsBatch = (payload: {
+  const importAdvisorsBatch = async (payload: {
     campaignId: string;
     campaignName: string;
     operationId?: string;
@@ -1016,19 +1016,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    // Commit state updates
-    if (advisorsToAdd.length > 0) {
-      setAdvisors(prev => [...prev, ...advisorsToAdd]);
-    }
-    if (advisorsToUpdate.length > 0) {
-      const updateMap = new Map(advisorsToUpdate.map(advisor => [advisor.id, advisor]));
-      setAdvisors(prev => prev.map(advisor => updateMap.get(advisor.id) || advisor));
-    }
-    if (campaignsToAdd.length > 0) setCampaigns(prev => [...prev, ...campaignsToAdd]);
-    if (teamsToAdd.length > 0) setTeams(prev => [...prev, ...teamsToAdd]);
-    if (usersToAdd.length > 0) {
-      setUsers(prev => [...prev, ...usersToAdd]);
-    }
+    // Persist the complete roster before reporting success. Previously this only
+    // updated React state; closing the modal immediately reloaded the old server
+    // snapshot and silently discarded the whole import.
+    const updateMap = new Map(advisorsToUpdate.map(advisor => [advisor.id, advisor]));
+    const nextAdvisors = [...advisors.map(advisor => updateMap.get(advisor.id) || advisor), ...advisorsToAdd];
+    const nextCampaigns = [...campaigns, ...campaignsToAdd];
+    const nextTeams = [...teams, ...teamsToAdd];
+    const nextUsers = [...users, ...usersToAdd];
+    const { repository: persisted } = await sharedRepositoryApi.sync({
+      users: nextUsers,
+      campaigns: nextCampaigns,
+      companies,
+      operations,
+      teams: nextTeams,
+      advisors: nextAdvisors
+    });
+
+    setUsers(persisted.users);
+    setCampaigns(persisted.campaigns);
+    setCompanies(persisted.companies || []);
+    setOperations(persisted.operations || []);
+    setTeams(persisted.teams);
+    setAdvisors(persisted.advisors);
     if (measurementsToAdd.length > 0) {
       setOperationalMeasurements(prev => [...prev, ...measurementsToAdd]);
     }

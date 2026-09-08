@@ -60,6 +60,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [sheetCount, setSheetCount] = useState<number | null>(null);
   const [validationResult, setValidationResult] = useState<ExcelValidationResult | null>(null);
+  const [isImporting, setIsImporting] = useState<boolean>(false);
 
   // Supervisor mapping adjustments in Step 2
   const [supervisorOverrides, setSupervisorOverrides] = useState<Record<string, string>>({});
@@ -184,7 +185,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
   };
 
   // Confirm and execute import
-  const handleExecuteImport = () => {
+  const handleExecuteImport = async () => {
     if (!validationResult) return;
     if (!validationResult.usesSheetCampaigns && !selectedOperationId) { setParseError('Selecciona la campaña de destino antes de continuar.'); setStep(1); return; }
     if (validationResult.usesSheetCampaigns && validationResult.detectedCampaigns.some(name => !campaignMappings[name])) {
@@ -215,23 +216,31 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
       };
     });
 
-    const summary = importAdvisorsBatch({
-      campaignId: selectedCampaign?.id || '',
-      campaignName: selectedCampaign?.name || 'Campaña importada',
-      operationId: selectedOperationId || undefined,
-      periodName: periodName.trim() || 'Periodo Actual',
-      cutoffDate,
-      isBaseline,
-      baselineHandling,
-      fileName: validationResult.fileName,
-      fileSize: validationResult.fileSize,
-      usesSheetCampaigns: validationResult.usesSheetCampaigns,
-      campaignMappings,
-      rows: rowsWithMappedSupervisors
-    });
+    setIsImporting(true);
+    setParseError(null);
+    try {
+      const summary = await importAdvisorsBatch({
+        campaignId: selectedCampaign?.id || '',
+        campaignName: selectedCampaign?.name || 'Campaña importada',
+        operationId: selectedOperationId || undefined,
+        periodName: periodName.trim() || 'Periodo Actual',
+        cutoffDate,
+        isBaseline,
+        baselineHandling,
+        fileName: validationResult.fileName,
+        fileSize: validationResult.fileSize,
+        usesSheetCampaigns: validationResult.usesSheetCampaigns,
+        campaignMappings,
+        rows: rowsWithMappedSupervisors
+      });
 
-    setImportSummary(summary);
-    setStep(3);
+      setImportSummary(summary);
+      setStep(3);
+    } catch (error) {
+      setParseError(error instanceof Error ? error.message : 'No fue posible guardar la dotación. No se aplicaron cambios.');
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   // Download error log report
@@ -1000,10 +1009,10 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
               <button
                 type="button"
                 onClick={handleExecuteImport}
-                disabled={validationResult.readyRows + validationResult.warningRows === 0}
+                disabled={isImporting || validationResult.readyRows + validationResult.warningRows === 0}
                 className="flex items-center gap-1.5 px-5 py-2 bg-[#031E3C] hover:bg-[#0B2B50] disabled:bg-slate-300 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
               >
-                <span>Confirmar Importación ({validationResult.readyRows + validationResult.warningRows} asesores)</span>
+                <span>{isImporting ? 'Guardando dotación...' : `Confirmar Importación (${validationResult.readyRows + validationResult.warningRows} asesores)`}</span>
                 <ArrowRight className="w-3.5 h-3.5 text-[#FF6B00]" />
               </button>
             )}

@@ -22,6 +22,7 @@ try{
   assert.equal(reconciled.response.status,200);
   const retainedOperations=reconciled.data.repository.operations.filter(operation=>operation.companyId===techcenter.id&&operation.name==='TECHCENTER / Retenciones Bitel'&&operation.status==='ACTIVA');assert.equal(retainedOperations.length,1,'Equivalent company/campaign operations are consolidated');
   const retainedStaffing=await api(`/api/staffing?operationId=${retainedOperations[0].id}`,{token:admin});assert.ok(retainedStaffing.data.rows.some(row=>row.id==='adv_duplicate_retentions'),'Reassigned people are visible in the canonical operation');
+  assert.ok(reconciled.data.repository.operationSupervisors.some(link=>link.operationId===retainedOperations[0].id&&link.supervisorId==='usr_admin'&&link.active),'An imported supervisor is linked to the destination operation');
   const deletedCampaign={id:'camp_deleted_evaluation',name:'Campaña eliminada de prueba',client:'Test',status:'ACTIVA',products:[]};
   const deletedOperation={id:'op_deleted_evaluation',companyId:techcenter.id,campaignId:deletedCampaign.id,name:'TECHCENTER / Campaña eliminada de prueba',status:'ACTIVA',legacy:false};
   const deletedAdvisor={id:'adv_deleted_evaluation',dni:'90000002',employeeCode:'DEL1',name:'Asesor de campaña eliminada',campaignId:deletedCampaign.id,operationId:deletedOperation.id,teamId:'',supervisorId:'usr_admin',status:'ACTIVO',active:true,hireDate:'2026-01-01'};

@@ -224,6 +224,12 @@ function persistRepository(input: SharedRepository) {
       const operation=requestedOperation || db.prepare('SELECT * FROM operations WHERE company_id=? AND campaign_id=? AND status=?').get('company_legacy',advisor.campaignId,'ACTIVA') as any;
       const operationId=operation?.id;
       if(!operation) throw new Error(`No se pudo preservar la campaña de ${advisor.name}.`);
+      // An import may map a supervisor without an explicit operation-supervisor
+      // record. Register that relationship atomically so the imported advisor is
+      // immediately valid in Dotación and not flagged as incompatible.
+      if(advisor.supervisorId && db.prepare("SELECT 1 FROM users WHERE id=? AND status='ACTIVO' AND role IN ('SUPERVISOR','FORMADOR','ADMINISTRADOR','CONSULTOR')").get(advisor.supervisorId)) {
+        db.prepare('INSERT OR IGNORE INTO operation_supervisors (operation_id,supervisor_id,active,start_at) VALUES (?,?,1,?)').run(operationId,advisor.supervisorId,now.slice(0,10));
+      }
       db.prepare(`INSERT INTO advisors (id,dni,employee_code,name,campaign_id,team_id,supervisor_id,data_json) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET dni=excluded.dni,employee_code=excluded.employee_code,name=excluded.name,campaign_id=excluded.campaign_id,team_id=excluded.team_id,supervisor_id=excluded.supervisor_id,data_json=excluded.data_json`).run(advisor.id, advisor.dni, advisor.employeeCode || '', advisor.name, advisor.campaignId, advisor.teamId || null, advisor.supervisorId || null, JSON.stringify({...advisor,operationId}));
       const changed=!previous || previous.operationId!==operationId || previous.supervisorId!==advisor.supervisorId || previous.teamId!==advisor.teamId;
       if(changed){
