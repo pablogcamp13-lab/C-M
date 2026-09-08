@@ -50,11 +50,23 @@ const admin = db.prepare("SELECT * FROM users WHERE role='ADMINISTRADOR' ORDER B
 if (!admin) throw new Error('No se encontró una cuenta administradora para conservar.');
 const configRow = db.prepare("SELECT payload_json FROM app_state WHERE id='global'").get() as any;
 const previousState = configRow?.payload_json ? JSON.parse(configRow.payload_json) : {};
-const state = { evaluations: [], actionPlans: [], interventions: [], advisorInterventions: [], operationalMeasurements: measurements, importHistory: [{ id: `imp_bitel_aug_2026`, date: now, fileName: 'Dotacion bitel.xlsx', fileSize: 0, user: admin.name, campaign: campaign.name, period: 'Agosto 2026', cutoffDate: '2026-08-31', isBaseline: true, rowsDetected: rows.length, rowsReady: rows.length, rowsWarnings: 0, rowsErrors: raw.length - rows.length, newAdvisorsCount: rows.length, updatedAdvisorsCount: 0, operationalMeasurementsCount: rows.length }], config: previousState.config };
+const previousRemoteState = googleStorage.enabled ? await googleStorage.loadPlatformState().catch(() => null) : null;
+const preservedState = previousRemoteState || previousState || {};
+const previousMeasurements = Array.isArray(preservedState.operationalMeasurements) ? preservedState.operationalMeasurements : [];
+const previousHistory = Array.isArray(preservedState.importHistory) ? preservedState.importHistory : [];
+const state = {
+  ...preservedState,
+  evaluations: Array.isArray(preservedState.evaluations) ? preservedState.evaluations : [],
+  actionPlans: Array.isArray(preservedState.actionPlans) ? preservedState.actionPlans : [],
+  interventions: Array.isArray(preservedState.interventions) ? preservedState.interventions : [],
+  advisorInterventions: Array.isArray(preservedState.advisorInterventions) ? preservedState.advisorInterventions : [],
+  operationalMeasurements: [...previousMeasurements.filter((item: any) => !rows.some(row => String(row.DNI || '').trim() === String(item.dni || '').trim())), ...measurements],
+  importHistory: [...previousHistory, { id: `imp_bitel_aug_2026`, date: now, fileName: 'Dotacion bitel.xlsx', fileSize: 0, user: admin.name, campaign: campaign.name, period: 'Agosto 2026', cutoffDate: '2026-08-31', isBaseline: true, rowsDetected: rows.length, rowsReady: rows.length, rowsWarnings: 0, rowsErrors: raw.length - rows.length, newAdvisorsCount: rows.length, updatedAdvisorsCount: 0, operationalMeasurementsCount: rows.length }],
+  config: preservedState.config || previousState.config
+};
 const repository = { users: [{ id: admin.id, name: admin.name, email: admin.email, username: admin.username || undefined, role: admin.role as User['role'], status: admin.status as User['status'], teamId: admin.team_id || undefined, advisorId: admin.advisor_id || undefined, avatar: admin.avatar || undefined, createdAt: admin.created_at }, ...supervisors, ...advisorUsers], campaigns: [campaign], teams, advisors };
 
 if (googleStorage.enabled) {
-  await googleStorage.clearRuntimeData();
   const hashes = new Map<string, string>([[admin.id, admin.password_hash], ...supervisors.map(supervisor => [supervisor.id, hash('12345678')] as [string, string]), ...advisorUsers.map(user => [user.id, hash(user.password!)] as [string, string])]);
   await googleStorage.saveRepository(repository, hashes);
   await googleStorage.savePlatformState(state);
