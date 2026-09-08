@@ -991,6 +991,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } else if (row.actionType === 'UPDATE') {
         updateCount++;
         const updatedAdvisor: Advisor = { ...existingAdv };
+        // Keep the original advisor ID. Evaluations, feedback, alerts and commitments reference it.
+        if (row.name) updatedAdvisor.name = row.name;
         if (destinationOperation) {
           updatedAdvisor.operationId = destinationOperation.id;
           updatedAdvisor.campaignId = destinationOperation.campaignId;
@@ -999,6 +1001,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (row.schedule) updatedAdvisor.schedule = row.schedule;
         if (row.supervisorId) updatedAdvisor.supervisorId = row.supervisorId;
         if (row.supervisorRaw) updatedAdvisor.supervisor = row.supervisorRaw;
+        if (row.hireDate) updatedAdvisor.hireDate = row.hireDate;
+        if (row.campaignStartDate) updatedAdvisor.campaignStartDate = row.campaignStartDate;
+        if (row.importedTenureLabel) updatedAdvisor.importedTenureLabel = row.importedTenureLabel;
+        if (row.quartile) updatedAdvisor.quartile = row.quartile;
+        if (row.condition) updatedAdvisor.condition = row.condition;
+        if (row.fte !== undefined && row.fte !== '') updatedAdvisor.fte = row.fte;
+        if (row.modality) updatedAdvisor.modality = row.modality;
+        if (row.shiftRaw) updatedAdvisor.sourceShift = row.shiftRaw;
+        if (row.site) updatedAdvisor.site = row.site;
+        if (row.indicators !== undefined && row.indicators !== '') updatedAdvisor.indicators = row.indicators;
         if (row.terminationDate) {
           updatedAdvisor.terminationDate = row.terminationDate;
           updatedAdvisor.status = 'INACTIVO';

@@ -409,10 +409,8 @@ export async function parseAndValidateExcel(
     const duplicateInWorkbook = Boolean(dni && dniSeenInFile.has(dni) && normalizedRows.some(item => item.dni === dni));
     const actionType: 'NEW' | 'UPDATE' | 'SKIP' = duplicateInWorkbook
       ? 'SKIP'
-      : existingAdvisor
-        ? (usesSheetCampaigns ? 'SKIP' : 'UPDATE')
-        : 'NEW';
-    if (existingAdvisor && usesSheetCampaigns) warnings.push('DNI ya existente; se omitirá sin sobrescribir información');
+      : existingAdvisor ? 'UPDATE' : 'NEW';
+    if (existingAdvisor) warnings.push('DNI existente: se actualizará la dotación sin modificar su historial de evaluaciones ni feedback.');
 
     let status: 'READY' | 'WARNING' | 'ERROR' = 'READY';
     if (errors.length > 0) {
