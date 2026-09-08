@@ -534,6 +534,8 @@ async function startServer() {
       if (!advisor || advisor.active === false || advisor.status !== 'ACTIVO') return res.status(400).json({ error: 'El asesor no está habilitado para evaluación.' });
       if (authUser.role === 'MONITOR') evaluation = { ...evaluation, evaluatorId: authUser.id, evaluatorName: authUser.name };
       const operation=directory.operations?.find(item=>item.id===(advisor.operationId||`op_legacy_${advisor.campaignId}`));
+      const campaign=directory.campaigns.find(item=>item.id===advisor.campaignId);
+      if (!operation || operation.legacy || operation.status !== 'ACTIVA' || operation.campaignId !== advisor.campaignId || !campaign || campaign.status !== 'ACTIVA') return res.status(400).json({ error: 'La campaña del asesor ya no está activa. Selecciona una campaña vigente.' });
       evaluation = { ...evaluation, campaignId:advisor.campaignId, teamId:advisor.teamId, supervisorId:advisor.supervisorId, operationId:operation?.id||`op_legacy_${advisor.campaignId}`, companyId:operation?.companyId||'company_legacy', supervisorAtEvaluation:evaluation.supervisorId||advisor.supervisorId, validationStatus: 'VALIDATED' };
       evaluation = correctMigracionesQualityEvaluation(evaluation, directory.campaigns);
       const localDuplicate = (db.prepare('SELECT payload_json FROM evaluations WHERE advisor_id=? AND evaluation_type=? AND evaluated_at=?').all(evaluation.advisorId,evaluation.evaluationType,evaluatedAt) as any[]).flatMap(row=>{try{return [JSON.parse(row.payload_json)];}catch{return [];}}).find(item=>evaluationIdentity(item)===evaluationIdentity(evaluation));

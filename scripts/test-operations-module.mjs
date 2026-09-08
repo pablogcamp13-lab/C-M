@@ -22,6 +22,16 @@ try{
   assert.equal(reconciled.response.status,200);
   const retainedOperations=reconciled.data.repository.operations.filter(operation=>operation.companyId===techcenter.id&&operation.name==='TECHCENTER / Retenciones Bitel'&&operation.status==='ACTIVA');assert.equal(retainedOperations.length,1,'Equivalent company/campaign operations are consolidated');
   const retainedStaffing=await api(`/api/staffing?operationId=${retainedOperations[0].id}`,{token:admin});assert.ok(retainedStaffing.data.rows.some(row=>row.id==='adv_duplicate_retentions'),'Reassigned people are visible in the canonical operation');
+  const deletedCampaign={id:'camp_deleted_evaluation',name:'Campaña eliminada de prueba',client:'Test',status:'ACTIVA',products:[]};
+  const deletedOperation={id:'op_deleted_evaluation',companyId:techcenter.id,campaignId:deletedCampaign.id,name:'TECHCENTER / Campaña eliminada de prueba',status:'ACTIVA',legacy:false};
+  const deletedAdvisor={id:'adv_deleted_evaluation',dni:'90000002',employeeCode:'DEL1',name:'Asesor de campaña eliminada',campaignId:deletedCampaign.id,operationId:deletedOperation.id,teamId:'',supervisorId:'usr_admin',status:'ACTIVO',active:true,hireDate:'2026-01-01'};
+  const withDeletedCampaign=await api('/api/shared-repository/sync',{token:admin,method:'PUT',body:{...reconciled.data.repository,campaigns:[...reconciled.data.repository.campaigns,deletedCampaign],operations:[...reconciled.data.repository.operations,deletedOperation],advisors:[...reconciled.data.repository.advisors,deletedAdvisor]}});assert.equal(withDeletedCampaign.response.status,200);
+  const removed=await api(`/api/admin/campaigns/${deletedCampaign.id}?companyId=${techcenter.id}`,{token:admin,method:'DELETE'});assert.equal(removed.response.status,204);
+  const afterRemoval=(await api('/api/shared-repository',{token:admin})).data.repository;
+  assert.equal(afterRemoval.campaigns.find(campaign=>campaign.id===deletedCampaign.id)?.status,'INACTIVA');
+  assert.equal(afterRemoval.operations.find(operation=>operation.id===deletedOperation.id)?.status,'INACTIVA');
+  const blockedEvaluation=await api('/api/evaluations',{token:admin,method:'POST',body:{id:'eval_deleted_campaign',advisorId:deletedAdvisor.id,evaluatorId:'usr_admin',evaluationType:'QUALITY',date:'2026-09-08',time:'12:00',items:[]}});
+  assert.equal(blockedEvaluation.response.status,400,'A removed campaign cannot receive new evaluations');
   const users=[...repo.users,{id:'usr_ops_supervisor',name:'Supervisor Operación',email:'ops.supervisor@test.local',username:'ops.supervisor',role:'SUPERVISOR',status:'ACTIVO',createdAt:now,password:'Supervisor-test-2026'},{id:'usr_ops_agent',name:'Agente Operación',email:'ops.agent@test.local',username:'ops.agent',role:'ASESOR',status:'ACTIVO',advisorId:'adv_ops',createdAt:now,password:'Agent-test-2026'}];
   const advisors=[...repo.advisors,{id:'adv_ops',dni:'90000001',employeeCode:'OPS1',name:'Asesor Operación',campaignId:'camp_1',operationId:'op_legacy_camp_1',teamId:'',supervisorId:'usr_ops_supervisor',status:'ACTIVO',active:true,hireDate:'2026-01-01'}];
   assert.equal((await api('/api/shared-repository/sync',{token:admin,method:'PUT',body:{...repo,users,advisors}})).response.status,200);
