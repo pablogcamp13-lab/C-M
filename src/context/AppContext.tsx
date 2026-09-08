@@ -52,6 +52,7 @@ interface AppContextType {
   authenticatedUserId: string | null;
   isAuthReady: boolean;
   isAuthenticated: boolean;
+  platformLoadError: string;
   login: (identity: string, password: string) => Promise<void>;
   changePassword: (password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -237,6 +238,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [authenticatedUserId, setAuthenticatedUserId] = useState<string | null>(null);
   const rosterHydrated = useRef(false);
   const platformStateHydrated = useRef(false);
+  const skipHydrationSave = useRef(false);
+  const [platformLoadError, setPlatformLoadError] = useState('');
   const recentEvaluation = useRef<{ key: string; evaluation: Evaluation; createdAt: number } | null>(null);
 
   // La sesión se mantiene sólo por pestaña; el token nunca se guarda en localStorage.
@@ -265,8 +268,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setEvaluations(Array.isArray(state.evaluations) ? uniqueEvaluations(state.evaluations) : []); setActionPlans(state.actionPlans || []); setInterventions(state.interventions || []);
           setAdvisorInterventions(state.advisorInterventions || []); setOperationalMeasurements(state.operationalMeasurements || []); setImportHistory(state.importHistory || []); setConfig(state.config || DEFAULT_METHODOLOGY_CONFIG);
         }
+        skipHydrationSave.current = true;
+        setPlatformLoadError('');
         platformStateHydrated.current = true;
       } catch (error) {
+        setPlatformLoadError(error instanceof Error ? error.message : 'No se pudo cargar el historial.');
         console.error('No fue posible cargar la dotación persistente', error);
       }
     };
@@ -282,6 +288,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     if (!isAuthenticated || ['ASESOR', 'SUPERVISOR', 'MONITOR'].includes(currentUser.role) || !platformStateHydrated.current) return;
+    if (skipHydrationSave.current) { skipHydrationSave.current = false; return; }
     void platformStateApi.save({ evaluations, actionPlans, interventions, advisorInterventions, operationalMeasurements, importHistory, config }).catch(error => console.error('No fue posible sincronizar el estado de plataforma', error));
   }, [evaluations, actionPlans, interventions, advisorInterventions, operationalMeasurements, importHistory, config, isAuthenticated, currentUser.role]);
 
@@ -1161,6 +1168,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         currentSection,
         setCurrentSection,
         filteredEvaluations,
+        platformLoadError,
         filteredAdvisors,
         filteredOperationalMeasurements,
         addUser,

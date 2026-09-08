@@ -1,4 +1,5 @@
 import express from "express";
+import { mergeEvaluationSources } from "./server/platformStateRecovery";
 import path from "path";
 import { googleStorage } from "./server/googleStorage";
 import { emailService } from "./server/emailService";
@@ -603,6 +604,7 @@ async function startServer() {
     catch (error) { console.error('[google-storage] No fue posible actualizar feedback.', error instanceof Error ? error.message : ''); res.status(502).json({ error: 'No fue posible sincronizar el feedback.' }); }
   });
   app.get('/api/platform-state', requireAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
     const user = (req as any).authUser as User; const directory = await readRepository();
     const onlyOwn = (state: any) => {
       if (!state) return state;
@@ -616,16 +618,21 @@ async function startServer() {
     try {
       if (googleStorage.enabled) {
         const [state, storedEvaluations] = await Promise.all([googleStorage.loadPlatformState(), googleStorage.loadEvaluations()]);
-        const consolidated = normalizePlatformState({ ...(state || {}), evaluations: uniqueEvaluations([...(storedEvaluations || []), ...(state?.evaluations || [])]) });
+        const localRow = db.prepare('SELECT payload_json FROM app_state WHERE id=?').get('global') as any;
+        const localState = localRow ? JSON.parse(localRow.payload_json) : {};
+        const localEvaluations = (db.prepare('SELECT payload_json FROM evaluations').all() as any[]).map(row => JSON.parse(row.payload_json));
+        const consolidated = { ...localState, ...(state || {}), evaluations: mergeEvaluationSources(storedEvaluations || [], state?.evaluations || [], localEvaluations, localState.evaluations || []) };
         const corrected = { ...consolidated, evaluations: consolidated.evaluations.map((evaluation:any) => correctMigracionesQualityEvaluation(evaluation, directory.campaigns)) };
         const evaluationTypes=corrected.evaluations.reduce((totals:any,item:any)=>{const type=item.evaluationType||'SIN_TIPO';totals[type]=(totals[type]||0)+1;return totals;},{});
         console.log(`[platform-state] fuente=Sheets evaluaciones=${corrected.evaluations.length} tipos=${JSON.stringify(evaluationTypes)} asesores=${directory.advisors.length}`);
-        const changed = corrected.evaluations.filter((evaluation:any,index:number) => JSON.stringify(evaluation) !== JSON.stringify(consolidated.evaluations[index]));
-        if (changed.length) await Promise.all([...changed.map((evaluation:any) => googleStorage.saveEvaluation(evaluation)), googleStorage.savePlatformState(corrected)]);
+        console.log('[platform-state] fuentes=' + JSON.stringify({ sheetsEvaluations: storedEvaluations.length, sheetsState: state?.evaluations?.length || 0, sqliteEvaluations: localEvaluations.length, sqliteState: localState.evaluations?.length || 0, total: corrected.evaluations.length }));
         return res.json({ state: onlyOwn(corrected) });
       }
     }
-    catch (error) { console.error('[google-storage] No fue posible leer el estado de plataforma.', error instanceof Error ? error.message : ''); }
+    catch (error) {
+      console.error('[google-storage] No fue posible leer el estado de plataforma.', error instanceof Error ? error.message : '');
+      return res.status(502).json({ error: 'No se pudo cargar el historial completo. Se detuvo la sincronización para proteger los registros. Reintenta la carga.' });
+    }
     const row = db.prepare('SELECT payload_json FROM app_state WHERE id=?').get('global') as any;
     const state = row ? JSON.parse(String(row.payload_json)) : {};
     const storedEvaluations = (db.prepare('SELECT payload_json FROM evaluations ORDER BY created_at DESC').all() as any[]).flatMap(item => { try { return [JSON.parse(item.payload_json)]; } catch { return []; } });

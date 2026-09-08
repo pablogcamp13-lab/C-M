@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { google } from 'googleapis';
 import { Readable } from 'node:stream';
+import { readPlatformStateRows } from './platformStateRecovery';
 import type { Advisor, Campaign, Team, User } from '../src/types';
 
 export type SharedRepository = { users: User[]; campaigns: Campaign[]; teams: Team[]; advisors: Advisor[] };
@@ -137,7 +138,15 @@ class GoogleStorage {
   async saveEvaluation(evaluation: any) { await this.upsert('EVALUATIONS', 'id', { id: evaluation.id, advisor_id: evaluation.advisorId, evaluator_id: evaluation.evaluatorId, evaluation_type: evaluation.evaluationType, evaluated_at: `${evaluation.date}T${evaluation.time || '00:00'}:00`, payload_json: JSON.stringify(evaluation), created_at: evaluation.createdAt || new Date().toISOString() }); }
   async loadEvaluations() {
     const rows = await this.rows('EVALUATIONS') || [];
-    return rows.flatMap(row => { try { return [JSON.parse(row.payload_json || '{}')]; } catch { return []; } });
+    return rows.map((row, index) => {
+      try {
+        const evaluation = JSON.parse(row.payload_json || '');
+        if (!evaluation?.id) throw new Error('missing id');
+        return evaluation;
+      } catch {
+        throw new Error(`EVALUATIONS: registro inválido en la fila ${index + 2}; no se omitió silenciosamente.`);
+      }
+    });
   }
   async deduplicateEvaluations() {
     const rows = await this.rows('EVALUATIONS') || [];
@@ -161,16 +170,7 @@ class GoogleStorage {
   }
   async loadPlatformState() {
     const rows = await this.rows('APP_STATE') || [];
-    const chunkRows=rows.filter(item=>/^global_\d+$/.test(item.id || ''));
-    const generations=[...new Set(chunkRows.map(item=>item.updated_at || ''))].sort().reverse();
-    for(const generation of generations){
-      const chunks=chunkRows.filter(item=>(item.updated_at || '')===generation).sort((a,b)=>(a.id || '').localeCompare(b.id || ''));
-      const contiguous=chunks.every((item,index)=>item.id===`global_${String(index).padStart(4,'0')}`);
-      if(!contiguous)continue;
-      try{return JSON.parse(chunks.map(item=>item.payload_json || '').join(''));}catch{}
-    }
-    const legacy = rows.filter(item => item.id === 'global' && item.payload_json).sort((a,b)=>(b.updated_at || '').localeCompare(a.updated_at || ''))[0];
-    return legacy?.payload_json ? JSON.parse(legacy.payload_json) : null;
+    return readPlatformStateRows(rows);
   }
   async savePlatformState(state: unknown) {
     const payload=JSON.stringify(state),updatedAt=new Date().toISOString(),chunkSize=45000;
