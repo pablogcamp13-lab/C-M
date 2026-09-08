@@ -361,6 +361,7 @@ export async function parseAndValidateExcel(
     const terminationDateParsed = parseExcelDate(rowObj.terminationDate);
 
     const sphParsed = parseSph(rowObj.sph);
+    const existingAdvisor = dni ? existingDniMap.get(dni) : undefined;
 
     const errors: string[] = [];
     const warnings: string[] = [];
@@ -385,11 +386,11 @@ export async function parseAndValidateExcel(
     }
 
     // Warnings on dates
-    if (hireDateParsed.isPending) {
+    if (!existingAdvisor && hireDateParsed.isPending) {
       warnings.push('F. INGRESO no disponible (#N/D o vacía). Asesor quedará con estado "Fecha pendiente"');
     }
 
-    if (campaignDateParsed.isPending && rowObj.campaignStartDate) {
+    if (!existingAdvisor && campaignDateParsed.isPending && rowObj.campaignStartDate) {
       warnings.push('F. CAMPAÑA con valor no disponible o pendiente');
     }
 
@@ -404,7 +405,7 @@ export async function parseAndValidateExcel(
 
       if (foundSup) {
         matchedSupervisorId = foundSup.id;
-      } else {
+      } else if (!existingAdvisor) {
         warnings.push(`Supervisor "${supervisorRaw}" no vinculado a usuario existente`);
       }
 
@@ -418,13 +419,10 @@ export async function parseAndValidateExcel(
       supervisorCounts[supervisorRaw].count++;
     }
 
-    // Existing advisor check
-    const existingAdvisor = dni ? existingDniMap.get(dni) : undefined;
     const duplicateInWorkbook = Boolean(dni && dniSeenInFile.has(dni) && normalizedRows.some(item => item.dni === dni));
     const actionType: 'NEW' | 'UPDATE' | 'SKIP' = duplicateInWorkbook
       ? 'SKIP'
       : existingAdvisor ? 'UPDATE' : 'NEW';
-    if (existingAdvisor) warnings.push('DNI existente: se actualizará la dotación sin modificar su historial de evaluaciones ni feedback.');
 
     let status: 'READY' | 'WARNING' | 'ERROR' = 'READY';
     if (errors.length > 0) {

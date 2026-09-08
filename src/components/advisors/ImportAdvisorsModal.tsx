@@ -191,7 +191,11 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
       setParseError('Selecciona una campaña existente de la plataforma para cada hoja del archivo.');
       return;
     }
-    if (validationResult.detectedSupervisors.some(supervisor => !supervisor.matchedUserId && !supervisorOverrides[supervisor.nameRaw])) {
+    const supervisorsRequiredForNewAdvisors = new Set(validationResult.rows
+      .filter(row => row.actionType === 'NEW' && !row.errors.length)
+      .map(row => row.supervisorRaw)
+      .filter(Boolean));
+    if (validationResult.detectedSupervisors.some(supervisor => supervisorsRequiredForNewAdvisors.has(supervisor.nameRaw) && !supervisor.matchedUserId && !supervisorOverrides[supervisor.nameRaw])) {
       setParseError('Vincula cada supervisor del archivo con un supervisor existente antes de importar.');
       return;
     }
@@ -630,7 +634,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                 )}
 
                 {/* Supervisor Mapping Alert & Selector */}
-                {validationResult.detectedSupervisors.some(s => !s.matchedUserId) && (
+                {validationResult.detectedSupervisors.some(s => !s.matchedUserId && validationResult.rows.some(row => row.actionType === 'NEW' && row.supervisorRaw === s.nameRaw && !row.errors.length)) && (
                   <div className="mt-3 pt-3 bg-amber-50/70 border border-amber-200 rounded-lg p-3 text-xs space-y-2">
                     <div className="flex items-center gap-1.5 text-amber-900 font-bold">
                       <AlertTriangle className="w-4 h-4 text-amber-600" />
@@ -638,7 +642,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                       {validationResult.detectedSupervisors
-                        .filter(s => !s.matchedUserId)
+                        .filter(s => !s.matchedUserId && validationResult.rows.some(row => row.actionType === 'NEW' && row.supervisorRaw === s.nameRaw && !row.errors.length))
                         .map(sup => (
                           <div key={sup.nameRaw} className="bg-white p-2 rounded border border-amber-200 space-y-1">
                             <span className="font-semibold text-slate-800 block text-[11px]">
@@ -778,8 +782,12 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                             <span className="px-1.5 py-0.5 bg-blue-100 text-blue-800 rounded font-bold text-[10px]">
                               NUEVO
                             </span>
-                          ) : (
+                          ) : row.actionType === 'UPDATE' ? (
                             <span className="px-1.5 py-0.5 bg-purple-100 text-purple-800 rounded font-bold text-[10px]">
+                              REASIGNAR
+                            </span>
+                          ) : (
+                            <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-bold text-[10px]">
                               OMITIR
                             </span>
                           )}
