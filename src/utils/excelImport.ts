@@ -552,20 +552,39 @@ export function generateSampleExcelTemplate(source: StaffingTemplateSource = {})
       { Name: 'SupervisoresDotacion', Ref: `Listas!$C$2:$C$${last(supervisors.length)}` }
     ]
   };
-  const cfb: any = (XLSX as any).CFB.read(XLSX.write(wb, { type: 'binary', bookType: 'xlsx' }), { type: 'binary' });
-  const sheetXml: any = (XLSX as any).CFB.find(cfb, 'sheet1.xml');
-  const xml = new TextDecoder().decode(sheetXml.content);
   const validations = '<dataValidations count="3">' +
     '<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Valor no permitido" error="Selecciona un valor de la lista de la plataforma." sqref="D2:D1001"><formula1>=SupervisoresDotacion</formula1></dataValidation>' +
     '<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Valor no permitido" error="Selecciona un valor de la lista de la plataforma." sqref="F2:F1001"><formula1>=CampanasDotacion</formula1></dataValidation>' +
     '<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Valor no permitido" error="Selecciona un valor de la lista de la plataforma." sqref="G2:G1001"><formula1>=EmpresasDotacion</formula1></dataValidation>' +
     '</dataValidations>';
-  // CFB accepts a binary XML string in both the browser and Node builds of SheetJS.
-  sheetXml.content = xml.replace('</worksheet>', `${validations}</worksheet>`);
-  const output: string = (XLSX as any).CFB.write(cfb, { type: 'binary', fileType: 'zip' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(new Blob([Uint8Array.from(output, byte => byte.charCodeAt(0))], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-  link.download = 'Plantilla_Dotacion_3C.xlsx';
-  link.click();
-  URL.revokeObjectURL(link.href);
+  const download = (content: BlobPart) => {
+    const url = URL.createObjectURL(new Blob([content], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'Plantilla_Dotacion_3C.xlsx';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  try {
+    const cfb: any = (XLSX as any).CFB.read(XLSX.write(wb, { type: 'binary', bookType: 'xlsx' }), { type: 'binary' });
+    const sheetXml: any = (XLSX as any).CFB.find(cfb, 'sheet1.xml');
+    if (!sheetXml) throw new Error('No se encontró la hoja principal para aplicar las listas.');
+    const xml = typeof sheetXml.content === 'string' ? sheetXml.content : new TextDecoder().decode(sheetXml.content);
+    // CFB accepts a binary XML string in both the browser and Node builds of SheetJS.
+    sheetXml.content = xml.replace('</worksheet>', `${validations}</worksheet>`);
+    const output: any = (XLSX as any).CFB.write(cfb, { type: 'binary', fileType: 'zip' });
+    const bytes = typeof output === 'string'
+      ? Uint8Array.from(output, byte => byte.charCodeAt(0))
+      : output instanceof ArrayBuffer ? new Uint8Array(output)
+      : ArrayBuffer.isView(output) ? new Uint8Array(output.buffer, output.byteOffset, output.byteLength)
+      : new Uint8Array(output);
+    download(bytes);
+  } catch (error) {
+    // A download must never fail merely because a browser blocks advanced ZIP rewriting.
+    console.warn('No se pudieron insertar las listas desplegables; se descarga la plantilla base.', error);
+    download(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer);
+  }
 }
