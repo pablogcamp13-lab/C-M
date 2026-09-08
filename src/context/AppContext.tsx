@@ -29,7 +29,7 @@ import {
 } from '../data/initialData';
 import { INITIAL_INTERVENTIONS } from '../data/interventionsData';
 import { calculateEvaluationSummary, parseTimeToMinutes, formatMinutesToHHMM } from '../utils/calculations';
-import { adminCampaignsApi, adminUsersApi, authApi, evaluationsApi, platformStateApi, sharedRepositoryApi } from '../api/sharedRepository';
+import { adminCampaignsApi, adminUsersApi, authApi, evaluationsApi, organizationApi, platformStateApi, sharedRepositoryApi } from '../api/sharedRepository';
 import { QUALITY_WEIGHTS } from '../data/qualityPueData';
 
 export const formatAdvisorUsername = (name: string): string => {
@@ -861,9 +861,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     rows: any[];
   }) => {
     const validRows = payload.rows.filter(r => r.status !== 'ERROR' && r.actionType !== 'SKIP');
+    const normalizeDni = (value: unknown) => String(value || '').trim().replace(/\.0$/, '').replace(/\D/g, '');
     const existingDniMap = new Map<string, Advisor>();
     advisors.forEach(a => {
-      if (a.dni) existingDniMap.set(a.dni.trim(), a);
+      if (a.dni) existingDniMap.set(normalizeDni(a.dni), a);
     });
 
     let newCount = 0;
@@ -880,6 +881,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const normalizeCampaign = (value: string) => value.trim().toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const campaignByName = new Map<string, Campaign>(campaigns.map(campaign => [normalizeCampaign(campaign.name), campaign]));
+    const destinationOperation = payload.operationId
+      ? operations.find(operation => operation.id === payload.operationId && operation.status === 'ACTIVA')
+      : undefined;
+    if (payload.operationId && !destinationOperation) {
+      throw new Error('La empresa o campaña seleccionada ya no está activa. Recarga la página y vuelve a seleccionarla.');
+    }
     if (payload.usesSheetCampaigns) {
       const unknownCampaign = payload.rows.filter(row => row.status !== 'ERROR').find(row => {
         const name = String(row.campaignName || row.sheetName || '').trim();
@@ -890,27 +897,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Fallback supervisor and team
     const defaultSupervisor = users.find(u => u.role === 'SUPERVISOR') || users[0];
+    if (!defaultSupervisor) throw new Error('No existe un supervisor activo para asignar la dotación.');
 
     validRows.forEach((row, index) => {
-      const existingAdv = existingDniMap.get(row.dni);
+      const existingAdv = existingDniMap.get(normalizeDni(row.dni));
+      const supervisorId = row.supervisorId || existingAdv?.supervisorId || defaultSupervisor.id;
+      const supervisor = users.find(user => user.id === supervisorId) || defaultSupervisor;
       const rowSph = typeof row.sph === 'number' ? row.sph : 0.00;
       const rowCampaign = payload.usesSheetCampaigns
         ? campaigns.find(campaign => campaign.id === payload.campaignMappings?.[String(row.campaignName || row.sheetName || '')])
           || campaignByName.get(normalizeCampaign(String(row.campaignName || row.sheetName || '')))
         : undefined;
-      const destinationOperation=payload.operationId ? operations.find(operation=>operation.id===payload.operationId && operation.status==='ACTIVA') : undefined;
       const campaignId = destinationOperation?.campaignId || rowCampaign?.id || payload.campaignId;
       const campaignName = rowCampaign?.name || payload.campaignName;
-      let campaignTeam = teams.find(team => team.campaignId === campaignId && (!destinationOperation || team.operationId === destinationOperation.id));
+      let campaignTeam = teams.find(team => team.campaignId === campaignId && team.supervisorId === supervisorId);
       if (!campaignTeam) {
-        campaignTeam = teamsToAdd.find(team => team.campaignId === campaignId);
+        campaignTeam = teamsToAdd.find(team => team.campaignId === campaignId && team.supervisorId === supervisorId);
       }
       if (!campaignTeam) {
         campaignTeam = {
           id: `team_excel_${nowTimestamp}_${teamsToAdd.length}`,
           campaignId,
           operationId: destinationOperation?.id,
-          supervisorId: row.supervisorId || defaultSupervisor.id,
+          supervisorId,
           name: `Equipo ${campaignName}`
         };
         teamsToAdd.push(campaignTeam);
@@ -931,8 +940,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           operationId: destinationOperation?.id,
           sourceCampaignName: row.campaignName || row.sheetName,
           teamId: campaignTeam.id,
-          supervisorId: row.supervisorId || defaultSupervisor.id,
-          supervisor: row.supervisorRaw || defaultSupervisor.name,
+          supervisorId,
+          supervisor: row.supervisorRaw || supervisor.name,
           schedule: row.schedule || 'COMPLETO',
           shift: /tarde|noche/i.test(row.shiftRaw || '') ? 'TARDE' : /mañana|manana/i.test(row.shiftRaw || '') ? 'MANANA' : 'COMPLETO',
           status: row.terminationDate || /inactivo|cesado/i.test(row.sourceStatus || '') ? 'INACTIVO' : 'ACTIVO',
@@ -1003,10 +1012,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
       } else if (row.actionType === 'UPDATE') {
         updateCount++;
-        const updatedAdvisor: Advisor = { ...existingAdv };
-        // Keep the original advisor ID and profile data. Existing people are
-        // reassigned only to the selected company/campaign; evaluations,
-        // feedback, quartile, supervisor and all historical profile fields stay intact.
+        // The advisor ID never changes, so evaluations and feedback keep their
+        // historical relation. Supplied roster fields refresh the current profile.
+        const updatedAdvisor: Advisor = {
+          ...existingAdv,
+          name: row.name || existingAdv.name,
+          supervisorId,
+          supervisor: row.supervisorRaw || supervisor.name || existingAdv.supervisor,
+          quartile: row.quartile || existingAdv.quartile,
+          schedule: row.schedule || existingAdv.schedule,
+          shift: row.shiftRaw
+            ? (/tarde|noche/i.test(row.shiftRaw) ? 'TARDE' : /mañana|manana/i.test(row.shiftRaw) ? 'MANANA' : 'COMPLETO')
+            : existingAdv.shift,
+          hireDate: row.hireDate || existingAdv.hireDate,
+          hireDatePending: row.hireDate ? false : existingAdv.hireDatePending,
+          campaignStartDate: row.campaignStartDate || existingAdv.campaignStartDate,
+          campaignStartDatePending: row.campaignStartDate ? false : existingAdv.campaignStartDatePending,
+          terminationDate: row.terminationDate ?? existingAdv.terminationDate,
+          importedTenureLabel: row.importedTenureLabel || existingAdv.importedTenureLabel,
+          condition: row.condition || existingAdv.condition,
+          fte: row.fte ?? existingAdv.fte,
+          modality: row.modality || existingAdv.modality,
+          sourceShift: row.shiftRaw || existingAdv.sourceShift,
+          site: row.site || existingAdv.site,
+          indicators: row.indicators ?? existingAdv.indicators
+        };
         if (destinationOperation) {
           updatedAdvisor.operationId = destinationOperation.id;
           updatedAdvisor.campaignId = destinationOperation.campaignId;
@@ -1024,14 +1054,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const nextCampaigns = [...campaigns, ...campaignsToAdd];
     const nextTeams = [...teams, ...teamsToAdd];
     const nextUsers = [...users, ...usersToAdd];
-    const { repository: persisted } = await sharedRepositoryApi.sync({
-      users: nextUsers,
-      campaigns: nextCampaigns,
-      companies,
-      operations,
-      teams: nextTeams,
-      advisors: nextAdvisors
-    });
+    let persisted;
+    if (destinationOperation) {
+      const result = await organizationApi.importRoster({
+        operationId: destinationOperation.id,
+        effectiveAt: payload.cutoffDate,
+        rows: [...advisorsToUpdate, ...advisorsToAdd].map(advisor => ({ advisor }))
+      });
+      if (result.verification?.verified !== validRows.length) {
+        throw new Error(`La importación sólo verificó ${result.verification?.verified || 0} de ${validRows.length} personas y fue revertida.`);
+      }
+      persisted = result.repository;
+      newCount = result.summary.created;
+      updateCount = result.summary.updated;
+    } else {
+      ({ repository: persisted } = await sharedRepositoryApi.sync({
+        users: nextUsers,
+        campaigns: nextCampaigns,
+        companies,
+        operations,
+        teams: nextTeams,
+        advisors: nextAdvisors
+      }));
+    }
 
     setUsers(persisted.users);
     setCampaigns(persisted.campaigns);

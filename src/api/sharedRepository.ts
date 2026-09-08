@@ -132,6 +132,7 @@ export const organizationApi = {
   addSupervisor(id:string,body:any) { return mutate<any>(`/api/operations/${id}/supervisors`,'POST',body); },
   removeSupervisor(id:string,supervisorId:string,body:any) { return mutate<any>(`/api/operations/${id}/supervisors/${supervisorId}`,'DELETE',body); },
   async staffing(query:Record<string,unknown>={}) { return json<any>(await fetch(`/api/staffing?${queryString(query)}`,{headers:headers()})); },
+  importRoster(body:any) { return mutate<any>('/api/staffing/import','POST',body); },
   updateAssignment(id:string,body:any) { return mutate<any>(`/api/staffing/${id}/assignment`,'PATCH',body); },
   bulkMove(body:any) { return mutate<any>('/api/staffing/bulk-move','POST',body); },
   bulkSupervisor(body:any) { return mutate<any>('/api/staffing/bulk-supervisor','POST',body); },

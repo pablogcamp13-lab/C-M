@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, scryptSync } from 'node:crypto';
 import type express from 'express';
 import type { User } from '../src/types';
 
@@ -12,6 +12,8 @@ type Dependencies = {
 
 const id = (prefix:string) => `${prefix}_${randomBytes(9).toString('hex')}`;
 const normalizeName = (value:unknown) => String(value || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').toLocaleLowerCase();
+const cleanDni = (value:unknown) => String(value || '').trim().replace(/\.0$/, '').replace(/\D/g, '');
+const hashPassword = (password:string) => { const salt=randomBytes(16).toString('hex');return `${salt}:${scryptSync(password,salt,64).toString('hex')}`; };
 const isoDate = (value:unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) ? String(value) : '';
 const parse = (value:unknown, fallback:any=null) => { try { return value ? JSON.parse(String(value)) : fallback; } catch { return fallback; } };
 const manageable = (user:User) => ['ADMINISTRADOR','CONSULTOR'].includes(user.role);
@@ -103,6 +105,91 @@ export function registerOperationsModule({app,db,requireAuth,repository,sync}:De
   const bulkMove = async(req:express.Request,res:express.Response,supervisorOnly=false) => {const user=guardWrite(req,res);if(!user)return;const b=req.body||{},targetId=String(b.operationId||''),preview=dryMove(b,user,targetId);if(b.dryRun)return res.json({preview});if(!preview.valid)return res.status(400).json({error:'La validación previa encontró errores.',preview});db.exec('BEGIN IMMEDIATE');const results:any[]=[];try{for(let index=0;index<preview.advisorIds.length;index++){const current=context(preview.advisorIds[index]);const operationId=supervisorOnly?current.operation_id:targetId;let supervisorId=String(b.supervisorId||'')||null;if(b.supervisorMode==='KEEP')supervisorId=current.supervisor_id||null;if(b.supervisorMode==='BALANCED'){const ids=(b.supervisorIds||[]).map(String);supervisorId=ids[index%ids.length]||null;}results.push(moveOne(preview.advisorIds[index],operationId,supervisorId,preview.effectiveAt,user.id,String(b.reason||'Actualización masiva de dotación.'),supervisorOnly?'CAMBIO_SUPERVISOR':undefined));}db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');return res.status(409).json({error:error instanceof Error?error.message:'La operación masiva fue revertida.',processed:0});}return syncResult(res,{processed:preview.total,modified:results.filter(row=>row.changed).length,warnings:preview.warnings,results});};
   app.get('/api/staffing',requireAuth,(req,res)=>{const user=guardRead(req,res);if(!user)return;res.json(staffingRows(req.query,user));});
   app.get('/api/staffing/export',requireAuth,(req,res)=>{const user=guardRead(req,res);if(!user)return;const result=staffingRows(req.query,user,true);res.json({rows:result.rows,total:result.total});});
+  app.post('/api/staffing/import',requireAuth,async(req,res)=>{
+    const actor=guardWrite(req,res);if(!actor)return;
+    const body=req.body||{},operationId=String(body.operationId||''),target=operation(operationId),effectiveAt=isoDate(body.effectiveAt)||new Date().toISOString().slice(0,10),sourceRows=Array.isArray(body.rows)?body.rows:[];
+    if(!target||target.status!=='ACTIVA'||target.company_status!=='ACTIVA'||target.legacy)return res.status(400).json({error:'Selecciona una empresa y campaña activas.'});
+    if(!sourceRows.length||sourceRows.length>5000)return res.status(400).json({error:'La importación debe contener entre 1 y 5000 personas.'});
+    const rows=sourceRows.map((row:any,index:number)=>({index,advisor:row?.advisor||row,dni:cleanDni(row?.advisor?.dni??row?.dni)}));
+    const duplicateDnis=rows.filter((row:any,index:number)=>rows.findIndex((candidate:any)=>candidate.dni===row.dni)!==index).map((row:any)=>row.dni);
+    if(rows.some((row:any)=>!row.dni||!String(row.advisor?.name||'').trim()))return res.status(400).json({error:'Todas las filas deben incluir DNI y nombre.'});
+    if(duplicateDnis.length)return res.status(400).json({error:`El archivo contiene DNI duplicados: ${[...new Set(duplicateDnis)].join(', ')}.`});
+    const advisorsByDni=new Map<string,any>(),ambiguousDnis=new Set<string>();
+    for(const stored of db.prepare('SELECT * FROM advisors').all() as any[]){const dni=cleanDni(stored.dni);if(!dni)continue;if(advisorsByDni.has(dni))ambiguousDnis.add(dni);else advisorsByDni.set(dni,stored);}
+    const ambiguousImport=rows.map((row:any)=>row.dni).filter((dni:string)=>ambiguousDnis.has(dni));
+    if(ambiguousImport.length)return res.status(409).json({error:`Existen registros históricos ambiguos para los DNI ${[...new Set(ambiguousImport)].join(', ')}. Resuelve esa duplicidad antes de importar.`});
+
+    let prepared:any[];
+    try{
+      prepared=rows.map((row:any)=>{
+        const existing=advisorsByDni.get(row.dni) as any;
+        const currentData=existing?parse(existing.data_json,{}):null;
+        const incoming=row.advisor||{};
+        const supervisorId=String(incoming.supervisorId||currentData?.supervisorId||'');
+        const supervisor=supervisorId?db.prepare(`SELECT id,name FROM users WHERE id=? AND status='ACTIVO' AND role IN ('SUPERVISOR','FORMADOR','ADMINISTRADOR','CONSULTOR')`).get(supervisorId) as any:null;
+        if(!supervisor)throw new Error(`${incoming.name}: selecciona un supervisor existente y activo.`);
+        return {...row,existing,currentData,incoming,supervisor};
+      });
+    }catch(error){return res.status(400).json({error:error instanceof Error?error.message:'La validación de la dotación falló.'});}
+
+    const now=new Date().toISOString(),summary={rows:prepared.length,created:0,updated:0,reassigned:0,alreadyAssigned:0,assignmentsCreated:0};
+    db.exec('BEGIN IMMEDIATE');
+    try{
+      for(const row of prepared){
+        const {existing,currentData,incoming,supervisor}=row;
+        db.prepare(`INSERT INTO operation_supervisors (operation_id,supervisor_id,active,start_at,end_at) VALUES (?,?,1,?,NULL) ON CONFLICT(operation_id,supervisor_id,start_at) DO UPDATE SET active=1,end_at=NULL`).run(operationId,supervisor.id,effectiveAt);
+        let team=db.prepare('SELECT * FROM teams WHERE campaign_id=? AND supervisor_id=? ORDER BY id LIMIT 1').get(target.campaign_id,supervisor.id) as any;
+        if(!team){team={id:id('team'),campaign_id:target.campaign_id,supervisor_id:supervisor.id,name:`${target.campaign_name} · ${supervisor.name}`};db.prepare('INSERT INTO teams (id,campaign_id,supervisor_id,name) VALUES (?,?,?,?)').run(team.id,team.campaign_id,team.supervisor_id,team.name);}
+        const advisorId=existing?.id||String(incoming.id||id('advisor'));
+        const updated={
+          ...(currentData||{}),
+          ...incoming,
+          id:advisorId,
+          dni:row.dni,
+          name:String(incoming.name).trim(),
+          campaignId:target.campaign_id,
+          operationId,
+          sourceCampaignName:target.campaign_name,
+          teamId:team.id,
+          supervisorId:supervisor.id,
+          supervisor:supervisor.name
+        };
+        if(existing){
+          db.prepare('UPDATE advisors SET dni=?,employee_code=?,name=?,campaign_id=?,team_id=?,supervisor_id=?,data_json=? WHERE id=?').run(row.dni,updated.employeeCode||existing.employee_code||'',updated.name,target.campaign_id,team.id,supervisor.id,JSON.stringify(updated),advisorId);
+          db.prepare('UPDATE users SET name=?,team_id=? WHERE advisor_id=?').run(updated.name,team.id,advisorId);
+          summary.updated++;
+        }else{
+          db.prepare('INSERT INTO advisors (id,dni,employee_code,name,campaign_id,team_id,supervisor_id,data_json) VALUES (?,?,?,?,?,?,?,?)').run(advisorId,row.dni,updated.employeeCode||`ADV-${row.dni.slice(-4)}`,updated.name,target.campaign_id,team.id,supervisor.id,JSON.stringify(updated));
+          let username=`asesor_${row.dni}`;if(db.prepare('SELECT 1 FROM users WHERE username=? OR email=?').get(username,`${username}@asesores3c.com`))username=`${username}_${randomBytes(3).toString('hex')}`;
+          db.prepare('INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,created_at,password_hash,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,?,1)').run(`usr_${advisorId}`,updated.name,`${username}@asesores3c.com`,username,'ASESOR',updated.status==='INACTIVO'?'INACTIVO':'ACTIVO',team.id,advisorId,now,hashPassword(row.dni));
+          summary.created++;
+        }
+
+        const activeAssignments=db.prepare('SELECT * FROM operation_assignments WHERE advisor_id=? AND active=1 ORDER BY start_date DESC,id DESC').all(advisorId) as any[];
+        const correct=activeAssignments.length===1&&activeAssignments[0].operation_id===operationId&&String(activeAssignments[0].supervisor_id||'')===supervisor.id;
+        if(correct){
+          db.prepare('UPDATE operation_assignments SET team_id=?,operational_status=? WHERE id=?').run(team.id,updated.status==='INACTIVO'?'BAJA':'PRODUCCION',activeAssignments[0].id);
+          summary.alreadyAssigned++;
+        }else{
+          const previous=context(advisorId),origin=beforeAfter(previous);
+          db.prepare('UPDATE operation_assignments SET active=0,end_date=? WHERE advisor_id=? AND active=1').run(effectiveAt,advisorId);
+          const assignmentId=id('assignment');
+          db.prepare(`INSERT INTO operation_assignments (id,advisor_id,operation_id,team_id,supervisor_id,role,operational_status,start_date,active,source,actor_id,observation) VALUES (?,?,?,?,?,?,?,?,1,'IMPORTACION',?,?)`).run(assignmentId,advisorId,operationId,team.id,supervisor.id,'ASESOR',updated.status==='INACTIVO'?'BAJA':'PRODUCCION',effectiveAt,actor.id,'Actualización automática desde carga de dotación.');
+          const destination={operationId,companyId:target.company_id,campaignId:target.campaign_id,companyName:target.company_name,campaignName:target.campaign_name,supervisorId:supervisor.id,supervisorName:supervisor.name};
+          db.prepare('INSERT INTO staffing_movements (id,advisor_id,assignment_id,type,occurred_at,effective_at,created_at,origin,destination,actor_id,observation) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(id('movement'),advisorId,assignmentId,existing?'CAMBIO_ASIGNACION':'ALTA',now,effectiveAt,now,origin?JSON.stringify(origin):null,JSON.stringify(destination),actor.id,'Actualización automática desde carga de dotación.');
+          summary.assignmentsCreated++;if(existing)summary.reassigned++;
+        }
+      }
+      const verified=prepared.filter(row=>{const result=db.prepare(`SELECT a.id FROM advisors a JOIN operation_assignments oa ON oa.advisor_id=a.id AND oa.active=1 WHERE a.dni=? AND a.campaign_id=? AND oa.operation_id=?`).get(row.dni,target.campaign_id,operationId);const total=(db.prepare('SELECT COUNT(*) total FROM operation_assignments WHERE advisor_id=(SELECT id FROM advisors WHERE dni=?) AND active=1').get(row.dni) as any)?.total;return Boolean(result)&&Number(total)===1;}).length;
+      if(verified!==prepared.length)throw new Error(`La verificación sólo confirmó ${verified} de ${prepared.length} personas.`);
+      await sync();
+      db.exec('COMMIT');
+      return res.json({summary,verification:{expected:prepared.length,verified},repository:repository()});
+    }catch(error){
+      db.exec('ROLLBACK');
+      return res.status(409).json({error:error instanceof Error?error.message:'La importación fue revertida; no se aplicaron cambios.'});
+    }
+  });
   app.patch('/api/staffing/:personId/assignment',requireAuth,async(req,res)=>{const user=guardWrite(req,res);if(!user)return;const b=req.body||{},advisor=db.prepare('SELECT data_json FROM advisors WHERE id=?').get(req.params.personId) as any;if(!advisor)return res.status(404).json({error:'Colaborador no encontrado.'});const preview=dryMove({...b,selection:{advisorIds:[req.params.personId]}},user,String(b.operationId||''));if(!preview.valid)return res.status(400).json({error:preview.errors[0],preview});db.exec('BEGIN IMMEDIATE');let result;try{const data=parse(advisor.data_json,{}),name=[String(b.firstName??'').trim(),String(b.lastName??'').trim()].filter(Boolean).join(' ')||data.name;if(!name)throw new Error('El nombre es obligatorio.');db.prepare('UPDATE advisors SET name=? WHERE id=?').run(name,req.params.personId);result=moveOne(req.params.personId,String(b.operationId),String(b.supervisorId||'')||null,preview.effectiveAt,user.id,String(b.reason||'Edición de persona y asignación.'));const fresh=db.prepare('SELECT data_json FROM advisors WHERE id=?').get(req.params.personId) as any;db.prepare('UPDATE advisors SET data_json=? WHERE id=?').run(JSON.stringify({...parse(fresh.data_json,{}),name}),req.params.personId);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');return res.status(409).json({error:error instanceof Error?error.message:'No se pudo actualizar.'});}return syncResult(res,{result});});
   app.post('/api/staffing/bulk-move',requireAuth,(req,res)=>void bulkMove(req,res,false));
   app.post('/api/staffing/bulk-supervisor',requireAuth,(req,res)=>void bulkMove(req,res,true));
