@@ -43,7 +43,7 @@ export function registerOperationsModule({app,db,requireAuth,repository,sync}:De
     const where=staffingWhere(query,user),page=Math.max(1,Number(query.page)||1),limit=Math.min(200,Math.max(1,Number(query.limit)||50));
     const from=` FROM advisors a LEFT JOIN operation_assignments oa ON oa.advisor_id=a.id AND oa.active=1 LEFT JOIN operations o ON o.id=oa.operation_id LEFT JOIN companies c ON c.id=o.company_id LEFT JOIN campaigns ca ON ca.id=o.campaign_id LEFT JOIN users u ON u.id=oa.supervisor_id WHERE 1=1 ${where.sql}`;
     const total=Number((db.prepare(`SELECT COUNT(DISTINCT a.id) total${from}`).get(...where.params) as any).total||0);
-    const rows=db.prepare(`SELECT a.id,a.name,a.dni,a.employee_code,oa.id assignment_id,oa.operation_id,oa.supervisor_id,oa.operational_status,oa.start_date,o.company_id,o.status operation_status,o.legacy,c.name company_name,ca.name campaign_name,u.name supervisor_name${from} ORDER BY a.name${unpaged?'':' LIMIT ? OFFSET ?'}`).all(...where.params,...(unpaged?[]:[limit,(page-1)*limit])) as any[];
+    const rows=db.prepare(`SELECT a.id,a.name,a.dni,a.employee_code,json_extract(a.data_json,'$.quartile') quartile,oa.id assignment_id,oa.operation_id,oa.supervisor_id,oa.operational_status,oa.start_date,o.company_id,o.status operation_status,o.legacy,c.name company_name,ca.name campaign_name,u.name supervisor_name${from} ORDER BY a.name${unpaged?'':' LIMIT ? OFFSET ?'}`).all(...where.params,...(unpaged?[]:[limit,(page-1)*limit])) as any[];
     return {rows:rows.map(row=>({...row,legacy:Boolean(row.legacy)})),total,page,limit};
   };
   const inconsistencyRows = (user:User) => {

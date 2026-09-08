@@ -31,6 +31,7 @@ export interface NormalizedAdvisorRow {
   ac?: string | number;
   sourcePercentage2?: string | number;
   quartile?: string;
+  companyName?: string;
   sourceStatus?: string;
   condition?: string;
   fte?: string | number;
@@ -87,6 +88,7 @@ export function normalizeHeaderKey(header: string): string {
 const HEADER_PATTERNS: Record<string, string[]> = {
   dni: ['dni', 'documento', 'docidentidad', 'cedula', 'idasesor', 'documentoidentidad', 'nrodocumento'],
   name: ['asesores', 'asesor', 'nombre', 'nombres', 'nombrecompleto', 'nombrerepresentante', 'asesorrepresentante'],
+  lastName: ['apellido', 'apellidos', 'apellidopaterno', 'apellidomaterno'],
   supervisor: ['supervisor', 'supervisora', 'sup', 'teamleader', 'lider', 'coordinador'],
   schedule: ['horario', 'jornada', 'horariogestion', 'horariotrabajo'],
   hireDate: ['fingreso', 'fechadeingreso', 'fechaingreso', 'fingresoempresa', 'fechaingresoempresa'],
@@ -108,6 +110,7 @@ const HEADER_PATTERNS: Record<string, string[]> = {
   modality: ['modalidad'],
   shiftRaw: ['turno'],
   campaign: ['campana'],
+  company: ['empresa', 'compania', 'cliente'],
   site: ['sede'],
   indicators: ['indicadores', 'indicador']
 };
@@ -298,7 +301,7 @@ export async function parseAndValidateExcel(
     let headerRowIndex = -1;
     for (let i = 0; i < Math.min(rawGrid.length, 15); i++) {
       const normalized = rawGrid[i].map(cell => normalizeHeaderKey(String(cell)));
-      if (normalized.includes('dni') && normalized.some(value => value === 'asesor' || value === 'asesores')) {
+      if (normalized.includes('dni') && normalized.some(value => value === 'asesor' || value === 'asesores' || value === 'nombre' || value === 'nombres')) {
         headerRowIndex = i;
         break;
       }
@@ -333,11 +336,11 @@ export async function parseAndValidateExcel(
     });
 
     const dni = cleanDni(rowObj.dni);
-    const name = cleanAdvisorName(rowObj.name);
+    const name = cleanAdvisorName([rowObj.name, rowObj.lastName].filter(Boolean).join(' '));
     const supervisorRaw = String(rowObj.supervisor || '').trim();
     const schedule = rowObj.schedule ? String(rowObj.schedule).trim() : undefined;
     const importedTenureLabel = rowObj.tenureLabel ? String(rowObj.tenureLabel).trim() : undefined;
-    const campaignName = sheetName.trim();
+    const campaignName = cleanAdvisorName(rowObj.campaign) || sheetName.trim();
 
     const hireDateParsed = parseExcelDate(rowObj.hireDate);
     const campaignDateParsed = parseExcelDate(rowObj.campaignStartDate);
@@ -444,6 +447,7 @@ export async function parseAndValidateExcel(
       ac: rowObj.ac,
       sourcePercentage2: rowObj.pct2,
       quartile: rowObj.quartile ? String(rowObj.quartile).trim() : undefined,
+      companyName: rowObj.company ? String(rowObj.company).trim() : undefined,
       sourceStatus: rowObj.sourceStatus ? String(rowObj.sourceStatus).trim() : undefined,
       condition: rowObj.condition ? String(rowObj.condition).trim() : undefined,
       fte: rowObj.fte,
@@ -513,91 +517,55 @@ export async function getExcelSheetNames(file: File): Promise<string[]> {
   return workbook.SheetNames;
 }
 
-// Generate template Excel file for users to download
-export function generateSampleExcelTemplate(): void {
-  const headers = [
-    'DNI',
-    'ASESORES',
-    'SUPERVISOR',
-    'HORARIO',
-    'F. INGRESO',
-    'F. CAMPAÑA',
-    'F. CESE',
-    'ANTIGÜEDAD',
-    'GESTION',
-    'PV',
-    'SPH',
-    'SA',
-    'DIF',
-    '%',
-    'AC',
-    '%2',
-    'CUARTIL'
-  ];
+export type StaffingTemplateSource = {
+  companies?: Array<{ name: string }>;
+  campaigns?: Array<{ name: string }>;
+  supervisors?: Array<{ name: string }>;
+};
 
-  const sampleRows = [
-    [
-      '74819234',
-      'QUISPE MAMANI LUIS ALBERTO',
-      'ALEJANDRO',
-      '09:00 - 18:00',
-      '15/03/2026',
-      '01/04/2026',
-      '',
-      '0-30 Días',
-      '1.05',
-      '42',
-      '0.32',
-      '38',
-      '4',
-      '105%',
-      '120',
-      '98%',
-      'Q1'
-    ],
-    [
-      '71239845',
-      'RODRIGUEZ SOTO MARIA ELENA',
-      'JOSE C',
-      '14:00 - 22:00',
-      '10/01/2026',
-      '15/01/2026',
-      '',
-      '1 a 3 meses',
-      '0.98',
-      '35',
-      '0.28',
-      '32',
-      '3',
-      '98%',
-      '95',
-      '94%',
-      'Q2'
-    ],
-    [
-      '48921034',
-      'FLORES BENITEZ CARLOS DANIEL',
-      'CESAR E',
-      '08:00 - 17:00',
-      '#N/D',
-      '01/02/2026',
-      '',
-      '0-30 Días',
-      '1.12',
-      '50',
-      '0.41',
-      '45',
-      '5',
-      '112%',
-      '140',
-      '102%',
-      'Q1'
-    ]
-  ];
+const uniqueLabels = (items: Array<{ name: string }> = []) =>
+  [...new Set(items.map(item => String(item.name || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
 
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...sampleRows]);
+/** Generates a real XLSX file with Excel data validations backed by a hidden list sheet. */
+export function generateSampleExcelTemplate(source: StaffingTemplateSource = {}): void {
+  const headers = ['DNI *', 'Nombre *', 'Apellido *', 'Supervisor', 'Cuartil', 'Campaña', 'Empresa'];
+  const rows = [headers, ['', '', '', '', '', '', '']];
+  const companies = uniqueLabels(source.companies);
+  const campaigns = uniqueLabels(source.campaigns);
+  const supervisors = uniqueLabels(source.supervisors);
+  const lists = [
+    ['Empresas', 'Campañas', 'Supervisores'],
+    ...Array.from({ length: Math.max(1, companies.length, campaigns.length, supervisors.length) }, (_, index) => [companies[index] || '', campaigns[index] || '', supervisors[index] || ''])
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{wch:14},{wch:22},{wch:24},{wch:28},{wch:12},{wch:28},{wch:24}];
+  const listSheet = XLSX.utils.aoa_to_sheet(lists);
+  const last = (count: number) => Math.max(2, count + 1);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Plantilla Operacional');
-
-  XLSX.writeFile(wb, 'Plantilla_Importacion_Asesores_3C.xlsx');
+  XLSX.utils.book_append_sheet(wb, ws, 'Dotación');
+  XLSX.utils.book_append_sheet(wb, listSheet, 'Listas');
+  wb.Workbook = {
+    Sheets: [{ Hidden: 0 }, { Hidden: 1 }],
+    Names: [
+      { Name: 'EmpresasDotacion', Ref: `Listas!$A$2:$A$${last(companies.length)}` },
+      { Name: 'CampanasDotacion', Ref: `Listas!$B$2:$B$${last(campaigns.length)}` },
+      { Name: 'SupervisoresDotacion', Ref: `Listas!$C$2:$C$${last(supervisors.length)}` }
+    ]
+  };
+  const cfb: any = (XLSX as any).CFB.read(XLSX.write(wb, { type: 'binary', bookType: 'xlsx' }), { type: 'binary' });
+  const sheetXml: any = (XLSX as any).CFB.find(cfb, 'sheet1.xml');
+  const xml = new TextDecoder().decode(sheetXml.content);
+  const validations = '<dataValidations count="3">' +
+    '<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Valor no permitido" error="Selecciona un valor de la lista de la plataforma." sqref="D2:D1001"><formula1>=SupervisoresDotacion</formula1></dataValidation>' +
+    '<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Valor no permitido" error="Selecciona un valor de la lista de la plataforma." sqref="F2:F1001"><formula1>=CampanasDotacion</formula1></dataValidation>' +
+    '<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Valor no permitido" error="Selecciona un valor de la lista de la plataforma." sqref="G2:G1001"><formula1>=EmpresasDotacion</formula1></dataValidation>' +
+    '</dataValidations>';
+  // CFB accepts a binary XML string in both the browser and Node builds of SheetJS.
+  sheetXml.content = xml.replace('</worksheet>', `${validations}</worksheet>`);
+  const output: string = (XLSX as any).CFB.write(cfb, { type: 'binary', fileType: 'zip' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([Uint8Array.from(output, byte => byte.charCodeAt(0))], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  link.download = 'Plantilla_Dotacion_3C.xlsx';
+  link.click();
+  URL.revokeObjectURL(link.href);
 }

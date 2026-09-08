@@ -78,6 +78,12 @@
 .cm-table thead { background:var(--cm-surface-elevated); color:var(--cm-text-secondary); }
 .cm-table th,.cm-table td { border-bottom:1px solid rgba(91,180,245,.13); }
 .cm-table tbody tr:hover { background:rgba(31,214,255,.045); }
+/* Operation menus must escape the roster table instead of being cut by its scroll frame. */
+.cm-card:has(.cm-table .relative) > .overflow-x-auto { overflow:visible; }
+.cm-card:has(.cm-table .relative) .cm-table { overflow:visible; }
+.cm-table .relative > .absolute::before { content:"Opciones de campaña"; display:block; padding:.45rem .65rem .35rem; color:var(--cm-text-secondary); font-size:.67rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; }
+/* Drawers are rendered in a portal, so their heading needs an explicit dark-theme color. */
+[role="dialog"] h2 { color:var(--cm-text)!important; }
 .cm-tabs { display:flex; align-items:end; gap:1rem; border-bottom:1px solid rgba(99,190,255,.16); }
 .cm-tab { position:relative; padding:.1rem 0 .65rem; color:var(--cm-text-muted); font-size:.75rem; font-weight:700; }
 .cm-tab:hover { color:var(--cm-text); }.cm-tab[aria-selected="true"] { color:var(--cm-text); }.cm-tab[aria-selected="true"]::after { content:""; position:absolute; right:0; bottom:-1px; left:0; height:2px; border-radius:999px; background:var(--cm-primary); }

@@ -868,17 +868,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const normalizeCampaign = (value: string) => value.trim().toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const campaignByName = new Map<string, Campaign>(campaigns.map(campaign => [normalizeCampaign(campaign.name), campaign]));
     if (payload.usesSheetCampaigns) {
-      payload.rows.filter(row => row.status !== 'ERROR').forEach(row => {
+      const unknownCampaign = payload.rows.filter(row => row.status !== 'ERROR').find(row => {
         const name = String(row.campaignName || row.sheetName || '').trim();
-        const mappedId = payload.campaignMappings?.[name];
-        if (mappedId && mappedId !== '__NEW__') return;
-        const key = normalizeCampaign(name);
-        if (!name || campaignByName.has(key)) return;
-        const id = `camp_excel_${nowTimestamp}_${campaignsToAdd.length}`;
-        const campaign: Campaign = { id, name, client: name, status: 'ACTIVA', products: [] };
-        campaignsToAdd.push(campaign);
-        campaignByName.set(key, campaign);
+        return Boolean(name) && !payload.campaignMappings?.[name] && !campaignByName.has(normalizeCampaign(name));
       });
+      if (unknownCampaign) throw new Error(`La campaña “${unknownCampaign.campaignName || unknownCampaign.sheetName}” no existe en la plataforma. Selecciona una campaña existente antes de importar.`);
     }
 
     // Fallback supervisor and team

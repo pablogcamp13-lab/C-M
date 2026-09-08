@@ -108,7 +108,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
       const normalized = (value: string) => value.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
       setCampaignMappings(Object.fromEntries(result.detectedCampaigns.map(name => [
         name,
-        campaigns.find(campaign => normalized(campaign.name) === normalized(name))?.id || '__NEW__'
+        campaigns.find(campaign => normalized(campaign.name) === normalized(name))?.id || ''
       ])));
 
       // Initialize supervisor mappings
@@ -187,6 +187,20 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
   const handleExecuteImport = () => {
     if (!validationResult) return;
     if (!validationResult.usesSheetCampaigns && !selectedOperationId) { setParseError('Selecciona la campaña de destino antes de continuar.'); setStep(1); return; }
+    if (validationResult.usesSheetCampaigns && validationResult.detectedCampaigns.some(name => !campaignMappings[name])) {
+      setParseError('Selecciona una campaña existente de la plataforma para cada hoja del archivo.');
+      return;
+    }
+    if (validationResult.detectedSupervisors.some(supervisor => !supervisor.matchedUserId && !supervisorOverrides[supervisor.nameRaw])) {
+      setParseError('Vincula cada supervisor del archivo con un supervisor existente antes de importar.');
+      return;
+    }
+    const destinationCompany = companies.find(company => company.id === selectedCompanyId);
+    const normalizeValue = (value: string) => value.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    if (!validationResult.usesSheetCampaigns && destinationCompany && validationResult.rows.some(row => row.companyName && normalizeValue(row.companyName) !== normalizeValue(destinationCompany.name))) {
+      setParseError(`La empresa indicada en el archivo no coincide con la empresa destino (${destinationCompany.name}).`);
+      return;
+    }
 
     // Apply supervisor mappings to rows
     const rowsWithMappedSupervisors = validationResult.rows.map(row => {
@@ -342,12 +356,16 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
 
           <button
             type="button"
-            onClick={generateSampleExcelTemplate}
+            onClick={() => generateSampleExcelTemplate({
+              companies,
+              campaigns: operations.map(operation => ({ name: campaigns.find(campaign => campaign.id === operation.campaignId)?.name || operation.name })),
+              supervisors: users.filter(user => ['SUPERVISOR', 'FORMADOR', 'ADMINISTRADOR', 'CONSULTOR'].includes(user.role))
+            })}
             className="flex items-center gap-1.5 text-xs text-[#031E3C] hover:text-[#FF6B00] font-semibold transition-colors cursor-pointer bg-white px-2.5 py-1 rounded-md border border-[#E5E8EC]"
-            title="Descargar archivo Excel con las 17 columnas reconocidas"
+            title="Descargar plantilla de Dotación con Nombre, Apellido, Supervisor, Cuartil, Campaña y Empresa"
           >
             <Download className="w-3.5 h-3.5 text-[#FF6B00]" />
-            <span>Descargar Plantilla Excel</span>
+            <span>Plantilla de Dotación</span>
           </button>
         </div>
 
@@ -603,7 +621,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                           onChange={event => setCampaignMappings(previous => ({ ...previous, [sourceName]: event.target.value }))}
                           className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-2.5 py-1.5 text-xs font-semibold text-[#031E3C]"
                         >
-                          <option value="__NEW__">Crear nueva: {sourceName}</option>
+                          <option value="">Selecciona una campaña existente</option>
                           {campaigns.map(campaign => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}
                         </select>
                       </label>
@@ -631,7 +649,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                               onChange={(e) => handleSupervisorOverrideChange(sup.nameRaw, e.target.value)}
                               className="w-full bg-[#F6F7F9] border border-slate-300 rounded px-1.5 py-1 text-[11px] focus:outline-none"
                             >
-                              <option value="">-- Conservar como texto --</option>
+                              <option value="">-- Selecciona un supervisor existente --</option>
                               {supervisorsList.map(u => (
                                 <option key={u.id} value={u.id}>
                                   Vincular a: {u.name}
