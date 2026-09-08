@@ -35,6 +35,12 @@ const clean = (value: unknown) => value == null ? '' : String(value);
 
 class GoogleStorage {
   private bootstrapPromise?: Promise<boolean>;
+  // A dashboard can request the same data more than once while React mounts.
+  // Keep short-lived, per-sheet results and coalesce in-flight requests so that
+  // one browser refresh cannot exhaust the Sheets per-user read quota.
+  private readonly rowsCache = new Map<SheetName, { expiresAt: number; rows: Row[] }>();
+  private readonly rowsLoading = new Map<SheetName, Promise<Row[]>>();
+  private readonly rowsCacheTtlMs = 30_000;
   get enabled() { return configured(); }
   private auth() {
     if (!this.enabled) throw new Error('Google Storage no está configurado.');
@@ -61,22 +67,38 @@ class GoogleStorage {
     const names = new Set(current.data.sheets?.map(sheet => sheet.properties?.title).filter(Boolean));
     const missing = (Object.keys(SHEETS) as SheetName[]).filter(name => !names.has(name));
     if (missing.length) await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: missing.map(title => ({ addSheet: { properties: { title } } })) } });
-    for (const name of Object.keys(SHEETS) as SheetName[]) {
-      const range = `${this.quote(name)}!A1:ZZ1`;
-      const existing = await sheets.spreadsheets.values.get({ spreadsheetId, range });
-      const currentHeaders = existing.data.values?.[0] || [];
-      if (!currentHeaders.length || (SHEETS[name] as readonly string[]).some(header => !currentHeaders.includes(header))) await sheets.spreadsheets.values.update({ spreadsheetId, range: `${this.quote(name)}!A1`, valueInputOption: 'RAW', requestBody: { values: [SHEETS[name] as unknown as string[]] } });
-    }
+    const sheetNames = Object.keys(SHEETS) as SheetName[];
+    // Read all header rows in one API operation instead of one request per
+    // sheet. This changes a cold start from roughly twenty reads to two.
+    const headerRanges = sheetNames.map(name => `${this.quote(name)}!A1:ZZ1`);
+    const headersResponse = await sheets.spreadsheets.values.batchGet({ spreadsheetId, ranges: headerRanges });
+    const pendingHeaders = sheetNames.flatMap((name, index) => {
+      const currentHeaders = headersResponse.data.valueRanges?.[index]?.values?.[0] || [];
+      return !currentHeaders.length || (SHEETS[name] as readonly string[]).some(header => !currentHeaders.includes(header))
+        ? [{ range: `${this.quote(name)}!A1`, values: [SHEETS[name] as unknown as string[]] }]
+        : [];
+    });
+    if (pendingHeaders.length) await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: 'RAW', data: pendingHeaders } });
     return true;
   }
 
   private async rows(name: SheetName): Promise<Row[] | null> {
     if (!this.enabled) return null;
-    await this.bootstrap();
-    const result = await this.sheets().spreadsheets.values.get({ spreadsheetId: process.env.GOOGLE_SHEET_ID!, range: `${this.quote(name)}!A:ZZ` });
-    const [headers = [], ...values] = result.data.values || [];
-    if (!headers.length) return [];
-    return values.filter(row => row.some(value => clean(value))).map(row => Object.fromEntries(headers.map((header, index) => [header, clean(row[index])])));
+    const cached = this.rowsCache.get(name);
+    if (cached && cached.expiresAt > Date.now()) return cached.rows;
+    const loading = this.rowsLoading.get(name);
+    if (loading) return loading;
+    const load = (async () => {
+      await this.bootstrap();
+      const result = await this.sheets().spreadsheets.values.get({ spreadsheetId: process.env.GOOGLE_SHEET_ID!, range: `${this.quote(name)}!A:ZZ` });
+      const [headers = [], ...values] = result.data.values || [];
+      const rows = headers.length ? values.filter(row => row.some(value => clean(value))).map(row => Object.fromEntries(headers.map((header, index) => [header, clean(row[index])]))) : [];
+      this.rowsCache.set(name, { rows, expiresAt: Date.now() + this.rowsCacheTtlMs });
+      return rows;
+    })();
+    this.rowsLoading.set(name, load);
+    try { return await load; }
+    finally { this.rowsLoading.delete(name); }
   }
 
   private async replace(name: SheetName, rows: Row[]) {
@@ -89,10 +111,13 @@ class GoogleStorage {
     const spreadsheetId = process.env.GOOGLE_SHEET_ID!;
     await sheets.spreadsheets.values.clear({ spreadsheetId, range: `${this.quote(name)}!A:ZZ` });
     await sheets.spreadsheets.values.update({ spreadsheetId, range: `${this.quote(name)}!A1`, valueInputOption: 'RAW', requestBody: { values } });
+    this.rowsCache.delete(name);
   }
 
   private async upsert(name: SheetName, key: string, row: Row) {
-    const rows = await this.rows(name) || [];
+    // Never mutate a cached read before the replacement has actually reached
+    // Sheets; a failed write must leave the last known-good cache intact.
+    const rows = (await this.rows(name) || []).map(item => ({ ...item }));
     const index = rows.findIndex(item => item[key] === clean(row[key]));
     if (index < 0) rows.push(row); else rows[index] = { ...rows[index], ...row };
     await this.replace(name, rows);
@@ -169,6 +194,7 @@ class GoogleStorage {
       // se reescribe el historial completo, incluso si Sheets rechaza la petición.
       await sheets.spreadsheets.values.append({spreadsheetId,range:`${this.quote('EVALUATIONS')}!A:G`,valueInputOption:'RAW',insertDataOption:'INSERT_ROWS',requestBody:{values}},{retry:false});
     }
+    this.rowsCache.delete('EVALUATIONS');
   }
   async loadEvaluations() {
     const rows = await this.rows('EVALUATIONS') || [];
@@ -215,6 +241,7 @@ class GoogleStorage {
     const previous=await this.rows('APP_STATE') || [],headers=SHEETS.APP_STATE as unknown as string[];
     const rowCount=Math.max(previous.length,chunks.length),body=[headers,...Array.from({length:rowCount},(_,index)=>index<chunks.length?headers.map(header=>clean((chunks[index] as Row)[header])):['','',''])];
     await this.sheets().spreadsheets.values.update({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:`${this.quote('APP_STATE')}!A1:C${rowCount+1}`,valueInputOption:'RAW',requestBody:{values:body}});
+    this.rowsCache.delete('APP_STATE');
   }
   async loadDevelopment() { const [capsules, assignments] = await Promise.all([this.rows('DEVELOPMENT_CAPSULES'), this.rows('DEVELOPMENT_ASSIGNMENTS')]); return { capsules: (capsules || []).map(row => JSON.parse(row.data_json || '{}')), assignments: (assignments || []).map(row => JSON.parse(row.data_json || '{}')) }; }
   async saveDevelopment(capsules: any[], assignments: any[]) { await Promise.all([this.replace('DEVELOPMENT_CAPSULES', capsules.map(item => ({ id:item.id,status:item.status,data_json:JSON.stringify(item),created_at:item.createdAt,updated_at:item.updatedAt }))),this.replace('DEVELOPMENT_ASSIGNMENTS', assignments.map(item => ({ id:item.id,capsule_id:item.capsuleId,advisor_id:item.advisorId,status:item.status,data_json:JSON.stringify(item),created_at:item.assignedAt,updated_at:item.updatedAt })))]); }

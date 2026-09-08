@@ -33,9 +33,9 @@ const db = { prepare(sql) {
   return { get: () => ({ payload_json: JSON.stringify({ evaluations: history.slice(3, 10) }) }), all: () => history.slice(10).map(e => ({ payload_json: JSON.stringify(e) })) };
 } };
 const compiled = ts.transpileModule(route, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-new Function('app', 'requireAuth', 'readRepository', 'googleStorage', 'db', 'mergeEvaluationSources', 'correctMigracionesQualityEvaluation', 'console', compiled)(
+new Function('app', 'requireAuth', 'readRepository', 'googleStorage', 'db', 'mergeEvaluationSources', 'correctMigracionesQualityEvaluation', 'console', 'lastCompletePlatformState', compiled)(
   { get: (_path, _auth, callback) => { handler = callback; } }, () => {}, async () => ({ advisors: [], campaigns: [] }),
-  source, db, mergeEvaluationSources, evaluation => evaluation, { log() {}, error() {} }
+  source, db, mergeEvaluationSources, evaluation => evaluation, { log() {}, error() {}, warn() {} }, null
 );
 function response() { return { statusCode: 200, setHeader() {}, status(value) { this.statusCode = value; return this; }, json(value) { this.body = value; return this; } }; }
 let res = response();
@@ -44,6 +44,7 @@ assert.equal(res.body.state.evaluations.length, 70, 'GET must consolidate all fo
 source.loadPlatformState = async () => { throw new Error('Incomplete chunks'); };
 res = response();
 await handler({ authUser: { id: 'admin', role: 'ADMINISTRADOR' } }, res);
-assert.equal(res.statusCode, 502, 'A failed read must not return an empty success');
-assert.equal(res.body.state, undefined);
-console.log('OK: actual GET route consolidates four stores and fails safely when Sheets cannot be read.');
+assert.equal(res.statusCode, 200, 'A transient remote failure must return the last complete state, never an empty dashboard');
+assert.equal(res.body.state.evaluations.length, 70);
+assert.equal(res.body.source, 'LAST_COMPLETE_CACHE');
+console.log('OK: actual GET route consolidates stores and falls back only to the last complete state.');

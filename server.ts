@@ -20,6 +20,9 @@ type SharedRepository = { users: User[]; campaigns: Campaign[]; teams: Team[]; a
 const sqlitePath = process.env.SQLITE_PATH || join(process.cwd(), 'data', 'contact-center.sqlite');
 mkdirSync(path.dirname(sqlitePath), { recursive: true });
 const db = new DatabaseSync(sqlitePath);
+// Only a fully consolidated snapshot is retained. It is a read-only fallback
+// for transient Sheets quota errors; it is never written back to Google.
+let lastCompletePlatformState: any | null = null;
 db.exec(`PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, username TEXT UNIQUE, role TEXT NOT NULL, status TEXT NOT NULL, team_id TEXT, advisor_id TEXT UNIQUE, avatar TEXT, created_at TEXT NOT NULL, password_hash TEXT NOT NULL, must_change_password INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS campaigns (id TEXT PRIMARY KEY, name TEXT NOT NULL, client TEXT NOT NULL, status TEXT NOT NULL, products_json TEXT NOT NULL, description TEXT, quality_guidelines_json TEXT NOT NULL DEFAULT '[]', quality_criterion_weights_json TEXT, quality_critical_errors_json TEXT NOT NULL DEFAULT '[]');
@@ -652,6 +655,7 @@ async function startServer() {
         const localEvaluations = (db.prepare('SELECT payload_json FROM evaluations').all() as any[]).map(row => JSON.parse(row.payload_json));
         const consolidated = { ...localState, ...(state || {}), evaluations: mergeEvaluationSources(storedEvaluations || [], state?.evaluations || [], localEvaluations, localState.evaluations || []) };
         const corrected = { ...consolidated, evaluations: consolidated.evaluations.map((evaluation:any) => correctMigracionesQualityEvaluation(evaluation, directory.campaigns)) };
+        lastCompletePlatformState = corrected;
         const evaluationTypes=corrected.evaluations.reduce((totals:any,item:any)=>{const type=item.evaluationType||'SIN_TIPO';totals[type]=(totals[type]||0)+1;return totals;},{});
         console.log(`[platform-state] fuente=Sheets evaluaciones=${corrected.evaluations.length} tipos=${JSON.stringify(evaluationTypes)} asesores=${directory.advisors.length}`);
         console.log('[platform-state] fuentes=' + JSON.stringify({ sheetsEvaluations: storedEvaluations.length, sheetsState: state?.evaluations?.length || 0, sqliteEvaluations: localEvaluations.length, sqliteState: localState.evaluations?.length || 0, total: corrected.evaluations.length }));
@@ -660,6 +664,10 @@ async function startServer() {
     }
     catch (error) {
       console.error('[google-storage] No fue posible leer el estado de plataforma.', error instanceof Error ? error.message : '');
+      if (lastCompletePlatformState) {
+        console.warn('[platform-state] Se entrega el último estado completo en caché por una falla transitoria de Google Sheets.');
+        return res.json({ state: onlyOwn(lastCompletePlatformState), source: 'LAST_COMPLETE_CACHE' });
+      }
       return res.status(502).json({ error: 'No se pudo cargar el historial completo. Se detuvo la sincronización para proteger los registros. Reintenta la carga.' });
     }
     const row = db.prepare('SELECT payload_json FROM app_state WHERE id=?').get('global') as any;
