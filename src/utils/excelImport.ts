@@ -526,65 +526,57 @@ export type StaffingTemplateSource = {
 const uniqueLabels = (items: Array<{ name: string }> = []) =>
   [...new Set(items.map(item => String(item.name || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
 
-/** Generates a real XLSX file with Excel data validations backed by a hidden list sheet. */
+const xml = (value: unknown) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+const excelCol = (index: number) => String.fromCharCode(65 + index);
+const crcTable = (() => { const table = new Uint32Array(256); for (let n = 0; n < 256; n++) { let value = n; for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1; table[n] = value >>> 0; } return table; })();
+const crc32 = (data: Uint8Array) => { let value = 0xffffffff; for (const byte of data) value = crcTable[(value ^ byte) & 0xff] ^ (value >>> 8); return (value ^ 0xffffffff) >>> 0; };
+const joinBytes = (chunks: Uint8Array[]) => { const output = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0)); let offset = 0; for (const chunk of chunks) { output.set(chunk, offset); offset += chunk.length; } return output; };
+const put16 = (view: DataView, offset: number, value: number) => view.setUint16(offset, value, true);
+const put32 = (view: DataView, offset: number, value: number) => view.setUint32(offset, value >>> 0, true);
+
+/** Minimal ZIP writer using stored entries. It keeps the generated XLSX browser-safe. */
+const zipXlsx = (files: Array<{ name: string; content: string }>) => {
+  const encoder = new TextEncoder();
+  const local: Uint8Array[] = [], central: Uint8Array[] = [];
+  let offset = 0;
+  for (const file of files) {
+    const name = encoder.encode(file.name), content = encoder.encode(file.content), crc = crc32(content);
+    const header = new Uint8Array(30); const view = new DataView(header.buffer);
+    put32(view, 0, 0x04034b50); put16(view, 4, 20); put16(view, 6, 0x0800); put16(view, 8, 0); put32(view, 14, crc); put32(view, 18, content.length); put32(view, 22, content.length); put16(view, 26, name.length);
+    local.push(header, name, content);
+    const directory = new Uint8Array(46); const dirView = new DataView(directory.buffer);
+    put32(dirView, 0, 0x02014b50); put16(dirView, 4, 20); put16(dirView, 6, 20); put16(dirView, 8, 0x0800); put16(dirView, 10, 0); put32(dirView, 16, crc); put32(dirView, 20, content.length); put32(dirView, 24, content.length); put16(dirView, 28, name.length); put32(dirView, 42, offset);
+    central.push(directory, name); offset += header.length + name.length + content.length;
+  }
+  const centralBytes = joinBytes(central), ending = new Uint8Array(22), endView = new DataView(ending.buffer);
+  put32(endView, 0, 0x06054b50); put16(endView, 8, files.length); put16(endView, 10, files.length); put32(endView, 12, centralBytes.length); put32(endView, 16, offset);
+  return joinBytes([...local, centralBytes, ending]);
+};
+
+const inlineCell = (reference: string, value: string, style?: number) => `<c r="${reference}"${style === undefined ? '' : ` s="${style}"`} t="inlineStr"><is><t>${xml(value)}</t></is></c>`;
+
+/** Generates a real XLSX with native Excel data-validations backed by a hidden list sheet. */
 export function generateSampleExcelTemplate(source: StaffingTemplateSource = {}): void {
   const headers = ['DNI *', 'Nombre *', 'Apellido *', 'Supervisor', 'Cuartil', 'Campaña', 'Empresa'];
-  const rows = [headers, ['', '', '', '', '', '', '']];
   const companies = uniqueLabels(source.companies);
   const campaigns = uniqueLabels(source.campaigns);
   const supervisors = uniqueLabels(source.supervisors);
-  const lists = [
-    ['Empresas', 'Campañas', 'Supervisores'],
-    ...Array.from({ length: Math.max(1, companies.length, campaigns.length, supervisors.length) }, (_, index) => [companies[index] || '', campaigns[index] || '', supervisors[index] || ''])
-  ];
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [{wch:14},{wch:22},{wch:24},{wch:28},{wch:12},{wch:28},{wch:24}];
-  const listSheet = XLSX.utils.aoa_to_sheet(lists);
   const last = (count: number) => Math.max(2, count + 1);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Dotación');
-  XLSX.utils.book_append_sheet(wb, listSheet, 'Listas');
-  wb.Workbook = {
-    Sheets: [{ Hidden: 0 }, { Hidden: 1 }],
-    Names: [
-      { Name: 'EmpresasDotacion', Ref: `Listas!$A$2:$A$${last(companies.length)}` },
-      { Name: 'CampanasDotacion', Ref: `Listas!$B$2:$B$${last(campaigns.length)}` },
-      { Name: 'SupervisoresDotacion', Ref: `Listas!$C$2:$C$${last(supervisors.length)}` }
-    ]
-  };
-  const validations = '<dataValidations count="3">' +
-    '<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Valor no permitido" error="Selecciona un valor de la lista de la plataforma." sqref="D2:D1001"><formula1>=SupervisoresDotacion</formula1></dataValidation>' +
-    '<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Valor no permitido" error="Selecciona un valor de la lista de la plataforma." sqref="F2:F1001"><formula1>=CampanasDotacion</formula1></dataValidation>' +
-    '<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Valor no permitido" error="Selecciona un valor de la lista de la plataforma." sqref="G2:G1001"><formula1>=EmpresasDotacion</formula1></dataValidation>' +
-    '</dataValidations>';
-  const download = (content: BlobPart) => {
-    const url = URL.createObjectURL(new Blob([content], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'Plantilla_Dotacion_3C.xlsx';
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-  try {
-    const cfb: any = (XLSX as any).CFB.read(XLSX.write(wb, { type: 'binary', bookType: 'xlsx' }), { type: 'binary' });
-    const sheetXml: any = (XLSX as any).CFB.find(cfb, 'sheet1.xml');
-    if (!sheetXml) throw new Error('No se encontró la hoja principal para aplicar las listas.');
-    const xml = typeof sheetXml.content === 'string' ? sheetXml.content : new TextDecoder().decode(sheetXml.content);
-    // CFB accepts a binary XML string in both the browser and Node builds of SheetJS.
-    sheetXml.content = xml.replace('</worksheet>', `${validations}</worksheet>`);
-    const output: any = (XLSX as any).CFB.write(cfb, { type: 'binary', fileType: 'zip' });
-    const bytes = typeof output === 'string'
-      ? Uint8Array.from(output, byte => byte.charCodeAt(0))
-      : output instanceof ArrayBuffer ? new Uint8Array(output)
-      : ArrayBuffer.isView(output) ? new Uint8Array(output.buffer, output.byteOffset, output.byteLength)
-      : new Uint8Array(output);
-    download(bytes);
-  } catch (error) {
-    // A download must never fail merely because a browser blocks advanced ZIP rewriting.
-    console.warn('No se pudieron insertar las listas desplegables; se descarga la plantilla base.', error);
-    download(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer);
-  }
+  const headerRow = headers.map((header, index) => inlineCell(`${excelCol(index)}1`, header, 1)).join('');
+  const listHeader = ['Empresas', 'Campañas', 'Supervisores'].map((header, index) => inlineCell(`${excelCol(index)}1`, header, 1)).join('');
+  const listRows = Array.from({ length: Math.max(1, companies.length, campaigns.length, supervisors.length) }, (_, index) => `<row r="${index + 2}">${[companies[index] || '', campaigns[index] || '', supervisors[index] || ''].map((value, column) => value ? inlineCell(`${excelCol(column)}${index + 2}`, value) : '').join('')}</row>`).join('');
+  const sheetOne = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:G1001"/><sheetViews><sheetView workbookViewId="0"/></sheetViews><cols><col min="1" max="1" width="14" customWidth="1"/><col min="2" max="3" width="22" customWidth="1"/><col min="4" max="4" width="28" customWidth="1"/><col min="5" max="5" width="12" customWidth="1"/><col min="6" max="7" width="28" customWidth="1"/></cols><sheetData><row r="1">${headerRow}</row></sheetData><dataValidations count="3"><dataValidation type="list" allowBlank="1" showErrorMessage="1" errorStyle="stop" errorTitle="Valor no permitido" error="Selecciona un valor de la lista de la plataforma." sqref="D2:D1001"><formula1>SupervisoresDotacion</formula1></dataValidation><dataValidation type="list" allowBlank="1" showErrorMessage="1" errorStyle="stop" errorTitle="Valor no permitido" error="Selecciona un valor de la lista de la plataforma." sqref="F2:F1001"><formula1>CampanasDotacion</formula1></dataValidation><dataValidation type="list" allowBlank="1" showErrorMessage="1" errorStyle="stop" errorTitle="Valor no permitido" error="Selecciona un valor de la lista de la plataforma." sqref="G2:G1001"><formula1>EmpresasDotacion</formula1></dataValidation></dataValidations></worksheet>`;
+  const sheetTwo = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1">${listHeader}</row>${listRows}</sheetData></worksheet>`;
+  const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><definedNames><definedName name="EmpresasDotacion">Listas!$A$2:$A$${last(companies.length)}</definedName><definedName name="CampanasDotacion">Listas!$B$2:$B$${last(campaigns.length)}</definedName><definedName name="SupervisoresDotacion">Listas!$C$2:$C$${last(supervisors.length)}</definedName></definedNames><sheets><sheet name="Dotación" sheetId="1" r:id="rId1"/><sheet name="Listas" sheetId="2" state="hidden" r:id="rId2"/></sheets></workbook>`;
+  const files = [
+    { name: '[Content_Types].xml', content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>' },
+    { name: '_rels/.rels', content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+    { name: 'xl/workbook.xml', content: workbook },
+    { name: 'xl/_rels/workbook.xml.rels', content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
+    { name: 'xl/worksheets/sheet1.xml', content: sheetOne },
+    { name: 'xl/worksheets/sheet2.xml', content: sheetTwo },
+    { name: 'xl/styles.xml', content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>' }
+  ];
+  const url = URL.createObjectURL(new Blob([zipXlsx(files)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  const link = document.createElement('a'); link.href = url; link.download = 'Plantilla_Dotacion_3C.xlsx'; link.style.display = 'none'; document.body.appendChild(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
