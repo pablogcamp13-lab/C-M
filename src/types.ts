@@ -31,12 +31,13 @@ export interface Campaign {
 }
 
 /** La campaña es el servicio comercial; la operación es su instancia por empresa. */
-export interface Company { id:string; name:string; status:'ACTIVA'|'INACTIVA'; createdAt:string; }
-export interface Operation { id:string; companyId:string; campaignId:string; name:string; status:'ACTIVA'|'INACTIVA'; legacy?:boolean; }
+export interface Company { id:string; name:string; status:'ACTIVA'|'INACTIVA'; createdAt:string; updatedAt?:string; }
+export interface Operation { id:string; companyId:string; campaignId:string; name:string; normalizedName?:string; status:'ACTIVA'|'INACTIVA'; legacy?:boolean; createdAt?:string; updatedAt?:string; closedAt?:string; version?:number; metadata?:Record<string,unknown>; }
+export interface OperationSupervisor { operationId:string; supervisorId:string; active:boolean; startAt:string; endAt?:string; }
 export type OperationalStatus='PRE_INGRESO'|'CAPACITACION'|'OJT'|'PRODUCCION'|'LICENCIA'|'SUSPENDIDO'|'BAJA';
 export interface OperationAssignment { id:string; advisorId:string; operationId:string; teamId?:string; supervisorId?:string; role:UserRole; operationalStatus:OperationalStatus; startDate:string; endDate?:string; active:boolean; source:'MIGRACION'|'MANUAL'|'IMPORTACION'; actorId?:string; observation?:string; }
 export interface StaffingPlan { id:string; operationId:string; period:string; targetHeadcount:number; createdAt:string; }
-export interface StaffingMovement { id:string; advisorId:string; assignmentId?:string; type:string; occurredAt:string; origin?:string; destination?:string; actorId?:string; observation?:string; }
+export interface StaffingMovement { id:string; advisorId:string; assignmentId?:string; type:string; effectiveAt:string; createdAt:string; occurredAt?:string; origin?:Record<string,unknown>|string; destination?:Record<string,unknown>|string; actorId?:string; observation?:string; reversedMovementId?:string; }
 
 export interface QualityCriticalError {
   id: string;

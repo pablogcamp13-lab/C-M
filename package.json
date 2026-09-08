@@ -19,7 +19,8 @@
     "restore:full-roster": "tsx scripts/restore-full-roster.ts",
     "lint": "npm run typecheck",
     "test:phase1": "node scripts/test-phase1.mjs",
-    "test:phase2": "node scripts/test-phase2.mjs"
+    "test:phase2": "node scripts/test-phase2.mjs",
+    "test:operations": "node scripts/test-operations-module.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

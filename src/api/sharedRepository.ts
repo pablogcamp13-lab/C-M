@@ -119,6 +119,29 @@ export const staffingApi = {
   async history(advisorId:string) { return json<{movements:any[]}>(await fetch(`/api/staffing/${advisorId}/history`, { headers:headers() })); }
 };
 
+const queryString=(query:Record<string,unknown>={})=>new URLSearchParams(Object.entries(query).filter(([,value])=>value!==''&&value!==undefined&&value!==null).map(([key,value])=>[key,String(value)])).toString();
+const mutate=async<T>(url:string,method:string,body?:unknown)=>json<T>(await fetch(url,{method,headers:{...(body?{'Content-Type':'application/json'}:{}),...headers()},body:body?JSON.stringify(body):undefined}));
+export const organizationApi = {
+  async dashboard(query:Record<string,unknown>={}) { return json<any>(await fetch(`/api/operations?${queryString(query)}`,{headers:headers()})); },
+  async detail(id:string) { return json<any>(await fetch(`/api/operations/${id}`,{headers:headers()})); },
+  create(body:any) { return mutate<any>('/api/operations','POST',body); },
+  update(id:string,body:any) { return mutate<any>(`/api/operations/${id}`,'PATCH',body); },
+  close(id:string,body:any) { return mutate<any>(`/api/operations/${id}/close`,'POST',body); },
+  remove(id:string) { return mutate<any>(`/api/operations/${id}`,'DELETE'); },
+  async supervisors(id:string) { return json<any>(await fetch(`/api/operations/${id}/supervisors`,{headers:headers()})); },
+  addSupervisor(id:string,body:any) { return mutate<any>(`/api/operations/${id}/supervisors`,'POST',body); },
+  removeSupervisor(id:string,supervisorId:string,body:any) { return mutate<any>(`/api/operations/${id}/supervisors/${supervisorId}`,'DELETE',body); },
+  async staffing(query:Record<string,unknown>={}) { return json<any>(await fetch(`/api/staffing?${queryString(query)}`,{headers:headers()})); },
+  updateAssignment(id:string,body:any) { return mutate<any>(`/api/staffing/${id}/assignment`,'PATCH',body); },
+  bulkMove(body:any) { return mutate<any>('/api/staffing/bulk-move','POST',body); },
+  bulkSupervisor(body:any) { return mutate<any>('/api/staffing/bulk-supervisor','POST',body); },
+  async movements(query:Record<string,unknown>={}) { return json<any>(await fetch(`/api/staffing/movements?${queryString(query)}`,{headers:headers()})); },
+  async inconsistencies() { return json<any>(await fetch('/api/staffing/inconsistencies',{headers:headers()})); },
+  resolve(body:any) { return mutate<any>('/api/staffing/resolve','POST',body); },
+  reverse(id:string,body:any) { return mutate<any>(`/api/staffing/movements/${id}/reverse`,'POST',body); },
+  async exportRows(query:Record<string,unknown>={}) { return json<any>(await fetch(`/api/staffing/export?${queryString(query)}`,{headers:headers()})); }
+};
+
 export const developmentApi = {
   async capsules() { return json<{ capsules: any[] }>(await fetch('/api/development/capsules', { headers: headers() })); },
   async createCapsule(data: any) { return json<{ capsule: any }>(await fetch('/api/development/capsules', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(data) })); },

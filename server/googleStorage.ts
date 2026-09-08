@@ -2,9 +2,9 @@ import 'dotenv/config';
 import { google } from 'googleapis';
 import { Readable } from 'node:stream';
 import { readPlatformStateRows } from './platformStateRecovery';
-import type { Advisor, Campaign, Team, User } from '../src/types';
+import type { Advisor, Campaign, Company, Operation, OperationAssignment, OperationSupervisor, StaffingMovement, Team, User } from '../src/types';
 
-export type SharedRepository = { users: User[]; campaigns: Campaign[]; teams: Team[]; advisors: Advisor[] };
+export type SharedRepository = { users: User[]; campaigns: Campaign[]; teams: Team[]; advisors: Advisor[]; companies?:Company[]; operations?:Operation[]; operationSupervisors?:OperationSupervisor[]; operationAssignments?:OperationAssignment[]; staffingMovements?:StaffingMovement[] };
 export type AuthUserRecord = { id: string; name: string; email: string; username?: string; role: User['role']; status: User['status']; teamId?: string; advisorId?: string; advisorDni?: string; avatar?: string; createdAt: string; passwordHash: string; mustChangePassword: boolean };
 
 const SHEETS = {
@@ -12,6 +12,11 @@ const SHEETS = {
   CAMPAIGNS: ['id', 'name', 'client', 'status', 'products_json', 'description', 'quality_guidelines_json', 'quality_criterion_weights_json', 'quality_critical_errors_json', 'background_image'],
   TEAMS: ['id', 'campaign_id', 'supervisor_id', 'name'],
   ADVISORS: ['id', 'dni', 'employee_code', 'name', 'campaign_id', 'team_id', 'supervisor_id', 'data_json'],
+  COMPANIES: ['id', 'name', 'status', 'created_at', 'updated_at'],
+  OPERATIONS: ['id', 'company_id', 'campaign_id', 'name', 'normalized_name', 'status', 'legacy', 'created_at', 'updated_at', 'closed_at', 'version', 'metadata_json'],
+  OPERATION_SUPERVISORS: ['operation_id', 'supervisor_id', 'active', 'start_at', 'end_at'],
+  OPERATION_ASSIGNMENTS: ['id', 'advisor_id', 'operation_id', 'team_id', 'supervisor_id', 'role', 'operational_status', 'start_date', 'end_date', 'active', 'source', 'actor_id', 'observation'],
+  STAFFING_MOVEMENTS: ['id', 'advisor_id', 'assignment_id', 'type', 'effective_at', 'created_at', 'origin', 'destination', 'actor_id', 'observation', 'reversed_movement_id'],
   EVALUATIONS: ['id', 'advisor_id', 'evaluator_id', 'evaluation_type', 'evaluated_at', 'payload_json', 'created_at'],
   FEEDBACKS: ['feedback_id', 'evaluation_id', 'advisor_id', 'supervisor_id', 'evaluator_id', 'evaluation_type', 'feedback_text', 'advisor_response', 'advisor_evidence_url', 'supervisor_closure_comment', 'status', 'created_at', 'advisor_action_at', 'closed_at', 'updated_at'],
   APP_STATE: ['id', 'payload_json', 'updated_at'],
@@ -95,13 +100,18 @@ class GoogleStorage {
 
   async loadRepository(): Promise<SharedRepository | null> {
     if (!this.enabled) return null;
-    const [users, campaigns, teams, advisors] = await Promise.all(['USERS', 'CAMPAIGNS', 'TEAMS', 'ADVISORS'].map(name => this.rows(name as SheetName)));
+    const [users, campaigns, teams, advisors, companies, operations, operationSupervisors, operationAssignments, staffingMovements] = await Promise.all(['USERS', 'CAMPAIGNS', 'TEAMS', 'ADVISORS', 'COMPANIES', 'OPERATIONS', 'OPERATION_SUPERVISORS', 'OPERATION_ASSIGNMENTS', 'STAFFING_MOVEMENTS'].map(name => this.rows(name as SheetName)));
     if (![users, campaigns, teams, advisors].every(Boolean)) return null;
     return {
       users: users!.map(row => ({ id: row.id!, name: row.name!, email: row.email!, username: row.username || undefined, role: row.role as User['role'], status: row.status as User['status'], teamId: row.team_id || undefined, advisorId: row.advisor_id || undefined, avatar: row.avatar || undefined, createdAt: row.created_at!, password: undefined, mustChangePassword: row.must_change_password !== '0' })),
       campaigns: campaigns!.map(row => ({ id: row.id!, name: row.name!, client: row.client!, status: row.status as Campaign['status'], products: JSON.parse(row.products_json || '[]'), description: row.description || undefined, backgroundImage: row.background_image || undefined, qualityGuidelines: JSON.parse(row.quality_guidelines_json || '[]'), qualityCriterionWeights: JSON.parse(row.quality_criterion_weights_json || 'null') || undefined, qualityCriticalErrors: JSON.parse(row.quality_critical_errors_json || '[]') })),
       teams: teams!.map(row => ({ id: row.id!, campaignId: row.campaign_id!, supervisorId: row.supervisor_id!, name: row.name! })),
-      advisors: advisors!.map(row => JSON.parse(row.data_json || '{}') as Advisor)
+      advisors: advisors!.map(row => JSON.parse(row.data_json || '{}') as Advisor),
+      companies: (companies || []).map(row => ({id:row.id!,name:row.name!,status:row.status as Company['status'],createdAt:row.created_at!,updatedAt:row.updated_at||undefined})),
+      operations: (operations || []).map(row => ({id:row.id!,companyId:row.company_id!,campaignId:row.campaign_id!,name:row.name!,normalizedName:row.normalized_name||undefined,status:row.status as Operation['status'],legacy:row.legacy==='1',createdAt:row.created_at||undefined,updatedAt:row.updated_at||undefined,closedAt:row.closed_at||undefined,version:Number(row.version||1),metadata:JSON.parse(row.metadata_json||'{}')})),
+      operationSupervisors: (operationSupervisors || []).map(row => ({operationId:row.operation_id!,supervisorId:row.supervisor_id!,active:row.active==='1',startAt:row.start_at!,endAt:row.end_at||undefined})),
+      operationAssignments: (operationAssignments || []).map(row => ({id:row.id!,advisorId:row.advisor_id!,operationId:row.operation_id!,teamId:row.team_id||undefined,supervisorId:row.supervisor_id||undefined,role:row.role as User['role'],operationalStatus:row.operational_status as OperationAssignment['operationalStatus'],startDate:row.start_date!,endDate:row.end_date||undefined,active:row.active==='1',source:row.source as OperationAssignment['source'],actorId:row.actor_id||undefined,observation:row.observation||undefined})),
+      staffingMovements: (staffingMovements || []).map(row => ({id:row.id!,advisorId:row.advisor_id!,assignmentId:row.assignment_id||undefined,type:row.type!,effectiveAt:row.effective_at!,createdAt:row.created_at!,occurredAt:row.created_at!,origin:row.origin?JSON.parse(row.origin):undefined,destination:row.destination?JSON.parse(row.destination):undefined,actorId:row.actor_id||undefined,observation:row.observation||undefined,reversedMovementId:row.reversed_movement_id||undefined}))
     };
   }
 
@@ -132,7 +142,12 @@ class GoogleStorage {
       this.replace('USERS', repository.users.map(user => ({ id: user.id, name: user.name, email: user.email, username: user.username, role: user.role, status: user.status, team_id: user.teamId, advisor_id: user.advisorId, avatar: user.avatar, created_at: user.createdAt, password_hash: passwordHashes.get(user.id), must_change_password: user.mustChangePassword !== false ? '1' : '0' }))),
       this.replace('CAMPAIGNS', repository.campaigns.map(campaign => ({ id: campaign.id, name: campaign.name, client: campaign.client, status: campaign.status, products_json: JSON.stringify(campaign.products || []), description: campaign.description, background_image: campaign.backgroundImage, quality_guidelines_json: JSON.stringify(campaign.qualityGuidelines || []), quality_criterion_weights_json: JSON.stringify(campaign.qualityCriterionWeights || null), quality_critical_errors_json: JSON.stringify(campaign.qualityCriticalErrors || []) }))),
       this.replace('TEAMS', repository.teams.map(team => ({ id: team.id, campaign_id: team.campaignId, supervisor_id: team.supervisorId, name: team.name }))),
-      advisorWrite
+      advisorWrite,
+      this.replace('COMPANIES', (repository.companies || []).map(item=>({id:item.id,name:item.name,status:item.status,created_at:item.createdAt,updated_at:item.updatedAt}))),
+      this.replace('OPERATIONS', (repository.operations || []).map(item=>({id:item.id,company_id:item.companyId,campaign_id:item.campaignId,name:item.name,normalized_name:item.normalizedName,status:item.status,legacy:item.legacy?'1':'0',created_at:item.createdAt,updated_at:item.updatedAt,closed_at:item.closedAt,version:String(item.version||1),metadata_json:JSON.stringify(item.metadata||{})}))),
+      this.replace('OPERATION_SUPERVISORS', (repository.operationSupervisors || []).map(item=>({operation_id:item.operationId,supervisor_id:item.supervisorId,active:item.active?'1':'0',start_at:item.startAt,end_at:item.endAt}))),
+      this.replace('OPERATION_ASSIGNMENTS', (repository.operationAssignments || []).map(item=>({id:item.id,advisor_id:item.advisorId,operation_id:item.operationId,team_id:item.teamId,supervisor_id:item.supervisorId,role:item.role,operational_status:item.operationalStatus,start_date:item.startDate,end_date:item.endDate,active:item.active?'1':'0',source:item.source,actor_id:item.actorId,observation:item.observation}))),
+      this.replace('STAFFING_MOVEMENTS', (repository.staffingMovements || []).map(item=>({id:item.id,advisor_id:item.advisorId,assignment_id:item.assignmentId,type:item.type,effective_at:item.effectiveAt,created_at:item.createdAt||item.occurredAt,origin:typeof item.origin==='string'?item.origin:JSON.stringify(item.origin||null),destination:typeof item.destination==='string'?item.destination:JSON.stringify(item.destination||null),actor_id:item.actorId,observation:item.observation,reversed_movement_id:item.reversedMovementId})))
     ]);
   }
 

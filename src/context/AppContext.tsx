@@ -56,6 +56,7 @@ interface AppContextType {
   login: (identity: string, password: string) => Promise<void>;
   changePassword: (password: string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshRepository: () => Promise<void>;
   setCurrentUser: (user: User) => void;
   setUserRole: (role: UserRole) => void;
 
@@ -310,6 +311,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     platformStateHydrated.current = false;
     setIsAuthenticated(false);
     setAuthenticatedUserId(null);
+  };
+  const refreshRepository = async () => {
+    const persisted=await sharedRepositoryApi.load();
+    rosterHydrated.current=true;
+    setUsers(persisted.users);setCampaigns(persisted.campaigns);setCompanies(persisted.companies||[]);setOperations(persisted.operations||[]);setTeams(persisted.teams);setAdvisors(persisted.advisors);
   };
 
   // Sync to LocalStorage on changes
@@ -1148,6 +1154,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       login,
       changePassword,
         logout,
+        refreshRepository,
         setCurrentUser,
         setUserRole,
         users,
