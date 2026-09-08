@@ -160,12 +160,16 @@ class GoogleStorage {
     await Promise.all([this.replace('EVALUATIONS', []), this.replace('FEEDBACKS', []), this.replace('APP_STATE', [])]);
   }
   async loadPlatformState() {
-    const rows = await this.rows('APP_STATE');
-    const chunks=(rows || []).filter(item=>/^global_\d+$/.test(item.id || '')).sort((a,b)=>(a.id || '').localeCompare(b.id || ''));
-    // El estado fragmentado es el formato vigente. Un registro legacy puede
-    // coexistir en Sheets y no debe ocultar información más reciente.
-    if(chunks.length) return JSON.parse(chunks.map(item=>item.payload_json || '').join(''));
-    const legacy = rows?.find(item => item.id === 'global');
+    const rows = await this.rows('APP_STATE') || [];
+    const chunkRows=rows.filter(item=>/^global_\d+$/.test(item.id || ''));
+    const generations=[...new Set(chunkRows.map(item=>item.updated_at || ''))].sort().reverse();
+    for(const generation of generations){
+      const chunks=chunkRows.filter(item=>(item.updated_at || '')===generation).sort((a,b)=>(a.id || '').localeCompare(b.id || ''));
+      const contiguous=chunks.every((item,index)=>item.id===`global_${String(index).padStart(4,'0')}`);
+      if(!contiguous)continue;
+      try{return JSON.parse(chunks.map(item=>item.payload_json || '').join(''));}catch{}
+    }
+    const legacy = rows.filter(item => item.id === 'global' && item.payload_json).sort((a,b)=>(b.updated_at || '').localeCompare(a.updated_at || ''))[0];
     return legacy?.payload_json ? JSON.parse(legacy.payload_json) : null;
   }
   async savePlatformState(state: unknown) {

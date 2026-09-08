@@ -618,6 +618,8 @@ async function startServer() {
         const [state, storedEvaluations] = await Promise.all([googleStorage.loadPlatformState(), googleStorage.loadEvaluations()]);
         const consolidated = normalizePlatformState({ ...(state || {}), evaluations: uniqueEvaluations([...(storedEvaluations || []), ...(state?.evaluations || [])]) });
         const corrected = { ...consolidated, evaluations: consolidated.evaluations.map((evaluation:any) => correctMigracionesQualityEvaluation(evaluation, directory.campaigns)) };
+        const evaluationTypes=corrected.evaluations.reduce((totals:any,item:any)=>{const type=item.evaluationType||'SIN_TIPO';totals[type]=(totals[type]||0)+1;return totals;},{});
+        console.log(`[platform-state] fuente=Sheets evaluaciones=${corrected.evaluations.length} tipos=${JSON.stringify(evaluationTypes)} asesores=${directory.advisors.length}`);
         const changed = corrected.evaluations.filter((evaluation:any,index:number) => JSON.stringify(evaluation) !== JSON.stringify(consolidated.evaluations[index]));
         if (changed.length) await Promise.all([...changed.map((evaluation:any) => googleStorage.saveEvaluation(evaluation)), googleStorage.savePlatformState(corrected)]);
         return res.json({ state: onlyOwn(corrected) });

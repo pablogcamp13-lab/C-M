@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { Activity, BarChart3, CalendarDays, CheckSquare, ChevronDown, Download, Filter, Flag, Layers3, MessageCircle, PlusSquare, ShieldCheck, TrendingUp, UsersRound } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { calculatePareto } from '../../utils/calculations';
@@ -13,15 +13,10 @@ const averageOf = (values: Array<number | null>) => {
 
 export const HomeView: React.FC = () => {
   const { filteredEvaluations, advisors, actionPlans, operationalMeasurements, setCurrentSection, companies, filters, setFilters } = useApp();
-  const [activeSummary, setActiveSummary] = useState<'D3C' | 'QUALITY'>('D3C');
-  const initialSummaryResolved = useRef(false);
+  const [selectedSummary, setSelectedSummary] = useState<'D3C' | 'QUALITY' | null>(null);
   const d3c = filteredEvaluations.filter(evaluation => evaluation.evaluationType !== 'QUALITY');
   const qualityCount = filteredEvaluations.filter(evaluation => evaluation.evaluationType === 'QUALITY').length;
-  useEffect(() => {
-    if (initialSummaryResolved.current || !filteredEvaluations.length) return;
-    initialSummaryResolved.current = true;
-    if (!d3c.length && qualityCount) setActiveSummary('QUALITY');
-  }, [d3c.length, filteredEvaluations.length, qualityCount]);
+  const activeSummary = selectedSummary || (!d3c.length && qualityCount ? 'QUALITY' : 'D3C');
   const scores = d3c.map(evaluation => evaluation.scoreTotal).filter((value): value is number => value !== null);
   const average = averageOf(scores);
   const critical = d3c.filter(evaluation => (evaluation.scoreTotal ?? 100) < 60).length;
@@ -47,8 +42,8 @@ export const HomeView: React.FC = () => {
     <FiltersBar />
 
     <section className="grid gap-2 lg:grid-cols-2">
-      <HeroCard title="Mejora Continua" text="Impulsa el desempeño de tu equipo con enfoque en desarrollo y resultados." icon={<TrendingUp />} variant="improvement" active={activeSummary === 'D3C'} onClick={() => setActiveSummary('D3C')} />
-      <HeroCard title="Calidad" text="Asegura experiencias excelentes con estándares y consistencia." icon={<ShieldCheck />} variant="quality" active={activeSummary === 'QUALITY'} onClick={() => setActiveSummary('QUALITY')} />
+      <HeroCard title="Mejora Continua" text="Impulsa el desempeño de tu equipo con enfoque en desarrollo y resultados." icon={<TrendingUp />} variant="improvement" active={activeSummary === 'D3C'} onClick={() => setSelectedSummary('D3C')} />
+      <HeroCard title="Calidad" text="Asegura experiencias excelentes con estándares y consistencia." icon={<ShieldCheck />} variant="quality" active={activeSummary === 'QUALITY'} onClick={() => setSelectedSummary('QUALITY')} />
     </section>
 
     {activeSummary === 'D3C' && <><section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">{kpis.map((kpi, index) => <article key={kpi.label} className="home-kpi"><span className={`home-kpi-icon icon-${index}`}>{kpi.icon}</span><div><p>{kpi.label}</p><b>{kpi.value}</b><small>{kpi.detail}</small></div><Sparkline values={scores.slice(-8)} /></article>)}</section>
