@@ -76,6 +76,7 @@ class GoogleStorage {
 
   private async replace(name: SheetName, rows: Row[]) {
     if (!this.enabled) return;
+    if (name === 'EVALUATIONS') throw new Error('EVALUATIONS no admite reemplazos completos. Usa guardado por fila para proteger el historial.');
     await this.bootstrap();
     const headers = SHEETS[name] as unknown as string[];
     const values = [headers, ...rows.map(row => headers.map(header => clean(row[header])))];
@@ -135,7 +136,25 @@ class GoogleStorage {
     ]);
   }
 
-  async saveEvaluation(evaluation: any) { await this.upsert('EVALUATIONS', 'id', { id: evaluation.id, advisor_id: evaluation.advisorId, evaluator_id: evaluation.evaluatorId, evaluation_type: evaluation.evaluationType, evaluated_at: `${evaluation.date}T${evaluation.time || '00:00'}:00`, payload_json: JSON.stringify(evaluation), created_at: evaluation.createdAt || new Date().toISOString() }); }
+  async saveEvaluation(evaluation: any) {
+    if (!this.enabled) return;
+    await this.bootstrap();
+    const headers=SHEETS.EVALUATIONS as unknown as string[];
+    const row:Row={id:evaluation.id,advisor_id:evaluation.advisorId,evaluator_id:evaluation.evaluatorId,evaluation_type:evaluation.evaluationType,evaluated_at:`${evaluation.date}T${evaluation.time || '00:00'}:00`,payload_json:JSON.stringify(evaluation),created_at:evaluation.createdAt || new Date().toISOString()};
+    if(!row.id || !row.advisor_id || !row.evaluator_id || !['QUALITY','D3C'].includes(clean(row.evaluation_type)))throw new Error('Evaluación inválida; no se modificó Sheets.');
+    const sheets=this.sheets(),spreadsheetId=process.env.GOOGLE_SHEET_ID!;
+    const ids=(await sheets.spreadsheets.values.get({spreadsheetId,range:`${this.quote('EVALUATIONS')}!A:A`,valueRenderOption:'UNFORMATTED_VALUE'})).data.values || [];
+    const matches=ids.flatMap((cells,index)=>clean(cells[0])===clean(row.id)?[index+1]:[]);
+    if(matches.length>1)throw new Error(`EVALUATIONS contiene el ID duplicado ${row.id}; no se modificó Sheets.`);
+    const values=[headers.map(header=>clean(row[header]))];
+    if(matches.length===1){
+      await sheets.spreadsheets.values.update({spreadsheetId,range:`${this.quote('EVALUATIONS')}!A${matches[0]}:G${matches[0]}`,valueInputOption:'RAW',requestBody:{values}});
+    }else{
+      // Una evaluación nueva se agrega en una única escritura. Nunca se vacía ni
+      // se reescribe el historial completo, incluso si Sheets rechaza la petición.
+      await sheets.spreadsheets.values.append({spreadsheetId,range:`${this.quote('EVALUATIONS')}!A:G`,valueInputOption:'RAW',insertDataOption:'INSERT_ROWS',requestBody:{values}},{retry:false});
+    }
+  }
   async loadEvaluations() {
     const rows = await this.rows('EVALUATIONS') || [];
     return rows.map((row, index) => {
@@ -160,13 +179,14 @@ class GoogleStorage {
         return true;
       } catch { return true; }
     });
-    if (unique.length !== rows.length) await this.replace('EVALUATIONS', unique);
-    return rows.length - unique.length;
+    const duplicates=rows.length-unique.length;
+    if(duplicates)log(`Se detectaron ${duplicates} evaluaciones duplicadas; no se reescribió EVALUATIONS.`);
+    return 0;
   }
   async loadFeedbacks() { return this.rows('FEEDBACKS'); }
   async saveFeedback(feedback: Row) { await this.upsert('FEEDBACKS', 'feedback_id', feedback); }
   async clearRuntimeData() {
-    await Promise.all([this.replace('EVALUATIONS', []), this.replace('FEEDBACKS', []), this.replace('APP_STATE', [])]);
+    throw new Error('Limpieza de datos operativos deshabilitada para proteger evaluaciones y feedbacks.');
   }
   async loadPlatformState() {
     const rows = await this.rows('APP_STATE') || [];
