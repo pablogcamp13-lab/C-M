@@ -32,6 +32,24 @@ type Row = Record<string, string | null | undefined>;
 const log = (message: string, error?: unknown) => console.error(`[google-storage] ${message}`, error instanceof Error ? error.message : '');
 const configured = () => Boolean(process.env.GOOGLE_SHEET_ID && process.env.GOOGLE_DRIVE_FOLDER_ID && process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN);
 const clean = (value: unknown) => value == null ? '' : String(value);
+const driveFolderId = () => {
+  const value = String(process.env.GOOGLE_DRIVE_FOLDER_ID || '').trim();
+  const fromPath = value.match(/\/folders\/([^/?#]+)/i)?.[1];
+  const fromQuery = value.match(/[?&]id=([^&#]+)/i)?.[1];
+  return decodeURIComponent(fromPath || fromQuery || value);
+};
+const googleStatus = (error: any) => Number(error?.response?.status || error?.code || 0);
+const googleReasons = (error: any) => [
+  error?.message,
+  error?.response?.data?.error,
+  error?.response?.data?.error_description,
+  ...(error?.response?.data?.error?.errors || []).map((item: any) => item?.reason)
+].filter(Boolean).map(String).join(' ').toLowerCase();
+const retryableDriveError = (error: unknown) => {
+  const status = googleStatus(error);
+  const detail = googleReasons(error);
+  return status === 429 || status >= 500 || /rate.?limit|quota exceeded|backend error|temporar/.test(detail);
+};
 
 class GoogleStorage {
   private bootstrapPromise?: Promise<boolean>;
@@ -252,19 +270,41 @@ class GoogleStorage {
   async saveCalibration(item: any) { await this.upsert('CALIBRATIONS', 'id', { id:item.id,status:item.status,evaluation_id:item.evaluationId,campaign_id:item.campaignId,data_json:JSON.stringify(item),created_at:item.createdAt,updated_at:item.updatedAt }); }
   async deleteCalibration(id: string) { await this.replace('CALIBRATIONS', (await this.rows('CALIBRATIONS') || []).filter(row => row.id !== id)); }
 
-  async uploadFile(input: { name: string; mimeType: string; base64: string }) {
+  async uploadFile(input: { name: string; mimeType: string; data: Buffer }) {
     if (!this.enabled) throw new Error('Google Drive no está configurado.');
-    const data = Buffer.from(input.base64.replace(/^data:[^;]+;base64,/, ''), 'base64');
-    if (!data.length || data.length > 45 * 1024 * 1024) throw new Error('Archivo inválido o excede el límite permitido.');
-    const file = await this.drive().files.create({ requestBody: { name: input.name.replace(/[\\/]/g, '_'), mimeType: input.mimeType || 'application/octet-stream', parents: [process.env.GOOGLE_DRIVE_FOLDER_ID!] }, media: { mimeType: input.mimeType || 'application/octet-stream', body: Readable.from(data) }, fields: 'id,name,mimeType,size,webViewLink,webContentLink,createdTime' });
-    return file.data;
+    if (!input.data.length || input.data.length > 35 * 1024 * 1024) throw new Error('Archivo inválido o excede el límite permitido.');
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const file = await this.drive().files.create({
+          requestBody: {
+            name: input.name.replace(/[\\/\r\n]/g, '_'),
+            mimeType: input.mimeType || 'application/octet-stream',
+            parents: [driveFolderId()]
+          },
+          media: {
+            mimeType: input.mimeType || 'application/octet-stream',
+            body: Readable.from(input.data)
+          },
+          fields: 'id,name,mimeType,size,webViewLink,webContentLink,createdTime',
+          supportsAllDrives: true
+        });
+        if (!file.data.id) throw new Error('Google Drive no devolvió el identificador del archivo.');
+        return file.data;
+      } catch (error) {
+        lastError = error;
+        if (attempt === 2 || !retryableDriveError(error)) throw error;
+        await new Promise(resolve => setTimeout(resolve, 500 * 2 ** attempt));
+      }
+    }
+    throw lastError;
   }
-  async fileMetadata(id: string) { return (await this.drive().files.get({ fileId: id, fields: 'id,name,mimeType,size,webViewLink,webContentLink,createdTime,modifiedTime,trashed' })).data; }
+  async fileMetadata(id: string) { return (await this.drive().files.get({ fileId: id, fields: 'id,name,mimeType,size,webViewLink,webContentLink,createdTime,modifiedTime,trashed', supportsAllDrives: true })).data; }
   async downloadFile(id: string) {
-    const response = await this.drive().files.get({ fileId: id, alt: 'media' }, { responseType: 'stream' });
+    const response = await this.drive().files.get({ fileId: id, alt: 'media', supportsAllDrives: true }, { responseType: 'stream' });
     return response.data as Readable;
   }
-  async deleteFile(id: string) { await this.drive().files.delete({ fileId: id }); }
+  async deleteFile(id: string) { await this.drive().files.delete({ fileId: id, supportsAllDrives: true }); }
 }
 
 export const googleStorage = new GoogleStorage();

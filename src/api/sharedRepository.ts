@@ -13,9 +13,15 @@ export interface SharedRepository {
 }
 
 const json = async <T>(response: Response): Promise<T> => {
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error || 'No fue posible conectar con el servidor.');
-  return body;
+  let body: any = {};
+  try { body = await response.json(); } catch {}
+  if (!response.ok) {
+    const fallback = response.status === 413
+      ? 'El archivo supera el tamaño máximo permitido.'
+      : 'No fue posible conectar con el servidor.';
+    throw new Error(body.error || fallback);
+  }
+  return body as T;
 };
 
 const headers = () => {
@@ -86,9 +92,18 @@ export const evaluationsApi = {
 
 export const filesApi = {
   async upload(file: File) {
-    const base64 = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(new Error('No fue posible leer el archivo.')); reader.onload = () => resolve(String(reader.result)); reader.readAsDataURL(file); });
+    if (!file.size) throw new Error('El archivo está vacío.');
+    if (file.size > 35 * 1024 * 1024) throw new Error('El archivo supera el límite de 35 MB.');
     const mimeType = /\.(mp3|mpeg|mpg)$/i.test(file.name) ? 'audio/mpeg' : file.type || 'application/octet-stream';
-    const result = await json<{ file: { id: string; name: string; mimeType: string; size?: string; url?: string } }>(await fetch('/api/files/upload', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify({ name: file.name, mimeType, base64 }) }));
+    const result = await json<{ file: { id: string; name: string; mimeType: string; size?: string; url?: string } }>(await fetch('/api/files/upload', {
+      method: 'POST',
+      headers: {
+        'Content-Type': mimeType,
+        'X-File-Name': encodeURIComponent(file.name),
+        ...headers()
+      },
+      body: file
+    }));
     return result.file;
   }
 };

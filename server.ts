@@ -362,6 +362,14 @@ async function startServer() {
   // Increase payload size for base64 audio files
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  const rawFileParser = express.raw({ type: () => true, limit: 36 * 1024 * 1024 });
+  const parseRawFile = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    rawFileParser(req, res, (error?: any) => {
+      if (!error) return next();
+      if (error.type === 'entity.too.large') return res.status(413).json({ error: 'El archivo supera el límite de 35 MB.' });
+      return res.status(400).json({ error: 'No fue posible leer el archivo enviado.' });
+    });
+  };
   registerOperationsModule({app,db,requireAuth,repository,sync:async()=>{if(googleStorage.enabled)await googleStorage.saveRepository(repository(),passwordHashes());}});
 
   app.post('/api/auth/login', async (req, res) => {
@@ -748,14 +756,40 @@ async function startServer() {
     res.json({ ok: true });
   });
 
-  app.post('/api/files/upload', requireAuth, async (req, res) => {
-    const { name, mimeType, base64 } = req.body || {};
-    if (!name || !base64) return res.status(400).json({ error: 'Archivo inválido.' });
-    const normalizedMimeType = /\.(mp3|mpeg|mpg)$/i.test(String(name)) ? 'audio/mpeg' : String(mimeType || 'application/octet-stream');
-    const bytes=Math.floor(String(base64).replace(/^data:[^,]*,/,'').length*3/4); if(bytes>35*1024*1024)return res.status(400).json({error:'El archivo supera el límite de 35 MB.'});
-    if(!/^(audio\/|image\/)/.test(normalizedMimeType))return res.status(400).json({error:'Solo se permiten audios o imágenes.'});
-    try { const file = await googleStorage.uploadFile({ name: String(name), mimeType: normalizedMimeType, base64: String(base64) }); res.status(201).json({ file: { id: file.id, name: file.name, mimeType: file.mimeType, size: file.size, url: `/api/files/${file.id}/content` } }); }
-    catch (error) { console.error('[google-storage] No fue posible subir archivo a Drive.', error instanceof Error ? error.message : ''); res.status(502).json({ error: 'No fue posible subir el archivo a Google Drive.' }); }
+  app.post('/api/files/upload', requireAuth, parseRawFile, async (req, res) => {
+    const legacyBody = !Buffer.isBuffer(req.body) ? req.body || {} : {};
+    let name = legacyBody.name || req.header('x-file-name') || '';
+    try { name = decodeURIComponent(String(name)); } catch { name = String(name); }
+    const requestedMimeType = String(legacyBody.mimeType || req.header('content-type') || 'application/octet-stream').split(';')[0].trim().toLowerCase();
+    const inferredMimeType = /\.(mp3|mpeg|mpg)$/i.test(name) ? 'audio/mpeg'
+      : /\.wav$/i.test(name) ? 'audio/wav'
+      : /\.(m4a|mp4)$/i.test(name) ? 'audio/mp4'
+      : /\.ogg$/i.test(name) ? 'audio/ogg'
+      : /\.webm$/i.test(name) ? 'audio/webm'
+      : /\.aac$/i.test(name) ? 'audio/aac'
+      : /\.(png|jpe?g|gif|webp)$/i.test(name) ? `image/${name.toLowerCase().endsWith('.jpg') ? 'jpeg' : name.split('.').pop()}`
+      : requestedMimeType;
+    const data = Buffer.isBuffer(req.body)
+      ? req.body
+      : Buffer.from(String(legacyBody.base64 || '').replace(/^data:[^,]*,/, ''), 'base64');
+    if (!name || !data.length) return res.status(400).json({ error: 'El archivo está vacío o no tiene un nombre válido.' });
+    if (data.length > 35 * 1024 * 1024) return res.status(413).json({ error: 'El archivo supera el límite de 35 MB.' });
+    if (!/^(audio\/|image\/)/.test(inferredMimeType)) return res.status(415).json({ error: 'Solo se permiten archivos de audio o imágenes compatibles.' });
+    try {
+      const file = await googleStorage.uploadFile({ name: String(name), mimeType: inferredMimeType, data });
+      res.status(201).json({ file: { id: file.id, name: file.name, mimeType: file.mimeType, size: file.size, url: `/api/files/${file.id}/content` } });
+    } catch (error: any) {
+      const status = Number(error?.response?.status || error?.code || 0);
+      const detail = [error?.message, error?.response?.data?.error, error?.response?.data?.error_description, ...(error?.response?.data?.error?.errors || []).map((item: any) => item?.reason)].filter(Boolean).map(String).join(' ').toLowerCase();
+      console.error('[google-storage] No fue posible subir archivo a Drive.', `status=${status || 'unknown'}`, error instanceof Error ? error.message : '');
+      if (/no está configurado|not configured/.test(detail)) return res.status(503).json({ code: 'GOOGLE_DRIVE_NOT_CONFIGURED', error: 'Google Drive no está configurado completamente en Railway.' });
+      if (/invalid_grant|token has been expired|token has been revoked/.test(detail)) return res.status(503).json({ code: 'GOOGLE_AUTH_EXPIRED', error: 'La autorización de Google Drive venció o fue revocada. Debe renovarse GOOGLE_REFRESH_TOKEN en Railway.' });
+      if (/insufficient.*scope|insufficient authentication scopes/.test(detail)) return res.status(503).json({ code: 'GOOGLE_DRIVE_SCOPE_MISSING', error: 'La autorización de Google no incluye permiso para subir archivos a Drive.' });
+      if (status === 404 || /file not found/.test(detail)) return res.status(503).json({ code: 'GOOGLE_DRIVE_FOLDER_NOT_FOUND', error: 'La carpeta configurada de Google Drive no existe o no está compartida con la cuenta autorizada.' });
+      if (status === 429 || /rate.?limit|quota exceeded/.test(detail)) return res.status(503).json({ code: 'GOOGLE_DRIVE_QUOTA', error: 'Google Drive alcanzó temporalmente su límite de solicitudes. Espera un minuto y vuelve a intentar.' });
+      if (status === 403 || /permission|forbidden/.test(detail)) return res.status(503).json({ code: 'GOOGLE_DRIVE_PERMISSION', error: 'La cuenta autorizada no tiene permiso para guardar archivos en la carpeta configurada de Google Drive.' });
+      return res.status(502).json({ code: 'GOOGLE_DRIVE_UPLOAD_FAILED', error: 'Google Drive rechazó el archivo. Revisa los registros de Railway para conocer el motivo exacto.' });
+    }
   });
   app.get('/api/files/:id/content', requireAuth, async (req, res) => {
     try {
