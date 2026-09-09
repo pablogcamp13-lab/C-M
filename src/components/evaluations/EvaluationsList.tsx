@@ -25,6 +25,8 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
   const [sortField, setSortField] = useState<'date' | 'score' | 'advisor'>('date');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'QUALITY' | 'D3C'>('ALL');
   const [resultFilter, setResultFilter] = useState<'ALL' | 'VENTA' | 'NO_VENTA'>('ALL');
   const [stateFilter, setStateFilter] = useState<'ALL' | 'PENDIENTE' | 'FINALIZADA'>('ALL');
@@ -146,6 +148,9 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                   sortedEvaluations.map((ev) => {
                     const advisor = advisors.find(a => a.id === ev.advisorId);
                     const supervisor = users.find(u => u.id === ev.supervisorId);
+                    const rawScore = ev.evaluationType === 'QUALITY' ? (ev.technicalScore ?? ev.scoreTotal) : ev.scoreTotal;
+                    const hasScore = rawScore !== null && rawScore !== undefined && Number.isFinite(Number(rawScore));
+                    const displayedScore = hasScore ? Number(rawScore) : null;
 
                     return (
                       <tr 
@@ -178,8 +183,8 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
 
                         {/* 3. Score 3C (Numeric Badge) */}
                         <td className="py-3 px-3 text-center">
-                          <span className={`inline-block text-xs font-bold font-kpi px-2.5 py-1 rounded-md border ${getScoreBadgeClass(ev.evaluationType === 'QUALITY' ? (ev.technicalScore ?? ev.scoreTotal) : ev.scoreTotal)}`}>
-                            {ev.evaluationType === 'QUALITY' ? (ev.technicalScore ?? ev.scoreTotal) : ev.scoreTotal}%
+                          <span className={`inline-block text-xs font-bold font-kpi px-2.5 py-1 rounded-md border ${displayedScore === null ? 'bg-slate-50 text-slate-600 border-slate-200' : getScoreBadgeClass(displayedScore)}`}>
+                            {displayedScore === null ? 'N/A' : `${displayedScore}%`}
                           </span>
                           {ev.qualityResult && <div className={`mt-1 text-[9px] font-bold ${ev.qualityResult === 'REPROBADA' ? 'text-red-600' : 'text-emerald-600'}`}>{ev.qualityResult}</div>}
                         </td>
@@ -222,7 +227,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                               <Eye className="w-4 h-4" />
                             </button>
                             {canDelete && <button
-                              onClick={() => setDeleteConfirmId(ev.id)}
+                              onClick={() => { setDeleteError(null); setDeleteConfirmId(ev.id); }}
                               className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                               title="Eliminar evaluación"
                             >
@@ -274,21 +279,33 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
             <p className="text-xs text-[#667085] mb-4">
               ¿Estás seguro de que deseas eliminar esta evaluación? Esta acción recalculará los promedios del dashboard en tiempo real.
             </p>
+            {deleteError && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">{deleteError}</p>}
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setDeleteConfirmId(null)}
+                disabled={Boolean(deletingId)}
                 className="px-3 py-1.5 text-xs font-medium text-[#667085] hover:bg-[#F6F7F9] rounded-lg transition-colors"
               >
                 Cancelar
               </button>
               <button
-                onClick={() => {
-                  deleteEvaluation(deleteConfirmId);
-                  setDeleteConfirmId(null);
+                onClick={async () => {
+                  if (deletingId) return;
+                  setDeletingId(deleteConfirmId);
+                  setDeleteError(null);
+                  try {
+                    await deleteEvaluation(deleteConfirmId);
+                    setDeleteConfirmId(null);
+                  } catch (error) {
+                    setDeleteError(error instanceof Error ? error.message : 'No fue posible eliminar la evaluación.');
+                  } finally {
+                    setDeletingId(null);
+                  }
                 }}
-                className="px-3 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-xs transition-colors"
+                disabled={Boolean(deletingId)}
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-xs transition-colors disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Eliminar
+                {deletingId ? 'Eliminando…' : 'Eliminar'}
               </button>
             </div>
           </div>

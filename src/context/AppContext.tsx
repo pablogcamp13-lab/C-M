@@ -101,7 +101,7 @@ interface AppContextType {
   // Mutators
   addEvaluation: (evalData: Omit<Evaluation, 'id' | 'createdAt' | 'scoreConnect' | 'scoreClarify' | 'scoreConvert' | 'scoreTotal' | 'primaryGap' | 'secondaryGap' | 'strongestPillar' | 'recommendation'>) => Promise<Evaluation>;
   updateEvaluation: (id: string, evalData: Partial<Evaluation>) => void;
-  deleteEvaluation: (id: string) => void;
+  deleteEvaluation: (id: string) => Promise<void>;
 
   addAdvisor: (advisor: Omit<Advisor, 'id'>) => Advisor;
   updateAdvisor: (id: string, data: Partial<Advisor>) => void;
@@ -681,9 +681,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }));
   };
 
-  const deleteEvaluation = (id: string) => {
-    if (currentUser.role === 'MONITOR') return;
+  const deleteEvaluation = async (id: string) => {
+    if (['ASESOR', 'SUPERVISOR', 'MONITOR'].includes(currentUser.role)) throw new Error('Tu perfil no puede eliminar evaluaciones.');
+    await evaluationsApi.remove(id);
     setEvaluations(prev => prev.filter(e => e.id !== id));
+    window.dispatchEvent(new Event('cm:data-changed'));
   };
 
   const addAdvisor = (advisorData: Omit<Advisor, 'id'>): Advisor => {

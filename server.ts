@@ -576,6 +576,10 @@ async function startServer() {
     let evaluation = authUser.role === 'MONITOR' ? { ...(req.body || {}), evaluatorId: authUser.id, evaluatorName: authUser.name } : req.body;
     if (!evaluation?.id || !evaluation?.advisorId || !evaluation?.evaluatorId || !['QUALITY', 'D3C'].includes(evaluation?.evaluationType)) return res.status(400).json({ error: 'Evaluación inválida.' });
     if (!evaluation?.date || !/^\d{4}-\d{2}-\d{2}$/.test(String(evaluation.date)) || (evaluation.time && !/^\d{2}:\d{2}$/.test(String(evaluation.time)))) return res.status(400).json({ error: 'La fecha u hora de evaluación no es válida.' });
+    const answeredItems = Array.isArray(evaluation.items) ? evaluation.items.filter((item:any) => ['CUMPLE','NO_CUMPLE','NO_APLICA'].includes(item?.compliance)) : [];
+    const submittedScore = evaluation.technicalScore ?? evaluation.scoreTotal;
+    const hasSubmittedScore = submittedScore !== null && submittedScore !== undefined && Number.isFinite(Number(submittedScore));
+    if (!answeredItems.some((item:any) => item.compliance !== 'NO_APLICA') && !hasSubmittedScore) return res.status(400).json({ error: 'Responde al menos un criterio evaluable antes de finalizar.' });
     const evaluatedAt = `${evaluation.date}T${evaluation.time || '00:00'}:00`;
     try {
       const directory = googleStorage.enabled ? await readRepository() : repository();
@@ -636,6 +640,41 @@ async function startServer() {
     return null;
   };
   const adminRoles = new Set(['ADMINISTRADOR','CONSULTOR']);
+  app.delete('/api/evaluations/:id', requireAuth, async (req, res) => {
+    const user = (req as any).authUser as User;
+    if (!adminRoles.has(user.role)) return res.status(403).json({ error: 'Sólo Administración o Calidad puede eliminar evaluaciones.' });
+    const id = String(req.params.id || '').trim();
+    const current = await loadEvaluationById(id);
+    if (!current) return res.status(404).json({ error: 'La evaluación ya no existe.' });
+    if ((db.prepare('SELECT 1 FROM calibrations WHERE evaluation_id=? LIMIT 1').get(id) as any)) return res.status(409).json({ error: 'La evaluación tiene una calibración asociada. Elimina primero esa calibración.' });
+    try {
+      if (googleStorage.enabled) await googleStorage.deleteEvaluation(id);
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        db.prepare('DELETE FROM evaluation_commitments WHERE evaluation_id=?').run(id);
+        db.prepare('DELETE FROM feedbacks WHERE evaluation_id=?').run(id);
+        db.prepare('DELETE FROM evaluations WHERE id=?').run(id);
+        const stateRow = db.prepare('SELECT payload_json FROM app_state WHERE id=?').get('global') as any;
+        if (stateRow?.payload_json) {
+          const state = JSON.parse(stateRow.payload_json);
+          const next = { ...state, evaluations: (state.evaluations || []).filter((item:any) => item?.id !== id) };
+          db.prepare('UPDATE app_state SET payload_json=?,updated_at=? WHERE id=?').run(JSON.stringify(next), new Date().toISOString(), 'global');
+        }
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+      if (lastCompletePlatformState) lastCompletePlatformState = { ...lastCompletePlatformState, evaluations: (lastCompletePlatformState.evaluations || []).filter((item:any) => item?.id !== id) };
+      return res.json({ deleted: true, id });
+    } catch (error: any) {
+      const status=Number(error?.response?.status||error?.code||0),detail=[error?.message,error?.response?.data?.error,error?.response?.data?.error_description].filter(Boolean).map(String).join(' ').toLowerCase();
+      console.error('[evaluations] No fue posible eliminar la evaluación.', `status=${status||'unknown'}`, error instanceof Error ? error.message : '');
+      if(status===429||/quota exceeded|rate.?limit/.test(detail))return res.status(503).json({error:'Google Sheets alcanzó temporalmente su límite. Espera un minuto y vuelve a eliminar.'});
+      if(/invalid_grant|token has been expired|token has been revoked/.test(detail))return res.status(503).json({error:'La autorización de Google Sheets venció. Debe renovarse GOOGLE_REFRESH_TOKEN en Railway.'});
+      return res.status(status>=500?503:400).json({ error: error.message || 'No fue posible eliminar la evaluación.' });
+    }
+  });
   const adminEvaluationRows = async () => { let rows=(db.prepare('SELECT payload_json FROM evaluations ORDER BY evaluated_at DESC').all() as any[]).flatMap(row=>{try{return[JSON.parse(row.payload_json)]}catch{return[]}});if(googleStorage.enabled)try{rows=uniqueEvaluations([...(await googleStorage.loadEvaluations()),...rows]);}catch{}return rows; };
   const adminFilteredEvaluations = async (query:any) => { const directory=await readRepository(),campaignId=String(query.campaignId||''),supervisorId=String(query.supervisorId||''),advisorName=String(query.advisorName||'').trim().toLocaleLowerCase(),feedbackStatus=String(query.feedbackStatus||''),validationStatus=String(query.validationStatus||'');let feedbacks=(db.prepare('SELECT * FROM feedbacks').all() as any[]);if(googleStorage.enabled)try{feedbacks=await googleStorage.loadFeedbacks();}catch{}const feedbackByEvaluation=new Map(feedbacks.map(item=>[item.evaluation_id,item]));const rows=(await adminEvaluationRows()).filter(item=>{const advisor=directory.advisors.find(a=>a.id===item.advisorId),fb=feedbackByEvaluation.get(item.id),fbState=fb&&['VALIDADO_ASESOR','CERRADO_SUPERVISOR'].includes(fb.status)?'FIRMADO':'PENDIENTE';return(!campaignId||item.campaignId===campaignId)&&(!supervisorId||item.supervisorId===supervisorId||advisor?.supervisorId===supervisorId)&&(!advisorName||advisor?.name.toLocaleLowerCase().includes(advisorName))&&(!feedbackStatus||fbState===feedbackStatus)&&(!validationStatus||normalizedValidationStatus(item)===validationStatus);});return{rows,feedbacks,directory,feedbackByEvaluation}; };
   app.get('/api/admin/dashboard',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(!adminRoles.has(user.role))return res.status(403).json({error:'Acceso restringido a Calidad y Administración.'});const {rows,feedbacks,directory}=await adminFilteredEvaluations(req.query);const valid=rows.filter(item=>normalizedValidationStatus(item)==='VALIDATED'),average=(items:any[])=>items.length?Math.round(items.reduce((sum,item)=>sum+Number(item.technicalScore??item.scoreTotal??0),0)/items.length):null;const by=(key:(item:any)=>string)=>Object.entries(valid.reduce((out:any,item)=>{const id=key(item);(out[id]??=[]).push(item);return out;},{})).map(([id,items]:any)=>({id,name:directory.campaigns.find(c=>c.id===id)?.name||directory.users.find(u=>u.id===id)?.name||'Sin asignar',average:average(items),count:items.length}));const signed=feedbacks.filter(item=>['VALIDADO_ASESOR','CERRADO_SUPERVISOR'].includes(item.status)).length;res.json({metrics:{feedbackDone:signed,feedbackPending:Math.max(0,feedbacks.length-signed),automaticPending:rows.filter(item=>normalizedValidationStatus(item)==='AUTOMATIC_PENDING').length},byCampaign:by(item=>item.campaignId),bySupervisor:by(item=>item.supervisorId),evaluations:rows.map(item=>({...item,feedbackStatus:(()=>{const fb=feedbacks.find(f=>f.evaluation_id===item.id);return fb&&['VALIDADO_ASESOR','CERRADO_SUPERVISOR'].includes(fb.status)?'FIRMADO':'PENDIENTE';})()}))});});
@@ -786,7 +825,10 @@ async function startServer() {
   app.put('/api/platform-state', requireAuth, async (req, res) => {
     if (['ASESOR','SUPERVISOR','MONITOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'Este rol no puede sobrescribir el estado global.' });
     const now = new Date().toISOString();
-    const normalizedState = normalizePlatformState(req.body);
+    let canonicalEvaluations = (db.prepare('SELECT payload_json FROM evaluations ORDER BY created_at DESC').all() as any[]).flatMap(row=>{try{return[JSON.parse(row.payload_json)]}catch{return[]}});
+    try { if (googleStorage.enabled) canonicalEvaluations = await googleStorage.loadEvaluations(); }
+    catch (error) { console.error('[google-storage] No fue posible validar EVALUATIONS antes de guardar el estado.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No se pudo validar el historial de evaluaciones; no se modificó el estado.' }); }
+    const normalizedState = normalizePlatformState({ ...(req.body || {}), evaluations: canonicalEvaluations });
     try { if (googleStorage.enabled) await googleStorage.savePlatformState(normalizedState); }
     catch (error) { console.error('[google-storage] No fue posible guardar el estado de plataforma.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible sincronizar el estado con Google Sheets.' }); }
     db.prepare(`INSERT INTO app_state (id,payload_json,updated_at) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,updated_at=excluded.updated_at`).run('global', JSON.stringify(normalizedState), now);

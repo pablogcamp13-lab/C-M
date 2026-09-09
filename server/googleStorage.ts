@@ -141,6 +141,29 @@ class GoogleStorage {
     await this.replace(name, rows);
   }
 
+  private async clearRowsByValue(name: SheetName, column: string, value: string) {
+    if (!this.enabled) return 0;
+    await this.bootstrap();
+    const sheets = this.sheets();
+    const spreadsheetId = process.env.GOOGLE_SHEET_ID!;
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${this.quote(name)}!${column}:${column}`,
+      valueRenderOption: 'UNFORMATTED_VALUE'
+    });
+    const rowNumbers = (response.data.values || []).flatMap((cells, index) =>
+      clean(cells[0]) === clean(value) ? [index + 1] : []
+    );
+    if (rowNumbers.length) {
+      await sheets.spreadsheets.values.batchClear({
+        spreadsheetId,
+        requestBody: { ranges: rowNumbers.map(row => `${this.quote(name)}!A${row}:ZZ${row}`) }
+      });
+    }
+    this.rowsCache.delete(name);
+    return rowNumbers.length;
+  }
+
   async loadRepository(): Promise<SharedRepository | null> {
     if (!this.enabled) return null;
     const [users, campaigns, teams, advisors, companies, operations, operationSupervisors, operationAssignments, staffingMovements] = await Promise.all(['USERS', 'CAMPAIGNS', 'TEAMS', 'ADVISORS', 'COMPANIES', 'OPERATIONS', 'OPERATION_SUPERVISORS', 'OPERATION_ASSIGNMENTS', 'STAFFING_MOVEMENTS'].map(name => this.rows(name as SheetName)));
@@ -225,6 +248,20 @@ class GoogleStorage {
         throw new Error(`EVALUATIONS: registro inválido en la fila ${index + 2}; no se omitió silenciosamente.`);
       }
     });
+  }
+  async deleteEvaluation(id: string) {
+    // APP_STATE fue una fuente histórica de evaluaciones. Se limpia primero para
+    // que una falla posterior conserve EVALUATIONS como copia recuperable.
+    const state = await this.loadPlatformState();
+    if (state?.evaluations?.some((item: any) => item?.id === id)) {
+      await this.savePlatformState({
+        ...state,
+        evaluations: state.evaluations.filter((item: any) => item?.id !== id)
+      });
+    }
+    const evaluationsDeleted = await this.clearRowsByValue('EVALUATIONS', 'A', id);
+    const feedbacksDeleted = await this.clearRowsByValue('FEEDBACKS', 'B', id);
+    return { evaluationsDeleted, feedbacksDeleted };
   }
   async deduplicateEvaluations() {
     const rows = await this.rows('EVALUATIONS') || [];

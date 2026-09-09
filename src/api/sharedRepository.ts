@@ -86,6 +86,9 @@ export const sharedRepositoryApi = {
 export const evaluationsApi = {
   async create(evaluation: Evaluation) {
     return json<{ evaluation: Evaluation; deduplicated?: boolean }>(await fetch('/api/evaluations', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(evaluation) }));
+  },
+  async remove(id: string) {
+    return json<{ deleted: true; id: string }>(await fetch(`/api/evaluations/${encodeURIComponent(id)}`, { method: 'DELETE', headers: headers() }));
   }
 };
 
