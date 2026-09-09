@@ -190,6 +190,32 @@ function reconcileEquivalentOperations(now: string) {
   }
 }
 
+// Releases anteriores podían confirmar una baja y luego reactivarla desde una
+// pestaña atrasada. El traslado histórico a LEGACY conserva la intención de la
+// baja y permite repararla una sola vez sin borrar personas ni evaluaciones.
+function recoverHistoricallyRetiredOperations(now: string) {
+  const rows = db.prepare(`SELECT DISTINCT current.operation_id FROM operation_assignments marker JOIN operations marker_operation ON marker_operation.id=marker.operation_id AND marker_operation.legacy=1 JOIN operation_assignments current ON current.advisor_id=marker.advisor_id AND current.active=1 JOIN operations current_operation ON current_operation.id=current.operation_id AND current_operation.legacy=0 AND current_operation.status='ACTIVA' WHERE marker.observation LIKE 'Campaña retirada de la empresa%'`).all() as any[];
+  for (const row of rows) {
+    const operation = db.prepare('SELECT id,campaign_id FROM operations WHERE id=?').get(row.operation_id) as any;
+    if (!operation) continue;
+    db.prepare("UPDATE operations SET status='INACTIVA',updated_at=?,closed_at=COALESCE(closed_at,?),version=version+1 WHERE id=?").run(now,now,operation.id);
+    const legacyOperationId = `op_legacy_${operation.campaign_id}`;
+    for (const current of db.prepare('SELECT id,advisor_id FROM operation_assignments WHERE operation_id=? AND active=1').all(operation.id) as any[]) {
+      db.prepare('UPDATE operation_assignments SET active=0,end_date=? WHERE id=?').run(now.slice(0,10),current.id);
+      const marker = db.prepare("SELECT id FROM operation_assignments WHERE advisor_id=? AND operation_id=? AND observation LIKE 'Campaña retirada de la empresa%' ORDER BY start_date DESC,id DESC LIMIT 1").get(current.advisor_id,legacyOperationId) as any;
+      if (marker) db.prepare('UPDATE operation_assignments SET active=1,end_date=NULL WHERE id=?').run(marker.id);
+      const advisorRow = db.prepare('SELECT data_json FROM advisors WHERE id=?').get(current.advisor_id) as any;
+      if (advisorRow) {
+        const advisor = JSON.parse(advisorRow.data_json || '{}');
+        db.prepare('UPDATE advisors SET data_json=? WHERE id=?').run(JSON.stringify({...advisor,operationId:legacyOperationId}),current.advisor_id);
+      }
+    }
+    const active = Number((db.prepare("SELECT COUNT(*) total FROM operations WHERE campaign_id=? AND legacy=0 AND status='ACTIVA'").get(operation.campaign_id) as any)?.total || 0);
+    if (!active) db.prepare("UPDATE campaigns SET status='INACTIVA' WHERE id=?").run(operation.campaign_id);
+    console.warn(`[operations] Baja administrativa histórica recuperada: ${operation.id}.`);
+  }
+}
+
 function persistRepository(input: SharedRepository) {
   const now = new Date().toISOString();
   db.exec('BEGIN IMMEDIATE');
@@ -201,7 +227,10 @@ function persistRepository(input: SharedRepository) {
     // operación LEGACY antes de validar asesores para conservar toda la dotación.
     db.prepare('INSERT OR IGNORE INTO companies (id,name,status,created_at) VALUES (?,?,?,?)').run('company_legacy','LEGACY','INACTIVA',now);
     for (const campaign of source.campaigns || []) db.prepare('INSERT OR IGNORE INTO operations (id,company_id,campaign_id,name,status,legacy) VALUES (?,?,?,?,?,1)').run(`op_legacy_${campaign.id}`,'company_legacy',campaign.id,`LEGACY / ${campaign.name}`,'ACTIVA');
-    for (const operation of source.operations || []) db.prepare('INSERT INTO operations (id,company_id,campaign_id,name,normalized_name,status,legacy,created_at,updated_at,closed_at,version,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET company_id=excluded.company_id,campaign_id=excluded.campaign_id,name=excluded.name,normalized_name=excluded.normalized_name,status=excluded.status,legacy=excluded.legacy,updated_at=excluded.updated_at,closed_at=excluded.closed_at,version=excluded.version,metadata_json=excluded.metadata_json').run(operation.id,operation.companyId,operation.campaignId,operation.name,operation.normalizedName||normalizeOperationName(operation.name.split('/').pop()||operation.name),operation.status,operation.legacy?1:0,operation.createdAt||now,operation.updatedAt||now,operation.closedAt||null,operation.version||1,JSON.stringify(operation.metadata||{}));
+    for (const operation of source.operations || []) db.prepare(`INSERT INTO operations (id,company_id,campaign_id,name,normalized_name,status,legacy,created_at,updated_at,closed_at,version,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET company_id=excluded.company_id,campaign_id=excluded.campaign_id,name=excluded.name,normalized_name=excluded.normalized_name,status=CASE WHEN operations.legacy=0 AND operations.status='INACTIVA' AND operations.closed_at IS NOT NULL THEN 'INACTIVA' ELSE excluded.status END,legacy=excluded.legacy,updated_at=excluded.updated_at,closed_at=CASE WHEN operations.legacy=0 AND operations.status='INACTIVA' AND operations.closed_at IS NOT NULL THEN operations.closed_at ELSE excluded.closed_at END,version=MAX(operations.version,excluded.version),metadata_json=excluded.metadata_json`).run(operation.id,operation.companyId,operation.campaignId,operation.name,operation.normalizedName||normalizeOperationName(operation.name.split('/').pop()||operation.name),operation.status,operation.legacy?1:0,operation.createdAt||now,operation.updatedAt||now,operation.closedAt||null,operation.version||1,JSON.stringify(operation.metadata||{}));
+    // Las bajas administrativas son autoritativas: una instantánea antigua de
+    // otra pestaña o de Sheets no puede reactivar la operación retirada.
+    db.prepare(`UPDATE campaigns SET status='INACTIVA' WHERE id IN (SELECT campaign_id FROM operations WHERE legacy=0 GROUP BY campaign_id HAVING SUM(CASE WHEN status='ACTIVA' THEN 1 ELSE 0 END)=0 AND SUM(CASE WHEN closed_at IS NOT NULL THEN 1 ELSE 0 END)>0)`).run();
     for (const user of source.users || []) {
       const existing = db.prepare('SELECT password_hash,must_change_password FROM users WHERE id=?').get(user.id);
       db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar`).run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt || now, existing?.password_hash || hashPassword(user.password || INITIAL_PASSWORD), existing ? existing.must_change_password : 1);
@@ -242,6 +271,7 @@ function persistRepository(input: SharedRepository) {
     for(const link of source.operationSupervisors||[]) db.prepare('INSERT OR REPLACE INTO operation_supervisors (operation_id,supervisor_id,active,start_at,end_at) VALUES (?,?,?,?,?)').run(link.operationId,link.supervisorId,link.active?1:0,link.startAt,link.endAt||null);
     for(const assignment of source.operationAssignments||[]) db.prepare('INSERT OR REPLACE INTO operation_assignments (id,advisor_id,operation_id,team_id,supervisor_id,role,operational_status,start_date,end_date,active,source,actor_id,observation) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').run(assignment.id,assignment.advisorId,assignment.operationId,assignment.teamId||null,assignment.supervisorId||null,assignment.role,assignment.operationalStatus,assignment.startDate,assignment.endDate||null,assignment.active?1:0,assignment.source,assignment.actorId||null,assignment.observation||null);
     for(const movement of source.staffingMovements||[]) db.prepare('INSERT OR REPLACE INTO staffing_movements (id,advisor_id,assignment_id,type,occurred_at,effective_at,created_at,origin,destination,actor_id,observation,reversed_movement_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(movement.id,movement.advisorId,movement.assignmentId||null,movement.type,movement.createdAt||movement.occurredAt,movement.effectiveAt,movement.createdAt||movement.occurredAt,typeof movement.origin==='string'?movement.origin:JSON.stringify(movement.origin||null),typeof movement.destination==='string'?movement.destination:JSON.stringify(movement.destination||null),movement.actorId||null,movement.observation||null,movement.reversedMovementId||null);
+    recoverHistoricallyRetiredOperations(now);
     reconcileEquivalentOperations(now);
     db.exec('COMMIT');
   } catch (error) {
@@ -273,11 +303,15 @@ async function readRepository() {
   try {
     const remote = await googleStorage.loadRepository();
     if (remote && (remote.users.length || remote.campaigns.length || remote.teams.length || remote.advisors.length)) {
-      const mustRepairOperationIndex = hasEquivalentActiveOperations(remote);
+      const retiredOperationIds = new Set((db.prepare("SELECT id FROM operations WHERE legacy=0 AND status='INACTIVA' AND closed_at IS NOT NULL").all() as any[]).map(row => row.id));
+      const mustRepairRetiredOperations = (remote.operations || []).some(operation => retiredOperationIds.has(operation.id) && operation.status === 'ACTIVA');
+      const mustRepairOperationIndex = hasEquivalentActiveOperations(remote) || mustRepairRetiredOperations;
       try {
         persistRepository(remote);
         const normalized = repository();
-        if (mustRepairOperationIndex) {
+        const normalizedOperations = new Map((normalized.operations || []).map(operation => [operation.id, operation]));
+        const repairedHistoricalRetirement = (remote.operations || []).some(operation => operation.status === 'ACTIVA' && normalizedOperations.get(operation.id)?.status === 'INACTIVA');
+        if (mustRepairOperationIndex || repairedHistoricalRetirement) {
           try {
             await googleStorage.saveRepository(normalized, passwordHashes());
             console.log('[operations] Operaciones duplicadas normalizadas y guardadas en Sheets.');
@@ -527,38 +561,36 @@ async function startServer() {
           db.prepare('UPDATE operation_assignments SET active=0,end_date=? WHERE advisor_id=? AND active=1').run(today,row.id);
           db.prepare('INSERT INTO operation_assignments (id,advisor_id,operation_id,team_id,supervisor_id,role,operational_status,start_date,active,source,observation) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(`assignment_${row.id}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,row.id,legacyOperationId,advisor.teamId||null,advisor.supervisorId||null,'ASESOR',advisor.status==='INACTIVO'?'BAJA':'PRODUCCION',today,1,'MANUAL','Campaña retirada de la empresa; se preserva el registro histórico.');
         }
-        for(const operation of selectedOperations)db.prepare('UPDATE operations SET status=? WHERE id=?').run('INACTIVA',operation.id);
+        for(const operation of selectedOperations)db.prepare('UPDATE operations SET status=?,updated_at=?,closed_at=?,version=version+1 WHERE id=?').run('INACTIVA',now,now,operation.id);
         const active=(db.prepare('SELECT COUNT(*) total FROM operations WHERE campaign_id=? AND legacy=0 AND status=?').get(campaignId,'ACTIVA') as any).total;
         if(!active)db.prepare('UPDATE campaigns SET status=? WHERE id=?').run('INACTIVA',campaignId);
         db.exec('COMMIT');
       }catch(error){db.exec('ROLLBACK');throw error;}
       if (googleStorage.enabled) await googleStorage.saveRepository(repository(), passwordHashes());
-      res.status(204).end();
+      res.json({ repository: repository() });
     } catch (error: any) { res.status(400).json({ error: error.message || 'No se pudo eliminar la campaña.' }); }
   });
   app.post('/api/evaluations', requireAuth, async (req, res) => {
     const authUser = (req as any).authUser as User;
     if (!['ADMINISTRADOR','CONSULTOR','MONITOR'].includes(authUser.role)) return res.status(403).json({ error: 'Solo Calidad, Monitor o Administración puede crear evaluaciones.' });
-    let evaluation = req.body;
+    let evaluation = authUser.role === 'MONITOR' ? { ...(req.body || {}), evaluatorId: authUser.id, evaluatorName: authUser.name } : req.body;
     if (!evaluation?.id || !evaluation?.advisorId || !evaluation?.evaluatorId || !['QUALITY', 'D3C'].includes(evaluation?.evaluationType)) return res.status(400).json({ error: 'Evaluación inválida.' });
+    if (!evaluation?.date || !/^\d{4}-\d{2}-\d{2}$/.test(String(evaluation.date)) || (evaluation.time && !/^\d{2}:\d{2}$/.test(String(evaluation.time)))) return res.status(400).json({ error: 'La fecha u hora de evaluación no es válida.' });
     const evaluatedAt = `${evaluation.date}T${evaluation.time || '00:00'}:00`;
     try {
       const directory = googleStorage.enabled ? await readRepository() : repository();
       const advisor = directory.advisors.find(item => item.id === evaluation.advisorId);
       if (!advisor || advisor.active === false || advisor.status !== 'ACTIVO') return res.status(400).json({ error: 'El asesor no está habilitado para evaluación.' });
-      if (authUser.role === 'MONITOR') evaluation = { ...evaluation, evaluatorId: authUser.id, evaluatorName: authUser.name };
       const operation=directory.operations?.find(item=>item.id===(advisor.operationId||`op_legacy_${advisor.campaignId}`));
       const campaign=directory.campaigns.find(item=>item.id===advisor.campaignId);
       if (!operation || operation.legacy || operation.status !== 'ACTIVA' || operation.campaignId !== advisor.campaignId || !campaign || campaign.status !== 'ACTIVA') return res.status(400).json({ error: 'La campaña del asesor ya no está activa. Selecciona una campaña vigente.' });
-      evaluation = { ...evaluation, campaignId:advisor.campaignId, teamId:advisor.teamId, supervisorId:advisor.supervisorId, operationId:operation?.id||`op_legacy_${advisor.campaignId}`, companyId:operation?.companyId||'company_legacy', supervisorAtEvaluation:evaluation.supervisorId||advisor.supervisorId, validationStatus: 'VALIDATED' };
+      evaluation = { ...evaluation, campaignId:advisor.campaignId, teamId:advisor.teamId, supervisorId:advisor.supervisorId, operationId:operation.id, companyId:operation.companyId, supervisorAtEvaluation:advisor.supervisorId, validationStatus: 'VALIDATED' };
       evaluation = correctMigracionesQualityEvaluation(evaluation, directory.campaigns);
       const localDuplicate = (db.prepare('SELECT payload_json FROM evaluations WHERE advisor_id=? AND evaluation_type=? AND evaluated_at=?').all(evaluation.advisorId,evaluation.evaluationType,evaluatedAt) as any[]).flatMap(row=>{try{return [JSON.parse(row.payload_json)];}catch{return [];}}).find(item=>evaluationIdentity(item)===evaluationIdentity(evaluation));
       if (localDuplicate) return res.status(200).json({ evaluation: localDuplicate, deduplicated: true });
-      if (googleStorage.enabled) {
-        const remoteDuplicate = (await googleStorage.loadEvaluations()).find(item=>evaluationIdentity(item)===evaluationIdentity(evaluation));
-        if (remoteDuplicate) return res.status(200).json({ evaluation: remoteDuplicate, deduplicated: true });
-        await googleStorage.saveEvaluation(evaluation);
-      }
+      // Evita volver a leer toda EVALUATIONS antes de cada alta. La deduplicación
+      // local ya opera sobre el historial consolidado y reduce cuota/latencia.
+      if (googleStorage.enabled) await googleStorage.saveEvaluation(evaluation);
       try {
         db.prepare(`INSERT INTO evaluations (id,advisor_id,evaluator_id,evaluation_type,evaluated_at,payload_json,created_at) VALUES (?,?,?,?,?,?,?)`).run(evaluation.id, evaluation.advisorId, evaluation.evaluatorId, evaluation.evaluationType, evaluatedAt, JSON.stringify(evaluation), evaluation.createdAt || new Date().toISOString());
       } catch (cacheError) {
@@ -580,7 +612,13 @@ async function startServer() {
         console.error('[email] La evaluación se guardó, pero no fue posible enviar la notificación.', mailError instanceof Error ? mailError.message : '');
       }
       return res.status(201).json({ evaluation, notificationSent });
-    } catch (error: any) { console.error('[google-storage] No fue posible guardar la evaluación.', error instanceof Error ? error.message : ''); return res.status(400).json({ error: error.message || 'No fue posible guardar la evaluación.' }); }
+    } catch (error: any) {
+      const status=Number(error?.response?.status||error?.code||0),detail=[error?.message,error?.response?.data?.error,error?.response?.data?.error_description].filter(Boolean).map(String).join(' ').toLowerCase();
+      console.error('[google-storage] No fue posible guardar la evaluación.', `status=${status||'unknown'}`, error instanceof Error ? error.message : '');
+      if(status===429||/quota exceeded|rate.?limit/.test(detail))return res.status(503).json({error:'Google Sheets alcanzó temporalmente su límite. Espera un minuto y vuelve a guardar; la evaluación permanece abierta.'});
+      if(/invalid_grant|token has been expired|token has been revoked/.test(detail))return res.status(503).json({error:'La autorización de Google Sheets venció. Debe renovarse GOOGLE_REFRESH_TOKEN en Railway.'});
+      return res.status(status>=500?503:400).json({ error: error.message || 'No fue posible guardar la evaluación.' });
+    }
   });
   // Dotación: el historial se entrega sólo al alcance del rol. Los cambios se
   // registran al persistir la asignación activa; evaluaciones nunca se tocan.

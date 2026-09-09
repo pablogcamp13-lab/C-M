@@ -30,6 +30,7 @@ import {
 import { INITIAL_INTERVENTIONS } from '../data/interventionsData';
 import { calculateEvaluationSummary, parseTimeToMinutes, formatMinutesToHHMM } from '../utils/calculations';
 import { adminCampaignsApi, adminUsersApi, authApi, evaluationsApi, organizationApi, platformStateApi, sharedRepositoryApi } from '../api/sharedRepository';
+import type { SharedRepository } from '../api/sharedRepository';
 import { QUALITY_WEIGHTS } from '../data/qualityPueData';
 
 export const formatAdvisorUsername = (name: string): string => {
@@ -56,7 +57,7 @@ interface AppContextType {
   login: (identity: string, password: string) => Promise<void>;
   changePassword: (password: string) => Promise<void>;
   logout: () => Promise<void>;
-  refreshRepository: () => Promise<void>;
+  refreshRepository: () => Promise<SharedRepository>;
   setCurrentUser: (user: User) => void;
   setUserRole: (role: UserRole) => void;
 
@@ -238,6 +239,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authenticatedUserId, setAuthenticatedUserId] = useState<string | null>(null);
   const rosterHydrated = useRef(false);
+  const skipRosterSyncSave = useRef(false);
   const rosterSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rosterSyncQueue = useRef<Promise<unknown>>(Promise.resolve());
   const platformStateHydrated = useRef(false);
@@ -264,6 +266,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const persisted = await sharedRepositoryApi.load();
         rosterHydrated.current = true;
+        skipRosterSyncSave.current = true;
         setUsers(persisted.users); setCampaigns(persisted.campaigns); setCompanies(persisted.companies || []); setOperations(persisted.operations || []); setTeams(persisted.teams); setAdvisors(persisted.advisors);
         const persistedState = await platformStateApi.load();
         const state = persistedState;
@@ -286,6 +289,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // siguen en su almacenamiento actual hasta sus fases de migración respectivas.
   useEffect(() => {
     if (!isAuthenticated || ['ASESOR', 'SUPERVISOR', 'MONITOR'].includes(currentUser.role) || !rosterHydrated.current) return;
+    if (skipRosterSyncSave.current) { skipRosterSyncSave.current = false; return; }
     const snapshot = { users, campaigns, companies, operations, teams, advisors };
     // The import changes several collections at once. Debouncing and queuing
     // sends the final complete snapshot once, rather than racing partial ones.
@@ -328,7 +332,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const refreshRepository = async () => {
     const persisted=await sharedRepositoryApi.load();
     rosterHydrated.current=true;
+    skipRosterSyncSave.current=true;
     setUsers(persisted.users);setCampaigns(persisted.campaigns);setCompanies(persisted.companies||[]);setOperations(persisted.operations||[]);setTeams(persisted.teams);setAdvisors(persisted.advisors);
+    return persisted;
   };
 
   // Sync to LocalStorage on changes
@@ -583,15 +589,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteCampaign = async (id: string, companyId?: string) => {
-    await adminCampaignsApi.remove(id, companyId);
-    if (companyId) {
-      setOperations(previous => previous.map(operation => operation.campaignId === id && operation.companyId === companyId && !operation.legacy ? { ...operation, status: 'INACTIVA' } : operation));
-      const hasAnotherActiveOperation = operations.some(operation => operation.campaignId === id && operation.companyId !== companyId && !operation.legacy && operation.status === 'ACTIVA');
-      if (!hasAnotherActiveOperation) setCampaigns(previous => previous.map(campaign => campaign.id === id ? { ...campaign, status: 'INACTIVA' } : campaign));
-      return;
-    }
-    setCampaigns(previous => previous.map(campaign => campaign.id === id ? { ...campaign, status: 'INACTIVA' } : campaign));
-    setOperations(previous => previous.map(operation => operation.campaignId === id && !operation.legacy ? { ...operation, status: 'INACTIVA' } : operation));
+    if (rosterSyncTimer.current) clearTimeout(rosterSyncTimer.current);
+    await rosterSyncQueue.current.catch(() => undefined);
+    const { repository: persisted } = await adminCampaignsApi.remove(id, companyId);
+    rosterHydrated.current = true;
+    skipRosterSyncSave.current = true;
+    setUsers(persisted.users); setCampaigns(persisted.campaigns); setCompanies(persisted.companies || []); setOperations(persisted.operations || []); setTeams(persisted.teams); setAdvisors(persisted.advisors);
   };
 
   const addTeam = (team: Omit<Team, 'id'>): Team => {
