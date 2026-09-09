@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Evaluation } from '../../types';
+import { Evaluation, EvaluationItem } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { CRITERIA_DEFINITIONS } from '../../data/criteriaData';
 import { QUALITY_ATTRIBUTES } from '../../data/qualityPueData';
@@ -12,23 +12,45 @@ import {
   FileAudio, 
   AlertCircle, 
   ListTodo,
-  ChevronDown
+  ChevronDown,
+  Pencil,
+  Save
 } from 'lucide-react';
 
 interface EvaluationDetailModalProps {
   evaluation: Evaluation | null;
   onClose: () => void;
+  onUpdated?: (evaluation: Evaluation) => void;
   onOpenNewActionPlan?: (evaluation: Evaluation) => void;
 }
 
 export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({ 
   evaluation, 
   onClose,
+  onUpdated,
   onOpenNewActionPlan 
 }) => {
-  const { advisors, users, currentUser } = useApp();
+  const { advisors, users, currentUser, updateEvaluation } = useApp();
   const [expandedCriterion, setExpandedCriterion] = useState<string | null>(null);
   const [agentDetail,setAgentDetail]=useState<any>(null); const [commitment,setCommitment]=useState(''); const [commitmentDate,setCommitmentDate]=useState(''); const [savingCommitment,setSavingCommitment]=useState(false); const [commitmentError,setCommitmentError]=useState('');
+  const [isEditing,setIsEditing]=useState(false); const [savingEdit,setSavingEdit]=useState(false); const [editError,setEditError]=useState('');
+  const [draftItems,setDraftItems]=useState<EvaluationItem[]>([]);
+  const [draftMeta,setDraftMeta]=useState({date:'',time:'',callId:'',recordingCode:'',type:'DIAGNOSTICO_INICIAL',product:'',sale:false,saleResult:'NO_VENTA',noSaleReason:'',comments:''});
+
+  useEffect(()=>{
+    if(!evaluation)return;
+    const quality=evaluation.evaluationType==='QUALITY';
+    const dimensionByCriterion:Record<string,any>={C1:'CONECTAR',C2:'CLARIFICAR',C3:'CONVERTIR',C4:'CONECTAR_C4'};
+    const fallback:EvaluationItem[]=quality
+      ? QUALITY_ATTRIBUTES.map(attribute=>({id:`item_${attribute.id}`,criterionId:attribute.id,dimension:dimensionByCriterion[attribute.criterion],compliance:undefined,level:0,percentage:0,finding:'',evidence:'',recommendedAction:'',qualityGuideline:attribute,category:attribute.category||attribute.criterion,attribute:attribute.name,classification:attribute.classification||'NO_CRITICO'}))
+      : CRITERIA_DEFINITIONS.map(criterion=>({id:`item_${criterion.id}`,criterionId:criterion.id,dimension:criterion.dimensionId,compliance:undefined,level:0,percentage:0,finding:'',evidence:'',recommendedAction:''}));
+    setDraftItems((evaluation.items?.length?evaluation.items:fallback).map(item=>({
+      ...item,
+      compliance:item.compliance||((item.level!==undefined||item.percentage!==undefined)?getItemCompliance(item):undefined)
+    })));
+    setDraftMeta({date:evaluation.date||'',time:evaluation.time||'',callId:evaluation.callId||'',recordingCode:evaluation.recordingCode||'',type:evaluation.type||'DIAGNOSTICO_INICIAL',product:evaluation.product||'',sale:Boolean(evaluation.sale),saleResult:evaluation.saleResult||'NO_VENTA',noSaleReason:evaluation.noSaleReason||'',comments:evaluation.comments||''});
+    setIsEditing(false);setEditError('');
+  },[evaluation]);
 
   useEffect(()=>{
     if(!evaluation||currentUser.role!=='ASESOR')return;
@@ -42,6 +64,18 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   const evaluator = users.find(u => u.id === evaluation.evaluatorId);
   const supervisor = users.find(u => u.id === evaluation.supervisorId);
   const isAgent = currentUser.role === 'ASESOR';
+  const canEdit = currentUser.role === 'ADMINISTRADOR';
+  const changeItem=(id:string,changes:Partial<EvaluationItem>)=>setDraftItems(items=>items.map(item=>item.id===id?{...item,...changes}:item));
+  const saveEdit=async()=>{
+    if(!evaluation||savingEdit)return;
+    if(!draftItems.some(item=>item.compliance==='CUMPLE'||item.compliance==='NO_CUMPLE')){setEditError('Responde al menos un criterio evaluable antes de guardar.');return;}
+    setSavingEdit(true);setEditError('');
+    try{
+      const saved=await updateEvaluation(evaluation.id,{...draftMeta,type:draftMeta.type as Evaluation['type'],saleResult:draftMeta.saleResult as Evaluation['saleResult'],items:draftItems});
+      onUpdated?.(saved);setIsEditing(false);
+    }catch(error){setEditError(error instanceof Error?error.message:'No fue posible actualizar la evaluación.');}
+    finally{setSavingEdit(false);}
+  };
   const saveCommitment=async()=>{setSavingCommitment(true);setCommitmentError('');try{const token=sessionStorage.getItem('CONTACT_CENTER_AUTH_TOKEN');const response=await fetch(`/api/evaluations/${evaluation.id}/commitment`,{method:'PATCH',headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify({commitment,commitmentDate})});const data=await response.json();if(!response.ok)throw new Error(data.error);setAgentDetail((value:any)=>({...value,commitment:data.commitment}));}catch(error:any){setCommitmentError(error.message||'No fue posible guardar el compromiso.');}finally{setSavingCommitment(false);}};
   const isQuality = evaluation.evaluationType === 'QUALITY' || evaluation.items.some(item => QUALITY_ATTRIBUTES.some(attribute => attribute.id === item.criterionId));
   const advisorName = advisor?.name || 'Asesor no disponible';
@@ -82,16 +116,27 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-1.5 text-[var(--cm-text-muted)] hover:text-[var(--cm-text)] hover:bg-[var(--cm-border)] rounded-lg transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {canEdit&&!isEditing&&<button onClick={()=>setIsEditing(true)} className="cm-button-secondary px-3 py-2 text-xs"><Pencil className="h-4 w-4"/>Editar evaluación</button>}
+            <button onClick={onClose} className="p-1.5 text-[var(--cm-text-muted)] hover:text-[var(--cm-text)] hover:bg-[var(--cm-border)] rounded-lg transition-colors cursor-pointer" aria-label="Cerrar"><X className="w-5 h-5" /></button>
+          </div>
         </div>
 
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5 bg-[var(--cm-bg-secondary)] text-[var(--cm-text)]">
+          {isEditing&&<div className="cm-card rounded-xl p-4 sm:p-5 space-y-4">
+            <div><h4 className="text-sm font-bold">Editar datos de la evaluación</h4><p className="mt-1 text-xs text-[var(--cm-text-secondary)]">Se conserva el ID, el asesor, la campaña, el audio, el feedback y todo el histórico relacionado.</p></div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="text-xs font-semibold">Fecha<input type="date" className="cm-input mt-1 p-2 font-normal" value={draftMeta.date} onChange={event=>setDraftMeta(value=>({...value,date:event.target.value}))}/></label>
+              <label className="text-xs font-semibold">Hora<input type="time" className="cm-input mt-1 p-2 font-normal" value={draftMeta.time} onChange={event=>setDraftMeta(value=>({...value,time:event.target.value}))}/></label>
+              <label className="text-xs font-semibold">ID de llamada<input className="cm-input mt-1 p-2 font-normal" value={draftMeta.callId} onChange={event=>setDraftMeta(value=>({...value,callId:event.target.value}))}/></label>
+              <label className="text-xs font-semibold">Código de grabación<input className="cm-input mt-1 p-2 font-normal" value={draftMeta.recordingCode} onChange={event=>setDraftMeta(value=>({...value,recordingCode:event.target.value}))}/></label>
+              <label className="text-xs font-semibold">Modalidad<select className="cm-select mt-1 p-2 font-normal" value={draftMeta.type} onChange={event=>setDraftMeta(value=>({...value,type:event.target.value}))}><option value="DIAGNOSTICO_INICIAL">Diagnóstico</option><option value="SEGUIMIENTO">Seguimiento</option><option value="COACHING">Coaching</option><option value="REEVALUACION">Reevaluación</option><option value="CERTIFICACION">Certificación</option></select></label>
+              <label className="text-xs font-semibold">Producto<input className="cm-input mt-1 p-2 font-normal" value={draftMeta.product} onChange={event=>setDraftMeta(value=>({...value,product:event.target.value}))}/></label>
+              <label className="text-xs font-semibold">Resultado<select className="cm-select mt-1 p-2 font-normal" value={draftMeta.saleResult} onChange={event=>setDraftMeta(value=>({...value,saleResult:event.target.value,sale:event.target.value==='VENTA_CONCRETADA'}))}><option value="NO_VENTA">No venta</option><option value="VENTA_CONCRETADA">Venta concretada</option><option value="VENTA_OBSERVADA">Venta observada</option><option value="VOLVER_A_LLAMAR">Volver a llamar</option></select></label>
+              {!draftMeta.sale&&<label className="text-xs font-semibold">Motivo de no venta<input className="cm-input mt-1 p-2 font-normal" value={draftMeta.noSaleReason} onChange={event=>setDraftMeta(value=>({...value,noSaleReason:event.target.value}))}/></label>}
+            </div>
+          </div>}
           
           {/* Metadata & Scores Top Card */}
           <div className="cm-card rounded-xl p-4 sm:p-5 grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -210,7 +255,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
             </h4>
 
             <div className="space-y-3">
-              {evaluation.items.map((item, idx) => {
+              {(isEditing?draftItems:evaluation.items).map((item, idx) => {
                 const qualityDef = isQuality ? item.qualityGuideline || QUALITY_ATTRIBUTES.find(c => c.id === item.criterionId) : undefined;
                 const critDef = !isQuality ? CRITERIA_DEFINITIONS.find(c => c.id === item.criterionId) : undefined;
                 const compliance = getItemCompliance(item);
@@ -264,6 +309,13 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
                     </div>
                     {isQuality && item.errorType && <p className="text-[11px] text-[var(--cm-danger)]"><b>Tipo de error:</b> {item.errorType}</p>}
 
+                    {isEditing&&<div className="grid gap-2 border-t border-[var(--cm-border)] pt-3 md:grid-cols-2">
+                      <label className="text-[11px] font-semibold">Resultado<select className="cm-select mt-1 p-2 font-normal" value={item.compliance||''} onChange={event=>{const compliance=event.target.value as EvaluationItem['compliance'];changeItem(item.id,{compliance,percentage:compliance==='CUMPLE'?100:0,level:compliance==='CUMPLE'?4:compliance==='NO_CUMPLE'?1:0});}}><option value="">Sin responder</option><option value="CUMPLE">Cumple</option><option value="NO_CUMPLE">No cumple</option><option value="NO_APLICA">No aplica</option></select></label>
+                      <label className="text-[11px] font-semibold">Hallazgo<input className="cm-input mt-1 p-2 font-normal" value={item.finding||''} onChange={event=>changeItem(item.id,{finding:event.target.value})}/></label>
+                      <label className="text-[11px] font-semibold">Evidencia<textarea rows={2} className="cm-input mt-1 p-2 font-normal" value={item.evidence||''} onChange={event=>changeItem(item.id,{evidence:event.target.value})}/></label>
+                      <label className="text-[11px] font-semibold">Acción recomendada<textarea rows={2} className="cm-input mt-1 p-2 font-normal" value={item.recommendedAction||''} onChange={event=>changeItem(item.id,{recommendedAction:event.target.value})}/></label>
+                    </div>}
+
                     {isExpanded && (
                       <div className="grid gap-2 border-t border-[var(--cm-border)] pt-3 md:grid-cols-2">
                         {details.filter(detail => detail.value).map(detail => <div key={detail.label} className="rounded-lg bg-[var(--cm-bg-secondary)] p-3"><strong className="text-[var(--cm-text)]">{detail.label}:</strong><p className="mt-1 leading-relaxed text-[var(--cm-text-secondary)]">{detail.value}</p></div>)}
@@ -294,29 +346,29 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
           </div>
 
           {/* Evaluator Notes */}
-          {evaluation.comments && (
+          {(evaluation.comments||isEditing) && (
             <div className="cm-card rounded-xl p-4 sm:p-5 space-y-2 text-xs">
               <h4 className="font-bold text-xs text-[var(--cm-text)] uppercase tracking-wider font-heading">
                 Conclusiones del Evaluador
               </h4>
-              <p className="text-[var(--cm-text-secondary)] leading-relaxed bg-[var(--cm-surface-elevated)] p-3 rounded-lg border border-[var(--cm-border)]">
-                {evaluation.comments}
-              </p>
+              {isEditing?<textarea rows={4} className="cm-input p-3" value={draftMeta.comments} onChange={event=>setDraftMeta(value=>({...value,comments:event.target.value}))}/>:<p className="text-[var(--cm-text-secondary)] leading-relaxed bg-[var(--cm-surface-elevated)] p-3 rounded-lg border border-[var(--cm-border)]">{evaluation.comments}</p>}
             </div>
           )}
+
+          {editError&&<div role="alert" className="rounded-xl border border-[var(--cm-danger)] bg-[rgba(255,77,79,.09)] px-4 py-3 text-xs text-[var(--cm-danger)]">{editError}</div>}
 
         </div>
 
         {/* Modal Footer Actions */}
         <div className="p-4 bg-[var(--cm-surface-elevated)] border-t border-[var(--cm-border)] flex items-center justify-between">
           <button
-            onClick={onClose}
+            onClick={()=>{if(isEditing){setIsEditing(false);setEditError('');}else onClose();}}
             className="cm-button-secondary px-4 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
           >
-            Cerrar
+            {isEditing?'Cancelar edición':'Cerrar'}
           </button>
 
-          {onOpenNewActionPlan && (
+          {isEditing?<button disabled={savingEdit} onClick={()=>void saveEdit()} className="cm-button-primary px-4 py-2 text-xs disabled:opacity-50"><Save className="h-4 w-4"/>{savingEdit?'Guardando…':'Guardar cambios'}</button>:onOpenNewActionPlan && (
             <button
               onClick={() => {
                 onOpenNewActionPlan(evaluation);

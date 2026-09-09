@@ -12,6 +12,7 @@ import type { Advisor, Campaign, Company, Operation, OperationAssignment, Operat
 // @types/node 22 para el resto del código existente.
 import { DatabaseSync } from "node:sqlite";
 import * as XLSX from 'xlsx';
+import { calculateEvaluationSummary, getItemCompliance } from './src/utils/calculations';
 
 const PORT = Number(process.env.PORT || 3001);
 const isProduction = process.env.NODE_ENV === 'production' || /dist[\\/]server\.cjs$/.test(process.argv[1] || '');
@@ -102,6 +103,42 @@ const correctMigracionesQualityEvaluation = (evaluation: any, campaigns: Campaig
   const criticalFailure = Boolean(evaluation.qualityCriticalErrorIds?.length || criticalItem);
   const failedByScore = recalculated < 75;
   return { ...evaluation, technicalScore: recalculated, scoreTotal: criticalFailure ? 0 : recalculated, qualityResult: criticalFailure || failedByScore ? 'REPROBADA' : 'APROBADA', criticalReason: criticalFailure ? (evaluation.criticalReason || evaluation.qualityCriticalErrorSnapshot?.[0]?.name || 'Error crítico') : failedByScore ? 'Puntaje menor al mínimo aprobatorio de 75%' : undefined };
+};
+const recalculateEditedEvaluation = (evaluation: any, campaigns: Campaign[]) => {
+  const items = Array.isArray(evaluation.items) ? evaluation.items : [];
+  if (evaluation.evaluationType !== 'QUALITY') {
+    const summary = calculateEvaluationSummary(items);
+    return { ...evaluation, ...summary };
+  }
+  const campaign = campaigns.find(item => item.id === evaluation.campaignId);
+  const criterionWeights = campaign?.qualityCriterionWeights || { C1: .30, C2: .30, C3: .30, C4: .10 };
+  const dimensionCriterion: Record<string,string> = { CONECTAR:'C1', CLARIFICAR:'C2', CONVERTIR:'C3', CONECTAR_C4:'C4' };
+  const groups = ['C1','C2','C3','C4'].map(criterion => {
+    const rows = items.filter((item:any) => (item.qualityGuideline?.criterion || dimensionCriterion[item.dimension]) === criterion && ['CUMPLE','NO_CUMPLE'].includes(item.compliance));
+    const denominator = rows.reduce((sum:number,item:any) => sum + Number(item.attributeWeight || item.qualityGuideline?.weight || 1), 0);
+    const achieved = rows.filter((item:any) => item.compliance === 'CUMPLE').reduce((sum:number,item:any) => sum + Number(item.attributeWeight || item.qualityGuideline?.weight || 1), 0);
+    return { criterion, score: denominator ? achieved / denominator * 100 : null, weight: Number((criterionWeights as any)[criterion] || 0) };
+  });
+  const activeWeight = groups.reduce((sum,item) => sum + (item.score === null ? 0 : item.weight), 0);
+  const technicalScore = activeWeight ? Math.round(groups.reduce((sum,item) => sum + (item.score === null ? 0 : item.score * item.weight), 0) / activeWeight) : null;
+  const criticalItem = items.find((item:any) => item.compliance === 'NO_CUMPLE' && (item.qualityGuideline?.critical || String(item.classification || '').startsWith('CRITICO_')));
+  const criticalFailure = Boolean(evaluation.qualityCriticalErrorIds?.length || criticalItem);
+  const failedByMinimum = Boolean(isMigracionesBitel(campaign) && (technicalScore ?? 0) < 75);
+  const gaps = items.filter((item:any) => item.compliance === 'NO_CUMPLE');
+  return {
+    ...evaluation,
+    technicalScore,
+    scoreTotal: criticalFailure ? 0 : technicalScore,
+    scoreConnect: groups.find(item=>item.criterion==='C1')?.score == null ? null : Math.round(groups.find(item=>item.criterion==='C1')!.score!),
+    scoreClarify: groups.find(item=>item.criterion==='C2')?.score == null ? null : Math.round(groups.find(item=>item.criterion==='C2')!.score!),
+    scoreConvert: groups.find(item=>item.criterion==='C3')?.score == null ? null : Math.round(groups.find(item=>item.criterion==='C3')!.score!),
+    qualityResult: criticalFailure || failedByMinimum ? 'REPROBADA' : 'APROBADA',
+    criticalReason: criticalFailure ? (evaluation.qualityCriticalErrorSnapshot?.[0]?.name || criticalItem?.errorType || 'Error crítico') : failedByMinimum ? 'Puntaje menor al mínimo aprobatorio de 75%' : undefined,
+    primaryGap: gaps[0]?.attribute || gaps[0]?.qualityGuideline?.name || 'Sin brechas identificadas',
+    secondaryGap: gaps[1]?.attribute || gaps[1]?.qualityGuideline?.name || '',
+    strongestPillar: groups.filter(item=>item.score!==null).sort((a,b)=>(b.score||0)-(a.score||0))[0]?.criterion || '',
+    recommendation: gaps.length ? 'Revisar los atributos marcados como No cumple.' : 'Mantener el estándar de calidad alcanzado.'
+  };
 };
 
 async function cleanupEvaluationDuplicates() {
@@ -678,7 +715,40 @@ async function startServer() {
   const adminEvaluationRows = async () => { let rows=(db.prepare('SELECT payload_json FROM evaluations ORDER BY evaluated_at DESC').all() as any[]).flatMap(row=>{try{return[JSON.parse(row.payload_json)]}catch{return[]}});if(googleStorage.enabled)try{rows=uniqueEvaluations([...(await googleStorage.loadEvaluations()),...rows]);}catch{}return rows; };
   const adminFilteredEvaluations = async (query:any) => { const directory=await readRepository(),campaignId=String(query.campaignId||''),supervisorId=String(query.supervisorId||''),advisorName=String(query.advisorName||'').trim().toLocaleLowerCase(),feedbackStatus=String(query.feedbackStatus||''),validationStatus=String(query.validationStatus||'');let feedbacks=(db.prepare('SELECT * FROM feedbacks').all() as any[]);if(googleStorage.enabled)try{feedbacks=await googleStorage.loadFeedbacks();}catch{}const feedbackByEvaluation=new Map(feedbacks.map(item=>[item.evaluation_id,item]));const rows=(await adminEvaluationRows()).filter(item=>{const advisor=directory.advisors.find(a=>a.id===item.advisorId),fb=feedbackByEvaluation.get(item.id),fbState=fb&&['VALIDADO_ASESOR','CERRADO_SUPERVISOR'].includes(fb.status)?'FIRMADO':'PENDIENTE';return(!campaignId||item.campaignId===campaignId)&&(!supervisorId||item.supervisorId===supervisorId||advisor?.supervisorId===supervisorId)&&(!advisorName||advisor?.name.toLocaleLowerCase().includes(advisorName))&&(!feedbackStatus||fbState===feedbackStatus)&&(!validationStatus||normalizedValidationStatus(item)===validationStatus);});return{rows,feedbacks,directory,feedbackByEvaluation}; };
   app.get('/api/admin/dashboard',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(!adminRoles.has(user.role))return res.status(403).json({error:'Acceso restringido a Calidad y Administración.'});const {rows,feedbacks,directory}=await adminFilteredEvaluations(req.query);const valid=rows.filter(item=>normalizedValidationStatus(item)==='VALIDATED'),average=(items:any[])=>items.length?Math.round(items.reduce((sum,item)=>sum+Number(item.technicalScore??item.scoreTotal??0),0)/items.length):null;const by=(key:(item:any)=>string)=>Object.entries(valid.reduce((out:any,item)=>{const id=key(item);(out[id]??=[]).push(item);return out;},{})).map(([id,items]:any)=>({id,name:directory.campaigns.find(c=>c.id===id)?.name||directory.users.find(u=>u.id===id)?.name||'Sin asignar',average:average(items),count:items.length}));const signed=feedbacks.filter(item=>['VALIDADO_ASESOR','CERRADO_SUPERVISOR'].includes(item.status)).length;res.json({metrics:{feedbackDone:signed,feedbackPending:Math.max(0,feedbacks.length-signed),automaticPending:rows.filter(item=>normalizedValidationStatus(item)==='AUTOMATIC_PENDING').length},byCampaign:by(item=>item.campaignId),bySupervisor:by(item=>item.supervisorId),evaluations:rows.map(item=>({...item,feedbackStatus:(()=>{const fb=feedbacks.find(f=>f.evaluation_id===item.id);return fb&&['VALIDADO_ASESOR','CERRADO_SUPERVISOR'].includes(fb.status)?'FIRMADO':'PENDIENTE';})()}))});});
-  app.patch('/api/admin/evaluations/:id',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(!adminRoles.has(user.role))return res.status(403).json({error:'Acceso restringido.'});const current=await loadEvaluationById(req.params.id);if(!current)return res.status(404).json({error:'Evaluación no encontrada.'});const body=req.body||{},now=new Date().toISOString(),items=Array.isArray(body.items)?body.items:current.items;const invalidNa=items.some((item:any)=>item.compliance==='NO_APLICA'&&!item.qualityGuideline?.applicableRules?.length);if(invalidNa)return res.status(400).json({error:'NO_APLICA requiere una regla explícita en el atributo.'});const validationStatus=body.validate||body.validationStatus==='VALIDATED'?'VALIDATED':current.validationStatus;const next=correctMigracionesQualityEvaluation({...current,...Object.fromEntries(['comments','items','qualityCriticalErrorIds','qualityCriticalErrorSnapshot','primaryGap','secondaryGap','strongestPillar','recommendation'].filter(k=>body[k]!==undefined).map(k=>[k,body[k]])),validationStatus,origin:current.origin||'AUTOMATIC',validatedBy:validationStatus==='VALIDATED'?user.id:current.validatedBy,validatedAt:validationStatus==='VALIDATED'?now:current.validatedAt,updatedAt:now,audit:[...(current.audit||[]),{action:body.validate?'VALIDATED':'EDITED',userId:user.id,at:now}],...(body.adjustments?{saOriginal:current.saOriginal||{items:current.items,technicalScore:current.technicalScore,scoreTotal:current.scoreTotal}}:{})},(await readRepository()).campaigns);db.prepare('UPDATE evaluations SET payload_json=? WHERE id=?').run(JSON.stringify(next),next.id);if(googleStorage.enabled)await googleStorage.saveEvaluation(next);res.json({evaluation:next});});
+  app.patch('/api/admin/evaluations/:id', requireAuth, async (req,res) => {
+    const user=(req as any).authUser as User;
+    if(user.role!=='ADMINISTRADOR') return res.status(403).json({error:'Sólo el usuario Administrador puede editar evaluaciones finalizadas.'});
+    const current=await loadEvaluationById(req.params.id);
+    if(!current) return res.status(404).json({error:'Evaluación no encontrada.'});
+    const body=req.body||{},now=new Date().toISOString();
+    const editableFields=['date','time','callId','recordingCode','type','product','sale','saleResult','noSaleReason','comments','items','qualityCriticalErrorIds','qualityCriticalErrorSnapshot'];
+    const changes=Object.fromEntries(editableFields.filter(key=>body[key]!==undefined).map(key=>[key,body[key]]));
+    const contentEdit=editableFields.some(key=>body[key]!==undefined);
+    if(changes.date&&!/^\d{4}-\d{2}-\d{2}$/.test(String(changes.date))) return res.status(400).json({error:'La fecha de evaluación no es válida.'});
+    if(changes.time&&!/^\d{2}:\d{2}$/.test(String(changes.time))) return res.status(400).json({error:'La hora de evaluación no es válida.'});
+    const items=Array.isArray(changes.items)?changes.items:current.items;
+    const itemCompliance=(item:any)=>['CUMPLE','NO_CUMPLE','NO_APLICA'].includes(item?.compliance)?item.compliance:(item?.level!==undefined||item?.percentage!==undefined?getItemCompliance(item):undefined);
+    const answered=items.map((item:any)=>itemCompliance(item));
+    const existingScore=current.technicalScore??current.scoreTotal;
+    if(contentEdit&&!answered.some((status:any)=>status==='CUMPLE'||status==='NO_CUMPLE')&&!(existingScore!==null&&existingScore!==undefined&&Number.isFinite(Number(existingScore)))) return res.status(400).json({error:'Responde al menos un criterio evaluable antes de guardar.'});
+    const invalidNa=items.some((item:any)=>item.compliance==='NO_APLICA'&&item.qualityGuideline&&!item.qualityGuideline?.applicableRules?.length);
+    if(invalidNa)return res.status(400).json({error:'NO_APLICA requiere una regla explícita en el atributo.'});
+    const directory=await readRepository();
+    const validationStatus=body.validate||body.validationStatus==='VALIDATED'?'VALIDATED':current.validationStatus;
+    const merged={...current,...changes,items:items.map((item:any)=>({...item,compliance:itemCompliance(item)})),validationStatus,updatedAt:now,audit:[...(current.audit||[]),{action:body.validate?'VALIDATED':'EDITED',userId:user.id,at:now}]};
+    const next=contentEdit?recalculateEditedEvaluation(merged,directory.campaigns):correctMigracionesQualityEvaluation(merged,directory.campaigns);
+    try {
+      if(googleStorage.enabled) await googleStorage.saveEvaluation(next);
+      db.prepare('UPDATE evaluations SET evaluated_at=?,payload_json=? WHERE id=?').run(`${next.date}T${next.time||'00:00'}:00`,JSON.stringify(next),next.id);
+      if(lastCompletePlatformState) lastCompletePlatformState={...lastCompletePlatformState,evaluations:(lastCompletePlatformState.evaluations||[]).map((item:any)=>item.id===next.id?next:item)};
+      return res.json({evaluation:next});
+    } catch(error:any) {
+      const status=Number(error?.response?.status||error?.code||0),detail=[error?.message,error?.response?.data?.error,error?.response?.data?.error_description].filter(Boolean).map(String).join(' ').toLowerCase();
+      if(status===429||/quota exceeded|rate.?limit/.test(detail))return res.status(503).json({error:'Google Sheets alcanzó temporalmente su límite. Espera un minuto y vuelve a guardar.'});
+      if(/invalid_grant|token has been expired|token has been revoked/.test(detail))return res.status(503).json({error:'La autorización de Google Sheets venció. Debe renovarse GOOGLE_REFRESH_TOKEN en Railway.'});
+      return res.status(status>=500?503:400).json({error:error.message||'No fue posible actualizar la evaluación.'});
+    }
+  });
   const canReadEvaluation = (user: User, evaluation: any) => user.role === 'ASESOR'
     ? user.advisorId === evaluation.advisorId
     : user.role === 'SUPERVISOR'

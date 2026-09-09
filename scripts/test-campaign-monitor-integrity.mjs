@@ -61,6 +61,14 @@ try {
   assert.equal(monitorDelete.response.status, 403, 'Un monitor no debe poder eliminar evaluaciones.');
   const linkedFeedback = await request('/api/feedbacks', { method: 'POST', token: admin, body: { evaluation_id: 'eval_monitor_test', feedback_text: 'Feedback que debe eliminarse con su evaluación.' } });
   assert.equal(linkedFeedback.response.status, 201, JSON.stringify(linkedFeedback.data));
+  const monitorEdit = await request('/api/admin/evaluations/eval_monitor_test', { method: 'PATCH', token: monitorToken, body: { comments: 'Intento no autorizado' } });
+  assert.equal(monitorEdit.response.status, 403, 'Un monitor no debe editar evaluaciones finalizadas.');
+  const edited = await request('/api/admin/evaluations/eval_monitor_test', { method: 'PATCH', token: admin, body: { comments: 'Corrección administrativa verificada', callId: 'CALL-MONITOR-EDITADA', items: [{ id: 'item_test', criterionId: 'D', dimension: 'DOMINIO_PRODUCTO', compliance: 'NO_CUMPLE', percentage: 0, level: 1, finding: 'Hallazgo corregido', evidence: '', recommendedAction: 'Reforzar conocimiento.' }] } });
+  assert.equal(edited.response.status, 200, JSON.stringify(edited.data));
+  assert.equal(edited.data.evaluation.id, 'eval_monitor_test', 'La edición debe conservar el ID y los vínculos históricos.');
+  assert.equal(edited.data.evaluation.scoreTotal, 0, 'El servidor debe recalcular el puntaje editado.');
+  assert.equal(edited.data.evaluation.audit.at(-1).action, 'EDITED', 'La edición debe dejar auditoría.');
+  assert.equal((await request('/api/feedbacks', { token: admin })).data.feedbacks.some(item => item.evaluation_id === 'eval_monitor_test'), true, 'Editar no debe eliminar el feedback asociado.');
 
   const removed = await request(`/api/admin/campaigns/${operation.campaignId}?companyId=${encodeURIComponent(operation.companyId)}`, { method: 'DELETE', token: admin });
   assert.equal(removed.response.status, 200, JSON.stringify(removed.data));
@@ -95,7 +103,7 @@ try {
   const feedbackAfterDelete = await request('/api/feedbacks', { token: admin });
   assert.equal(feedbackAfterDelete.data.feedbacks.some(item => item.evaluation_id === 'eval_monitor_test'), false, 'El feedback dependiente no debe quedar huérfano.');
   assert.equal((await request('/api/evaluations/eval_monitor_test', { method: 'DELETE', token: admin })).response.status, 404);
-  console.log('Integridad de campañas, evaluación MONITOR y eliminación persistente: 18 verificaciones correctas.');
+  console.log('Integridad de campañas, edición administrativa y eliminación persistente: 24 verificaciones correctas.');
 } finally {
   child.kill();
   await new Promise(resolve => setTimeout(resolve, 250));

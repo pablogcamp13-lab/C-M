@@ -190,6 +190,7 @@ const MainLayout: React.FC = () => {
         <EvaluationDetailModal
           evaluation={selectedEvaluationForDetail}
           onClose={() => setSelectedEvaluationForDetail(null)}
+          onUpdated={setSelectedEvaluationForDetail}
           onOpenNewActionPlan={currentUser.role === 'ASESOR' ? undefined : (ev) => {
             setSelectedEvaluationForDetail(null);
             handleOpenActionPlanWithEval(ev);

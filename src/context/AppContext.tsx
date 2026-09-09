@@ -100,7 +100,7 @@ interface AppContextType {
 
   // Mutators
   addEvaluation: (evalData: Omit<Evaluation, 'id' | 'createdAt' | 'scoreConnect' | 'scoreClarify' | 'scoreConvert' | 'scoreTotal' | 'primaryGap' | 'secondaryGap' | 'strongestPillar' | 'recommendation'>) => Promise<Evaluation>;
-  updateEvaluation: (id: string, evalData: Partial<Evaluation>) => void;
+  updateEvaluation: (id: string, evalData: Partial<Evaluation>) => Promise<Evaluation>;
   deleteEvaluation: (id: string) => Promise<void>;
 
   addAdvisor: (advisor: Omit<Advisor, 'id'>) => Advisor;
@@ -656,29 +656,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved;
   };
 
-  const updateEvaluation = (id: string, evalData: Partial<Evaluation>) => {
-    if (currentUser.role === 'MONITOR' && !evaluations.some(e => e.id === id && e.evaluatorId === currentUser.id)) return;
-    setEvaluations(prev => prev.map(e => {
-      if (e.id === id) {
-        const merged = { ...e, ...evalData };
-        if (evalData.items) {
-          const summary = calculateEvaluationSummary(merged.items, config);
-          return {
-            ...merged,
-            scoreConnect: summary.scoreConnect,
-            scoreClarify: summary.scoreClarify,
-            scoreConvert: summary.scoreConvert,
-            scoreTotal: summary.scoreTotal,
-            primaryGap: summary.primaryGap,
-            secondaryGap: summary.secondaryGap,
-            strongestPillar: summary.strongestPillar,
-            recommendation: summary.recommendation
-          };
-        }
-        return merged;
-      }
-      return e;
-    }));
+  const updateEvaluation = async (id: string, evalData: Partial<Evaluation>) => {
+    if (currentUser.role !== 'ADMINISTRADOR') throw new Error('Sólo el usuario Administrador puede editar evaluaciones finalizadas.');
+    const saved = (await evaluationsApi.update(id, evalData)).evaluation;
+    setEvaluations(prev => prev.map(e => e.id === id ? saved : e));
+    window.dispatchEvent(new Event('cm:data-changed'));
+    return saved;
   };
 
   const deleteEvaluation = async (id: string) => {
