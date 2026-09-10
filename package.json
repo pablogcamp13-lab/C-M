@@ -20,6 +20,7 @@
     "lint": "npm run typecheck",
     "test:phase1": "node scripts/test-phase1.mjs",
     "test:phase2": "node scripts/test-phase2.mjs",
+    "test:phase3": "node scripts/test-phase3.mjs",
     "test:operations": "node scripts/test-operations-module.mjs",
     "test:roster-reassignment": "tsx scripts/test-roster-reassignment.mjs"
   },

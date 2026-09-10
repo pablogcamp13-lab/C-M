@@ -1,4 +1,4 @@
-import React, { useEffect, useId } from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
@@ -28,15 +28,23 @@ export const Drawer: React.FC<DrawerProps> = ({
   footer
 }) => {
   const titleId = useId();
+  const drawerRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
+      if (event.key !== 'Tab' || !drawerRef.current) return;
+      const items = [...drawerRef.current.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')];
+      if (!items.length) { event.preventDefault(); drawerRef.current.focus(); return; }
+      const first = items[0], last = items.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     };
     document.body.style.overflow = 'hidden';
     document.addEventListener('keydown', closeOnEscape);
+    requestAnimationFrame(() => drawerRef.current?.querySelector<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled])')?.focus() || drawerRef.current?.focus());
     return () => {
       document.body.style.overflow = previousOverflow;
       document.removeEventListener('keydown', closeOnEscape);
@@ -47,7 +55,7 @@ export const Drawer: React.FC<DrawerProps> = ({
   return createPortal(
     <div className="cm-drawer-overlay" data-cm-overlay="drawer">
       <button className="cm-drawer-backdrop" onClick={onClose} aria-label="Cerrar panel" />
-      <section className={`cm-drawer cm-drawer--${size}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <section ref={drawerRef} tabIndex={-1} className={`cm-drawer cm-drawer--${size}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <header className="cm-drawer__header">
           <div className="cm-drawer__heading">
             {icon && <span className="cm-drawer__icon">{icon}</span>}

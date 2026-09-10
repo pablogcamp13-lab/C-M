@@ -11,7 +11,7 @@ const api=async(path,{token,method='GET',body}={})=>{const response=await fetch(
 try{
   for(let attempt=0;attempt<100;attempt++){try{if((await fetch(`${base}/api/health`)).ok)break}catch{}await new Promise(resolve=>setTimeout(resolve,80));}
   const login=await api('/api/auth/login',{method:'POST',body:{identity:'admin',password:'Admin-test-2026'}});assert.equal(login.response.status,200);const admin=login.data.token;
-  const repo=(await api('/api/shared-repository',{token:admin})).data.repository,now=new Date().toISOString();
+  const repo=(await api('/api/shared-repository',{token:admin})).data.repository,now=new Date().toISOString(),effectiveDate=now.slice(0,10);
   const talent=repo.companies.find(company=>company.name==='TALENT UP');assert.ok(talent);
   const techcenter=repo.companies.find(company=>company.name==='TECHCENTER');assert.ok(techcenter);
   const retentions=repo.operations.find(operation=>operation.companyId===techcenter.id&&operation.name==='TECHCENTER / Retenciones Bitel');assert.ok(retentions);
@@ -23,13 +23,13 @@ try{
   const retainedOperations=reconciled.data.repository.operations.filter(operation=>operation.companyId===techcenter.id&&operation.name==='TECHCENTER / Retenciones Bitel'&&operation.status==='ACTIVA');assert.equal(retainedOperations.length,1,'Equivalent company/campaign operations are consolidated');
   const retainedStaffing=await api(`/api/staffing?operationId=${retainedOperations[0].id}`,{token:admin});assert.ok(retainedStaffing.data.rows.some(row=>row.id==='adv_duplicate_retentions'),'Reassigned people are visible in the canonical operation');
   assert.ok(reconciled.data.repository.operationSupervisors.some(link=>link.operationId===retainedOperations[0].id&&link.supervisorId==='usr_admin'&&link.active),'An imported supervisor is linked to the destination operation');
-  const historicalEvaluation=await api('/api/evaluations',{token:admin,method:'POST',body:{id:'eval_before_roster_import',advisorId:'adv_duplicate_retentions',evaluatorId:'usr_admin',evaluationType:'QUALITY',date:'2026-09-07',time:'10:00',items:[]}});assert.equal(historicalEvaluation.response.status,201);
+  const historicalEvaluation=await api('/api/evaluations',{token:admin,method:'POST',body:{id:'eval_before_roster_import',advisorId:'adv_duplicate_retentions',evaluatorId:'usr_admin',evaluationType:'QUALITY',date:'2026-09-07',time:'10:00',technicalScore:80,items:[]}});assert.equal(historicalEvaluation.response.status,201);
   const historicalFeedback=await api('/api/feedbacks',{token:admin,method:'POST',body:{evaluation_id:'eval_before_roster_import',feedback_text:'Histórico que debe conservarse.'}});assert.equal(historicalFeedback.response.status,201);
   const importRows=[
     {advisor:{...duplicatedAdvisor,id:'client_id_must_not_replace_existing',name:'Asesor Retenciones Actualizado',operationId:retainedOperations[0].id,campaignId:retainedOperations[0].campaignId,supervisorId:'usr_admin',quartile:'Q4'}},
     {advisor:{id:'adv_imported_roster',dni:'90000003',employeeCode:'IMP1',name:'Asesor Nuevo Importado',operationId:retainedOperations[0].id,campaignId:retainedOperations[0].campaignId,teamId:'',supervisorId:'usr_admin',quartile:'Q2',status:'ACTIVO',active:true,hireDate:'2026-01-01'}}
   ];
-  const imported=await api('/api/staffing/import',{token:admin,method:'POST',body:{operationId:retainedOperations[0].id,effectiveAt:'2026-09-08',rows:importRows}});
+  const imported=await api('/api/staffing/import',{token:admin,method:'POST',body:{operationId:retainedOperations[0].id,effectiveAt:effectiveDate,rows:importRows}});
   assert.equal(imported.response.status,200);assert.equal(imported.data.verification.verified,2);assert.equal(imported.data.summary.created,1);assert.equal(imported.data.summary.updated,1);
   const importedExisting=imported.data.repository.advisors.find(advisor=>advisor.dni==='90000000');
   assert.equal(importedExisting.id,'adv_duplicate_retentions','Import by DNI preserves the advisor identity and its historical references');
@@ -37,18 +37,18 @@ try{
   const importedNew=imported.data.repository.advisors.find(advisor=>advisor.dni==='90000003');assert.ok(importedNew);assert.equal(importedNew.operationId,retainedOperations[0].id);
   assert.ok(imported.data.repository.users.some(user=>user.advisorId===importedNew.id),'New advisors receive an account');
   const movementsAfterFirstImport=imported.data.repository.staffingMovements.length;
-  const repeatedImport=await api('/api/staffing/import',{token:admin,method:'POST',body:{operationId:retainedOperations[0].id,effectiveAt:'2026-09-08',rows:importRows}});
+  const repeatedImport=await api('/api/staffing/import',{token:admin,method:'POST',body:{operationId:retainedOperations[0].id,effectiveAt:effectiveDate,rows:importRows}});
   assert.equal(repeatedImport.response.status,200);assert.equal(repeatedImport.data.verification.verified,2);assert.equal(repeatedImport.data.summary.created,0);assert.equal(repeatedImport.data.summary.updated,2);assert.equal(repeatedImport.data.summary.assignmentsCreated,0);assert.equal(repeatedImport.data.summary.alreadyAssigned,2);
   assert.equal(repeatedImport.data.repository.staffingMovements.length,movementsAfterFirstImport,'Repeating the same roster does not duplicate assignments or movements');
   const evaluationsAfterImport=await api('/api/admin/dashboard',{token:admin});assert.ok(evaluationsAfterImport.data.evaluations.some(evaluation=>evaluation.id==='eval_before_roster_import'),'Evaluations survive reassignment');
   const feedbacksAfterImport=await api('/api/feedbacks',{token:admin});assert.ok(feedbacksAfterImport.data.feedbacks.some(feedback=>feedback.feedback_id===historicalFeedback.data.feedback.feedback_id),'Feedback survives reassignment');
-  const rejectedImport=await api('/api/staffing/import',{token:admin,method:'POST',body:{operationId:retainedOperations[0].id,effectiveAt:'2026-09-08',rows:[{advisor:{id:'adv_should_rollback',dni:'90000004',name:'Fila válida previa',supervisorId:'usr_admin'}},{advisor:{id:'adv_invalid_supervisor',dni:'90000005',name:'Fila inválida',supervisorId:'missing_user'}}]}});
+  const rejectedImport=await api('/api/staffing/import',{token:admin,method:'POST',body:{operationId:retainedOperations[0].id,effectiveAt:effectiveDate,rows:[{advisor:{id:'adv_should_rollback',dni:'90000004',name:'Fila válida previa',supervisorId:'usr_admin'}},{advisor:{id:'adv_invalid_supervisor',dni:'90000005',name:'Fila inválida',supervisorId:'missing_user'}}]}});
   assert.equal(rejectedImport.response.status,400);const afterRejectedImport=(await api('/api/shared-repository',{token:admin})).data.repository;assert.ok(!afterRejectedImport.advisors.some(advisor=>['90000004','90000005'].includes(advisor.dni)),'A rejected batch does not leave partial advisors');
   const deletedCampaign={id:'camp_deleted_evaluation',name:'Campaña eliminada de prueba',client:'Test',status:'ACTIVA',products:[]};
   const deletedOperation={id:'op_deleted_evaluation',companyId:techcenter.id,campaignId:deletedCampaign.id,name:'TECHCENTER / Campaña eliminada de prueba',status:'ACTIVA',legacy:false};
   const deletedAdvisor={id:'adv_deleted_evaluation',dni:'90000002',employeeCode:'DEL1',name:'Asesor de campaña eliminada',campaignId:deletedCampaign.id,operationId:deletedOperation.id,teamId:'',supervisorId:'usr_admin',status:'ACTIVO',active:true,hireDate:'2026-01-01'};
   const withDeletedCampaign=await api('/api/shared-repository/sync',{token:admin,method:'PUT',body:{...reconciled.data.repository,campaigns:[...reconciled.data.repository.campaigns,deletedCampaign],operations:[...reconciled.data.repository.operations,deletedOperation],advisors:[...reconciled.data.repository.advisors,deletedAdvisor]}});assert.equal(withDeletedCampaign.response.status,200);
-  const removed=await api(`/api/admin/campaigns/${deletedCampaign.id}?companyId=${techcenter.id}`,{token:admin,method:'DELETE'});assert.equal(removed.response.status,204);
+  const removed=await api(`/api/admin/campaigns/${deletedCampaign.id}?companyId=${techcenter.id}`,{token:admin,method:'DELETE'});assert.equal(removed.response.status,200);
   const afterRemoval=(await api('/api/shared-repository',{token:admin})).data.repository;
   assert.equal(afterRemoval.campaigns.find(campaign=>campaign.id===deletedCampaign.id)?.status,'INACTIVA');
   assert.equal(afterRemoval.operations.find(operation=>operation.id===deletedOperation.id)?.status,'INACTIVA');
@@ -57,7 +57,7 @@ try{
   const users=[...repo.users,{id:'usr_ops_supervisor',name:'Supervisor Operación',email:'ops.supervisor@test.local',username:'ops.supervisor',role:'SUPERVISOR',status:'ACTIVO',createdAt:now,password:'Supervisor-test-2026'},{id:'usr_ops_agent',name:'Agente Operación',email:'ops.agent@test.local',username:'ops.agent',role:'ASESOR',status:'ACTIVO',advisorId:'adv_ops',createdAt:now,password:'Agent-test-2026'}];
   const advisors=[...repo.advisors,{id:'adv_ops',dni:'90000001',employeeCode:'OPS1',name:'Asesor Operación',campaignId:'camp_1',operationId:'op_legacy_camp_1',teamId:'',supervisorId:'usr_ops_supervisor',status:'ACTIVO',active:true,hireDate:'2026-01-01'}];
   assert.equal((await api('/api/shared-repository/sync',{token:admin,method:'PUT',body:{...repo,users,advisors}})).response.status,200);
-  const body={companyId:talent.id,name:'Operación de Prueba',supervisorIds:['usr_ops_supervisor'],selection:{advisorIds:['adv_ops']},supervisorMode:'KEEP',effectiveAt:'2026-09-08',dryRun:true};
+  const body={companyId:talent.id,name:'Operación de Prueba',supervisorIds:['usr_ops_supervisor'],selection:{advisorIds:['adv_ops']},supervisorMode:'KEEP',effectiveAt:effectiveDate,dryRun:true};
   const preview=await api('/api/operations',{token:admin,method:'POST',body});assert.equal(preview.response.status,200);assert.equal(preview.data.preview.valid,true);
   const created=await api('/api/operations',{token:admin,method:'POST',body:{...body,dryRun:false}});assert.equal(created.response.status,201);assert.equal(created.data.assigned,1);
   const duplicate=await api('/api/operations',{token:admin,method:'POST',body:{...body,dryRun:false}});assert.equal(duplicate.response.status,400);

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Navbar } from './components/layout/Navbar';
+import { Sidebar } from './components/layout/Sidebar';
+import { ToastProvider } from './components/ui';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { EvaluationsList } from './components/evaluations/EvaluationsList';
 import { NewEvaluationModal } from './components/evaluations/NewEvaluationModal';
@@ -49,6 +51,7 @@ const MainLayout: React.FC = () => {
   const [selectedAdvisorIdForProfile, setSelectedAdvisorIdForProfile] = useState<string | null>(null);
   const [isNewAdvisorModalOpen, setIsNewAdvisorModalOpen] = useState(false);
   const [initialEvalForActionPlan, setInitialEvalForActionPlan] = useState<any>(null);
+  const [isNavigationOpen, setIsNavigationOpen] = useState(false);
 
   const handleOpenNewEvaluation = async (advisor?: Advisor) => {
     let latest = { advisors, operations };
@@ -91,15 +94,13 @@ const MainLayout: React.FC = () => {
   const activeAdvisorsCount = advisors.filter(a => a.active).length;
 
   return (
-    <div className="cm-app-shell antialiased [background-image:radial-gradient(circle_at_90%_0%,rgba(33,212,253,.08),transparent_28%)]">
-      <div className="min-h-screen flex flex-col">
-        
-        {/* Top Navbar */}
-        <Navbar onOpenNewEvaluation={() => handleOpenNewEvaluation()} />
-
-        {/* Dynamic View Router */}
-        <main className="flex-1 flex flex-col min-h-0 relative">
-          {currentSection === 'home' && (currentUser.role === 'ASESOR' ? <AdvisorHomeView onSelectEvaluation={setSelectedEvaluationForDetail} /> : currentUser.role === 'SUPERVISOR' ? <SupervisorHomeView /> : <HomeView />)}
+    <div className="cm-app-shell antialiased">
+      <div className="cm-shell">
+        <Sidebar mobileOpen={isNavigationOpen} onMobileClose={() => setIsNavigationOpen(false)} />
+        <div className="cm-shell__main">
+          <Navbar onOpenNewEvaluation={() => handleOpenNewEvaluation()} onOpenNavigation={() => setIsNavigationOpen(true)} />
+          <main className="cm-shell__content">
+          {currentSection === 'home' && (currentUser.role === 'ASESOR' ? <AdvisorHomeView onSelectEvaluation={setSelectedEvaluationForDetail} /> : currentUser.role === 'SUPERVISOR' ? <SupervisorHomeView /> : <HomeView onOpenNewEvaluation={() => handleOpenNewEvaluation()} />)}
           
           {currentSection === 'dashboard' && (
             <DashboardView
@@ -162,8 +163,8 @@ const MainLayout: React.FC = () => {
             <AdminSettingsView />
           )}
 
-        </main>
-
+          </main>
+        </div>
       </div>{currentUser.mustChangePassword && currentUser.id === authenticatedUserId && <ForcePasswordChange />}
 
       {/* Global Modals */}
@@ -249,7 +250,7 @@ const EvaluationModulePicker: React.FC<{ campaign?: Campaign; onSelect: (module:
 export default function App() {
   return (
     <AppProvider>
-      <AuthenticatedApplication />
+      <ToastProvider><AuthenticatedApplication /></ToastProvider>
     </AppProvider>
   );
 }

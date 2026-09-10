@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Edit3, ImagePlus, Plus, Trash2, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Campaign, Operation } from '../../types';
+import { Button, Modal } from '../ui';
 
 const emptyForm: Omit<Campaign, 'id'> = { name: '', client: '', status: 'ACTIVA', products: [], description: '', backgroundImage: '' };
 type CampaignRow = { campaign: Campaign; operation?: Operation; companyId?: string };
@@ -14,6 +15,7 @@ export const CampaignManagerModal: React.FC<{ onClose: () => void }> = ({ onClos
   const [companyId, setCompanyId] = useState('');
   const [form, setForm] = useState<Omit<Campaign, 'id'>>(emptyForm);
   const [message, setMessage] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<CampaignRow | null>(null);
 
   const groups = useMemo(() => {
     const activeOperations = operations.filter(operation => !operation.legacy && operation.status === 'ACTIVA');
@@ -57,11 +59,11 @@ export const CampaignManagerModal: React.FC<{ onClose: () => void }> = ({ onClos
 
   const remove = async (row: CampaignRow) => {
     const scope = row.companyId ? ` de ${companies.find(company => company.id === row.companyId)?.name || 'la empresa'}` : '';
-    if (!window.confirm(`¿Eliminar la campaña “${row.campaign.name}”${scope}? Los asesores y su historial se conservarán.`)) return;
     setMessage('');
     try {
       await deleteCampaign(row.campaign.id, row.companyId);
       setMessage(`Campaña “${row.campaign.name}” eliminada${scope}.`);
+      setPendingDelete(null);
     } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo eliminar la campaña.'); }
   };
 
@@ -112,7 +114,7 @@ export const CampaignManagerModal: React.FC<{ onClose: () => void }> = ({ onClos
                     <div><strong className="text-sm text-white">{row.campaign.name}</strong><span className="block text-xs text-[var(--cm-text-secondary)]">{row.campaign.description || row.operation?.name || 'Sin descripción'}</span></div>
                     <span className="w-fit rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300">{row.campaign.status}</span>
                     <span className="text-xs text-[var(--cm-text-secondary)]">{assigned} asesores</span>
-                    <div className="flex justify-end gap-2"><button onClick={() => openForm(row)} className="cm-button-secondary flex items-center gap-1 px-3 py-1.5 text-xs"><Edit3 className="h-3.5 w-3.5" />Editar</button><button onClick={() => void remove(row)} className="rounded-lg p-2 text-rose-400 hover:bg-rose-500/10" title="Eliminar"><Trash2 className="h-4 w-4" /></button></div>
+                    <div className="flex justify-end gap-2"><button onClick={() => openForm(row)} className="cm-button-secondary flex items-center gap-1 px-3 py-1.5 text-xs"><Edit3 className="h-3.5 w-3.5" />Editar</button><button onClick={() => setPendingDelete(row)} className="rounded-lg p-2 text-rose-400 hover:bg-rose-500/10" title="Eliminar"><Trash2 className="h-4 w-4" /></button></div>
                   </div>;
                 })}
               </div>
@@ -138,6 +140,7 @@ export const CampaignManagerModal: React.FC<{ onClose: () => void }> = ({ onClos
           </form>
         </div>}
       </div>
+      <Modal open={Boolean(pendingDelete)} title="Eliminar campaña" description="La eliminación sólo procederá si no existen referencias históricas." tone="danger" onClose={() => setPendingDelete(null)} footer={<><Button variant="secondary" onClick={() => setPendingDelete(null)}>Cancelar</Button><Button variant="danger" onClick={() => pendingDelete && void remove(pendingDelete)}>Eliminar campaña</Button></>}><p className="text-sm text-[var(--cm-text-secondary)]">{pendingDelete ? `Se validará “${pendingDelete.campaign.name}” antes de eliminar. Los asesores, evaluaciones y feedbacks no se borrarán.` : ''}</p></Modal>
     </div>, document.body
   );
 };

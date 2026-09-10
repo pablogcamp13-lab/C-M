@@ -1,52 +1,16 @@
-import React, { useState } from 'react';
-import { Bell, ChevronDown, Menu, Plus, X } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Bell, ChevronDown, Menu, Plus } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import type { NavigationSection } from '../../types';
+import { Badge, Button, IconButton } from '../ui';
+import { sectionLabel } from './navigation';
 
-const navigation: Array<{ label: string; section: NavigationSection }> = [
-  { label: 'Inicio', section: 'home' }, { label: 'MC', section: 'dashboard' },
-  { label: 'Calidad', section: 'dashboard_quality' }, { label: 'Evaluaciones', section: 'evaluations' },
-  { label: 'Feedback', section: 'feedback' }, { label: 'PDA', section: 'action_plans' },
-  { label: 'Alertas', section: 'quality_alerts' }, { label: 'Calibraciones', section: 'calibrations' },
-  { label: 'Desarrollo', section: 'development' },
-  { label: 'Analítica', section: 'pareto' }, { label: 'Reportes', section: 'reports' }, { label: 'Configuración', section: 'admin' }
-];
-const monitorNavigation: Array<{ label: string; section: NavigationSection }> = [
-  { label: 'Evaluar', section: 'evaluations' },
-  { label: 'Feedbacks', section: 'feedback' },
-  { label: 'Resultados', section: 'monitor_results' },
-  { label: 'Cápsulas', section: 'development' },
-  { label: 'Mis avances', section: 'monitor_progress' },
-];
-
-export const Navbar: React.FC<{ onOpenNewEvaluation: () => void }> = ({ onOpenNewEvaluation }) => {
-  const { currentSection, setCurrentSection, currentUser, logout } = useApp();
-  const [open, setOpen] = useState(false);
+export const Navbar: React.FC<{ onOpenNewEvaluation: () => void; onOpenNavigation: () => void }> = ({ onOpenNewEvaluation, onOpenNavigation }) => {
+  const { currentSection, currentUser, logout, companies, filters } = useApp();
   const [menu, setMenu] = useState(false);
-  const visibleNavigation = currentUser.role === 'MONITOR' ? monitorNavigation : currentUser.role === 'ASESOR'
-    ? navigation.filter(item => ['home', 'evaluations', 'feedback', 'action_plans', 'quality_alerts', 'development'].includes(item.section))
-    : currentUser.role === 'SUPERVISOR'
-      ? navigation.filter(item => ['home', 'evaluations', 'feedback', 'action_plans', 'quality_alerts', 'calibrations', 'reports'].includes(item.section))
-      : navigation.filter(item => item.section !== 'development' || currentUser.role === 'ADMINISTRADOR');
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => { const close = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setMenu(false); }; document.addEventListener('mousedown', close); return () => document.removeEventListener('mousedown', close); }, []);
   const canCreateEvaluation = ['ADMINISTRADOR', 'CONSULTOR', 'MONITOR'].includes(currentUser.role);
+  const company = companies.find(item => item.id === filters.companyId)?.name || 'Vista global';
 
-  return <header className="cm-navbar">
-    <div className="cm-navbar__inner">
-      <button onClick={() => setCurrentSection(currentUser.role === 'MONITOR' ? 'monitor_progress' : 'home')} className="cm-navbar__brand">
-        <span className="cm-navbar__brand-mark">C&amp;M</span><span className="cm-navbar__divider hidden sm:block" />
-        <span className="cm-navbar__subtitle hidden sm:block">Calidad y<br />Mejora Continua</span>
-      </button>
-      <nav className="cm-navbar__nav hidden xl:flex" aria-label="Navegación principal">
-        {visibleNavigation.map(item => <button key={item.section} onClick={() => setCurrentSection(item.section)} className="cm-navbar__link" aria-current={currentSection === item.section ? 'page' : undefined}>{item.label}</button>)}
-      </nav>
-      <div className="cm-navbar__actions ml-auto flex items-center gap-2">
-        <button className="cm-navbar__icon-button" aria-label="Notificaciones"><Bell className="h-5 w-5" /><span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#1fa8ff]" /></button>
-        <button onClick={() => setMenu(!menu)} className="cm-navbar__profile hidden sm:flex" aria-expanded={menu}><span className="cm-navbar__avatar">{currentUser.name.charAt(0)}</span><span className="max-w-28 text-left text-[11px] leading-tight"><b className="block truncate">{currentUser.name}</b><span className="text-[#c2dddd]">{currentUser.role}</span></span><ChevronDown className="h-3 w-3" /></button>
-        {canCreateEvaluation && <button onClick={onOpenNewEvaluation} className="cm-navbar__new-evaluation cm-button-primary hidden items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold md:inline-flex"><Plus className="h-4 w-4 shrink-0" /><span>Nueva evaluación</span></button>}
-        <button onClick={() => setOpen(!open)} className="cm-navbar__icon-button xl:hidden" aria-label="Abrir navegación" aria-expanded={open}>{open ? <X /> : <Menu />}</button>
-      </div>
-    </div>
-    {menu && <div className="cm-modal cm-navbar__menu text-sm"><p className="px-2 py-2 text-xs text-[var(--cm-text-muted)]">Sesión activa</p><button onClick={() => void logout()} className="cm-button-secondary w-full px-2 py-2 text-left">Cerrar sesión</button></div>}
-    {open && <nav className="cm-navbar__mobile xl:hidden" aria-label="Navegación móvil">{visibleNavigation.map(item => <button key={item.section} onClick={() => { setCurrentSection(item.section); setOpen(false); }} className="cm-navbar__mobile-link" aria-current={currentSection === item.section ? 'page' : undefined}>{item.label}</button>)}{canCreateEvaluation && <button onClick={onOpenNewEvaluation} className="cm-button-primary mt-2 w-full px-3 py-2 text-left text-sm">+ Nueva evaluación</button>}</nav>}
-  </header>;
+  return <header className="cm-topbar"><div className="cm-topbar__left"><IconButton label="Abrir navegación" onClick={onOpenNavigation} className="lg:hidden"><Menu /></IconButton><div><nav aria-label="Migas de pan"><span>C&amp;M</span><b>/</b><strong>{sectionLabel(currentSection)}</strong></nav><small>{company}</small></div></div><div className="cm-topbar__actions"><Badge variant="success" dot>Operativo</Badge><IconButton label="Notificaciones"><Bell /><i className="cm-notification-dot" /></IconButton>{canCreateEvaluation && <Button size="sm" leadingIcon={<Plus />} onClick={onOpenNewEvaluation}>Nueva evaluación</Button>}<div className="cm-profile-menu" ref={root}><button onClick={() => setMenu(value => !value)} aria-expanded={menu}><span>{currentUser.name.charAt(0)}</span><i><b>{currentUser.name}</b><small>{currentUser.role}</small></i><ChevronDown /></button>{menu && <div className="cm-profile-menu__popover"><p>Sesión activa</p><b>{currentUser.name}</b><small>{currentUser.role}</small><Button variant="secondary" size="sm" onClick={() => void logout()}>Cerrar sesión</Button></div>}</div></div></header>;
 };

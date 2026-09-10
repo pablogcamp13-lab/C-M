@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Evaluation, EvaluationItem } from '../../types';
+import { Evaluation, EvaluationItem, QualityGuideline } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { CRITERIA_DEFINITIONS } from '../../data/criteriaData';
 import { QUALITY_ATTRIBUTES } from '../../data/qualityPueData';
@@ -42,7 +42,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
     const quality=evaluation.evaluationType==='QUALITY';
     const dimensionByCriterion:Record<string,any>={C1:'CONECTAR',C2:'CLARIFICAR',C3:'CONVERTIR',C4:'CONECTAR_C4'};
     const fallback:EvaluationItem[]=quality
-      ? QUALITY_ATTRIBUTES.map(attribute=>({id:`item_${attribute.id}`,criterionId:attribute.id,dimension:dimensionByCriterion[attribute.criterion],compliance:undefined,level:0,percentage:0,finding:'',evidence:'',recommendedAction:'',qualityGuideline:attribute,category:attribute.category||attribute.criterion,attribute:attribute.name,classification:attribute.classification||'NO_CRITICO'}))
+      ? QUALITY_ATTRIBUTES.map(attribute=>{const guideline={...attribute,critical:'critical' in attribute?Boolean(attribute.critical):false,active:true} as QualityGuideline;return {id:`item_${attribute.id}`,criterionId:attribute.id,dimension:dimensionByCriterion[attribute.criterion],compliance:undefined,level:0,percentage:0,finding:'',evidence:'',recommendedAction:'',qualityGuideline:guideline,category:attribute.criterion,attribute:attribute.name,classification:'NO_CRITICO'};})
       : CRITERIA_DEFINITIONS.map(criterion=>({id:`item_${criterion.id}`,criterionId:criterion.id,dimension:criterion.dimensionId,compliance:undefined,level:0,percentage:0,finding:'',evidence:'',recommendedAction:''}));
     setDraftItems((evaluation.items?.length?evaluation.items:fallback).map(item=>({
       ...item,
