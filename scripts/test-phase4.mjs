@@ -5,7 +5,7 @@ import {join} from 'node:path';
 const root=process.cwd(),text=path=>readFile(join(root,path),'utf8');
 const [server,app,context,storage,authorization,env,sql]=await Promise.all([text('server.ts'),text('src/App.tsx'),text('src/context/AppContext.tsx'),text('server/supabaseStorage.ts'),text('server/authorization.ts'),text('.env.example'),text('migration/supabase/04_runtime_hardening.sql')]);
 assert.match(server,/supabaseStorage\.enabled \? supabaseStorage/);
-assert.match(server,/ALLOW_GOOGLE_SHEETS_FALLBACK === 'true'/);
+assert.match(server,/ALLOW_GOOGLE_SHEETS_FALLBACK !== 'false'/);
 assert.match(server,/googleDriveStorage\.driveEnabled/);
 assert.doesNotMatch(context,/localStorage\.(setItem|getItem|removeItem)/);
 assert.match(app,/lazy\(\(\)=>import/);

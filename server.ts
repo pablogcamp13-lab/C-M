@@ -16,7 +16,10 @@ import { DatabaseSync } from "node:sqlite";
 import * as XLSX from 'xlsx';
 import { calculateEvaluationSummary, getItemCompliance } from './src/utils/calculations';
 
-const legacySheetsAllowed = process.env.ALLOW_GOOGLE_SHEETS_FALLBACK === 'true';
+// Keep the existing Sheets repository available during the Supabase cutover.
+// An explicit "false" disables it; an unset variable must never leave
+// production with an empty local repository.
+const legacySheetsAllowed = process.env.ALLOW_GOOGLE_SHEETS_FALLBACK !== 'false';
 const structuredStorage: any = supabaseStorage.enabled ? supabaseStorage : legacySheetsAllowed && googleDriveStorage.sheetsEnabled ? googleDriveStorage : null;
 // Compatibility facade: structured methods resolve to Supabase (or an explicit
 // legacy fallback), while file methods always remain on private Google Drive.
@@ -1199,7 +1202,7 @@ async function startServer() {
   });
 
   // Readiness verifica el repositorio principal sin exponer secretos.
-  const health=async(_req:express.Request,res:express.Response)=>{let database:any={configured:supabaseStorage.enabled,ok:!supabaseStorage.enabled};try{if(supabaseStorage.enabled)database={configured:true,...await supabaseStorage.health()};}catch{database={configured:true,ok:false};}const required=process.env.REQUIRE_SUPABASE==='true';return res.status(required&&!database.ok?503:200).json({status:database.ok||!required?'ok':'degraded',database,drive:{configured:googleDriveStorage.driveEnabled},sheetsFallback:{enabled:legacySheetsAllowed}});};
+  const health=async(_req:express.Request,res:express.Response)=>{let database:any={configured:supabaseStorage.enabled,ok:!supabaseStorage.enabled};try{if(supabaseStorage.enabled)database={configured:true,...await supabaseStorage.health()};}catch{database={configured:true,ok:false};}const required=process.env.REQUIRE_SUPABASE==='true';return res.status(required&&!database.ok?503:200).json({status:database.ok||!required?'ok':'degraded',database,drive:{configured:googleDriveStorage.driveEnabled},sheetsFallback:{enabled:legacySheetsAllowed,configured:googleDriveStorage.sheetsEnabled}});};
   app.get('/health', health);
   app.get('/api/health', health);
 
