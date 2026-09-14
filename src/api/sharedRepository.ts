@@ -19,7 +19,10 @@ const json = async <T>(response: Response): Promise<T> => {
     const fallback = response.status === 413
       ? 'El archivo supera el tamaño máximo permitido.'
       : 'No fue posible conectar con el servidor.';
-    throw new Error(body.error || fallback);
+    const validationDetails = Array.isArray(body?.preview?.errors)
+      ? body.preview.errors.filter(Boolean).join(' ')
+      : '';
+    throw new Error([body.error || fallback, validationDetails].filter(Boolean).join(' '));
   }
   return body as T;
 };

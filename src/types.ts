@@ -13,6 +13,10 @@ export interface User {
   username?: string; // e.g. "nombre.apellido"
   password?: string; // e.g. DNI for advisors
   mustChangePassword?: boolean;
+  /** ROLE answers what the user may do; SCOPE limits where it may be done. */
+  accessScope?: 'GLOBAL' | 'COMPANY' | 'OPERATION' | 'TEAM' | 'SELF';
+  companyIds?: string[];
+  operationIds?: string[];
   /** Vista temporal de administrador; no representa una sesión autenticada del usuario. */
   isPreview?: boolean;
 }

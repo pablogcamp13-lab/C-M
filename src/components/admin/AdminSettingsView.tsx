@@ -36,6 +36,7 @@ export const AdminSettingsView: React.FC = () => {
     updateConfig,
     clearAllData,
     campaigns,
+    companies,
     users,
     teams,
     advisors,
@@ -91,6 +92,8 @@ export const AdminSettingsView: React.FC = () => {
   const [userStatus, setUserStatus] = useState<"ACTIVO" | "INACTIVO">("ACTIVO");
   const [userAdvisorId, setUserAdvisorId] = useState<string>("");
   const [userTeamId, setUserTeamId] = useState<string>("");
+  const [userAccessScope, setUserAccessScope] = useState<User['accessScope']>('SELF');
+  const [userCompanyIds, setUserCompanyIds] = useState<string[]>([]);
   const [userSearchQuery, setUserSearchQuery] = useState<string>("");
 
   // Campaign form state
@@ -153,6 +156,8 @@ export const AdminSettingsView: React.FC = () => {
     setUserStatus("ACTIVO");
     setUserAdvisorId(advisors[0]?.id || "");
     setUserTeamId(teams[0]?.id || "");
+    setUserAccessScope('SELF');
+    setUserCompanyIds([]);
     setIsUserModalOpen(true);
   };
 
@@ -172,6 +177,8 @@ export const AdminSettingsView: React.FC = () => {
         status: userStatus,
         advisorId: userRole === "ASESOR" ? userAdvisorId : undefined,
         teamId: userRole === "SUPERVISOR" ? userTeamId : undefined,
+        accessScope: userRole === 'ASESOR' ? 'SELF' : userRole === 'SUPERVISOR' ? 'TEAM' : userAccessScope,
+        companyIds: userAccessScope === 'COMPANY' ? userCompanyIds : [],
       });
       showNotification(
         `Usuario "${created.name}" creado. Usuario: ${created.username} · clave inicial: 12345678`,
@@ -938,6 +945,15 @@ export const AdminSettingsView: React.FC = () => {
                     )}
                   </div>
                 )}
+
+                {['ADMINISTRADOR','CONSULTOR','FORMADOR','GERENCIA'].includes(userRole) && <div className="rounded-lg border border-cyan-200 bg-cyan-50/60 p-3 space-y-2">
+                  <label className="block font-bold text-[#031E3C]">Alcance de acceso *</label>
+                  <select value={userAccessScope} onChange={event=>{setUserAccessScope(event.target.value as User['accessScope']);setUserCompanyIds([]);}} className="w-full rounded-md border border-cyan-300 bg-white p-2 font-semibold text-[#031E3C]">
+                    <option value="GLOBAL">Todas las empresas</option>
+                    <option value="COMPANY">Empresas seleccionadas</option>
+                  </select>
+                  {userAccessScope==='COMPANY'&&<div className="grid gap-2 pt-1">{companies.filter(company=>company.status==='ACTIVA').map(company=><label key={company.id} className="flex items-center gap-2"><input type="checkbox" checked={userCompanyIds.includes(company.id)} onChange={event=>setUserCompanyIds(current=>event.target.checked?[...current,company.id]:current.filter(id=>id!==company.id))}/><span>{company.name}</span></label>)}</div>}
+                </div>}
 
                 {/* Nombre */}
                 <div>

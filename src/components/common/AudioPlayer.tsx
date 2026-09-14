@@ -17,9 +17,12 @@ import {
 interface AudioPlayerProps {
   audioUrl?: string;
   audioFileName?: string;
+  audioFileSize?: number;
   audioDurationSeconds?: number;
   readOnly?: boolean;
   sticky?: boolean;
+  compact?: boolean;
+  busy?: boolean;
   onTimeUpdate?: (currentTimeSeconds: number, formattedTimestamp: string) => void;
   onInsertTimestamp?: (timestamp: string, seconds: number) => void;
   onAudioUpload?: (file: File, objectUrl: string, durationSeconds: number) => void;
@@ -37,9 +40,12 @@ export const formatSecondsToTime = (totalSeconds: number): string => {
 export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   audioUrl,
   audioFileName,
+  audioFileSize = 0,
   audioDurationSeconds = 380, // Default demo duration ~6:20
   readOnly = false,
   sticky = false,
+  compact = false,
+  busy = false,
   onTimeUpdate,
   onInsertTimestamp,
   onAudioUpload,
@@ -177,7 +183,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   };
 
   const handleFileUpload = (file: File) => {
-    if (!file) return;
+    if (!file || busy) return;
+    setPlaybackError(null);
 
     // Supported formats prioritizing MP3 and MPEG (.mp3, .mpeg, .mpg)
     const allowedMimeTypes = [
@@ -202,13 +209,13 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     const isExtValid = validExtensions.test(file.name);
 
     if (!isMimeValid && !isExtValid) {
-      alert('Formato no soportado. Por favor selecciona un archivo de audio en formato MP3 o MPEG (.mp3, .mpeg).');
+      setPlaybackError('Formato no soportado. Usa MP3, MPEG, WAV, M4A, OGG, WEBM, AAC o MP4.');
       return;
     }
 
     const maxBytes = 35 * 1024 * 1024; // 35 MB
     if (file.size > maxBytes) {
-      alert('El archivo supera el límite de 35MB');
+      setPlaybackError('El archivo supera el límite de 35 MB.');
       return;
     }
 
@@ -248,10 +255,16 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const currentFormatted = formatSecondsToTime(currentTime);
   const totalFormatted = formatSecondsToTime(duration);
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const hasAudio = Boolean(audioFileName || audioUrl);
+  const formattedFileSize = audioFileSize > 0
+    ? audioFileSize >= 1024 * 1024
+      ? `${(audioFileSize / (1024 * 1024)).toFixed(1)} MB`
+      : `${Math.max(1, Math.round(audioFileSize / 1024))} KB`
+    : '';
 
   return (
     <div 
-      className={`cm-card cm-audio-player transition-all ${
+      className={`cm-card cm-audio-player ${compact ? 'cm-audio-player--compact' : ''} transition-all ${
         sticky ? 'sticky top-0 z-30 shadow-md backdrop-blur-sm' : ''
       }`}
     >
@@ -278,10 +291,27 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         />
       )}
 
+      {!readOnly && (
+        <input
+          type="file"
+          ref={fileInputRef}
+          disabled={busy}
+          accept="audio/mpeg,audio/mp3,.mp3,.mpeg,.mpg,audio/wav,.wav,audio/m4a,.m4a,audio/ogg,.ogg,audio/webm,.webm,audio/aac,.aac,audio/mp4,.mp4,audio/*"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) handleFileUpload(file);
+            event.target.value = '';
+          }}
+        />
+      )}
+
       {/* Main Container */}
-        <div className="p-3.5 sm:p-4 space-y-3">
+        <div className={`${compact ? 'p-3' : 'p-3.5 sm:p-4'} space-y-3`}>
+        {busy&&<p role="status" className="rounded-md border border-[var(--cm-border-strong)] bg-[rgba(31,214,255,.07)] px-3 py-2 text-xs text-[var(--cm-text-secondary)]">Procesando audio…</p>}
         {playbackError && <p role="alert" className="rounded-md border border-[var(--cm-danger)]/40 bg-[var(--cm-danger)]/10 px-3 py-2 text-xs text-[var(--cm-danger)]">{playbackError}</p>}
         
+        {hasAudio && <>
         {/* Top bar: File status & Header */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
@@ -298,7 +328,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-[#667085] truncate">
-                Evidencia acústica verificable · Metodología 3C
+                {formattedFileSize ? `${formattedFileSize} · ` : ''}Evidencia privada de la evaluación
               </p>
             </div>
           </div>
@@ -321,30 +351,21 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             {/* Upload new audio file button */}
             {!readOnly && (
               <>
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept="audio/mpeg,audio/mp3,.mp3,.mpeg,.mpg,audio/wav,.wav,audio/m4a,.m4a,audio/ogg,.ogg,audio/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    if (e.target.files && e.target.files[0]) {
-                      handleFileUpload(e.target.files[0]);
-                    }
-                  }}
-                />
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
+                  disabled={busy}
                   className="cm-button-secondary flex items-center gap-1 px-2.5 py-1.5 text-[11px]"
                   title="Cargar archivo de audio MP3 o MPEG"
                 >
                   <Upload className="h-3.5 w-3.5 text-[var(--cm-text-secondary)]" />
-                  <span className="hidden md:inline">Cargar / Reemplazar</span>
+                  <span className="hidden md:inline">Reemplazar</span>
                 </button>
                 {onRemoveAudio && audioFileName && (
                   <button
                     type="button"
                     onClick={onRemoveAudio}
+                    disabled={busy}
                     className="rounded-lg p-1.5 text-[var(--cm-text-muted)] hover:bg-[rgba(255,77,79,.1)] hover:text-[var(--cm-danger)]"
                     title="Quitar audio"
                   >
@@ -384,6 +405,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               step={0.5}
               value={currentTime}
               onChange={handleSeek}
+              disabled={busy}
               className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-[var(--cm-border)] accent-[var(--cm-primary)]"
             />
           </div>
@@ -402,6 +424,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             <button
               type="button"
               onClick={() => skipTime(-5)}
+              disabled={busy}
               className="rounded-md p-1.5 text-[var(--cm-text-secondary)] hover:bg-[rgba(31,214,255,.09)] hover:text-[var(--cm-text)]"
               title="Retroceder 5 segundos"
             >
@@ -411,6 +434,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             <button
               type="button"
               onClick={togglePlay}
+              disabled={busy || !playableUrl}
               className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--cm-primary-active)] text-[#031326] shadow-xs transition-transform active:scale-95"
               title={isPlaying ? 'Pausar' : 'Reproducir'}
             >
@@ -424,6 +448,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             <button
               type="button"
               onClick={() => skipTime(5)}
+              disabled={busy}
               className="rounded-md p-1.5 text-[var(--cm-text-secondary)] hover:bg-[rgba(31,214,255,.09)] hover:text-[var(--cm-text)]"
               title="Adelantar 5 segundos"
             >
@@ -439,6 +464,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               <button
                 type="button"
                 onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+                disabled={busy}
                 className="cm-button-secondary px-2 py-1 text-[11px] font-mono"
                 title="Velocidad de reproducción"
               >
@@ -468,6 +494,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               <button
                 type="button"
                 onClick={toggleMute}
+                disabled={busy}
                 className="text-[var(--cm-text-muted)] transition-colors hover:text-[var(--cm-text)]"
                 title={isMuted ? 'Activar sonido' : 'Silenciar'}
               >
@@ -491,6 +518,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                     audioRef.current.volume = val;
                   }
                 }}
+                disabled={busy}
                 className="h-1 w-16 cursor-pointer appearance-none rounded-lg bg-[var(--cm-border)] accent-[var(--cm-primary)]"
               />
             </div>
@@ -499,29 +527,36 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
         </div>
 
+        </>}
+
       </div>
 
       {/* Drag and Drop Zone if empty in non-readonly mode */}
-      {!readOnly && !audioFileName && !audioUrl && (
-        <div
+      {!readOnly && !hasAudio && (
+        <button
+          type="button"
           onDragOver={(e) => { e.preventDefault(); setIsDraggingOver(true); }}
           onDragLeave={() => setIsDraggingOver(false)}
           onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className={`m-3 p-4 border-2 border-dashed rounded-lg text-center cursor-pointer transition-all ${
+          onClick={() => { if(!busy) fileInputRef.current?.click(); }}
+          disabled={busy}
+          aria-disabled={busy}
+          aria-label="Subir audio de llamada"
+          className={`${compact ? 'm-2 p-3' : 'm-3 p-4'} block border border-dashed rounded-lg text-center cursor-pointer transition-all ${
             isDraggingOver
               ? 'border-[var(--cm-primary)] bg-[rgba(31,214,255,.08)]'
               : 'border-[var(--cm-border)] bg-[rgba(31,214,255,.03)] hover:border-[var(--cm-border-strong)]'
           }`}
         >
-          <Upload className="mx-auto mb-1.5 h-5 w-5 text-[var(--cm-text-muted)]" />
+          <Upload className={`${compact ? 'mr-2 inline h-4 w-4' : 'mx-auto mb-1.5 h-5 w-5'} text-[var(--cm-text-muted)]`} />
           <p className="text-xs font-semibold text-[var(--cm-text)]">
-            Arrastra el archivo de llamada aquí o haz clic para seleccionarlo
+            {compact ? 'Seleccionar audio de llamada' : 'Arrastra el archivo de llamada aquí o haz clic para seleccionarlo'}
           </p>
-          <p className="mt-0.5 text-[11px] text-[var(--cm-text-secondary)]">
-            Formatos compatibles: <strong className="text-[var(--cm-text)]">MP3</strong> (.mp3) o <strong className="text-[var(--cm-text)]">MPEG</strong> (.mpeg, .mpg) · Máx 35MB
+          <p className={`${compact ? 'inline' : 'mt-0.5'} text-[11px] text-[var(--cm-text-secondary)]`}>
+            {compact ? ' · ' : ''}
+            MP3, MPEG, WAV, M4A, OGG, WEBM, AAC o MP4 · Máx. 35 MB
           </p>
-        </div>
+        </button>
       )}
 
     </div>

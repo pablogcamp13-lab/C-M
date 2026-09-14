@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Activity, ArrowDown, ArrowRight, ArrowUp, BarChart3, CheckSquare, Info, ListChecks, Plus, ShieldCheck, Sparkles, TrendingUp, UsersRound } from 'lucide-react';
+import { Activity, ArrowDown, ArrowRight, ArrowUp, BarChart3, CheckSquare, Filter, Info, ListChecks, Plus, ShieldCheck, TrendingUp, UsersRound } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, KpiCard, PageHeader, Select, TableSkeleton, Tabs, Tooltip } from '../ui';
 import { CompanyDistributionCard, EvaluationStatusCard, QualityTrendCard } from './ExecutiveCharts';
-import { ExecutiveFilters } from './ExecutiveFilters';
+import { ExecutiveFilters, useExecutiveFilterSummary } from './ExecutiveFilters';
 import { type CampaignRank, type ExecutiveMode, useExecutiveHome } from './useExecutiveHome';
 
 const scoreLabel = (value: number | null | undefined) => value === null || value === undefined ? 'Sin datos' : `${value}%`;
@@ -12,6 +12,8 @@ const detailInfo = (text: string, definition: string) => <span className="cm-met
 export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpenNewEvaluation }) => {
   const { currentUser, isAuthReady, setCurrentSection, platformLoadError } = useApp();
   const [mode, setMode] = useState<ExecutiveMode>('D3C');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterSummary = useExecutiveFilterSummary();
   const data = useExecutiveHome(mode);
   const canCreateEvaluation = Boolean(onOpenNewEvaluation) && ['ADMINISTRADOR', 'CONSULTOR', 'MONITOR'].includes(currentUser.role);
   const firstName = currentUser.name.trim().split(/\s+/)[0] || currentUser.role;
@@ -28,8 +30,13 @@ export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpe
   ];
 
   return <div className="cm-page cm-home-executive">
-    <PageHeader breadcrumbs={['Inicio']} title={`Hola, ${firstName}`} description={`Resumen ejecutivo de Calidad y Mejora Continua · ${currentUser.role.toLocaleLowerCase('es-PE')}.`} actions={canCreateEvaluation ? <Button leadingIcon={<Plus />} onClick={onOpenNewEvaluation}>Nueva evaluación</Button> : undefined} context={<Tabs value={mode} onChange={value => setMode(value as ExecutiveMode)} items={[{ value: 'D3C', label: 'Mejora Continua', count: data.totalByMode.D3C }, { value: 'QUALITY', label: 'Calidad', count: data.totalByMode.QUALITY }]} />} />
-    <ExecutiveFilters />
+    <PageHeader breadcrumbs={['Inicio']} title={`Hola, ${firstName}`} description={`Resumen ejecutivo de Calidad y Mejora Continua · ${currentUser.role.toLocaleLowerCase('es-PE')}.`} actions={canCreateEvaluation ? <Button leadingIcon={<Plus />} onClick={onOpenNewEvaluation}>Nueva evaluación</Button> : undefined} context={<div className="cm-home-dashboard-controls"><Tabs value={mode} onChange={value => setMode(value as ExecutiveMode)} items={[{ value: 'D3C', label: 'Mejora Continua', count: data.totalByMode.D3C }, { value: 'QUALITY', label: 'Calidad', count: data.totalByMode.QUALITY }]} /><Button type="button" variant="secondary" size="sm" leadingIcon={<Filter />} className="cm-exec-filters-toggle" aria-expanded={filtersOpen} aria-controls="home-executive-filters" aria-label={`${filtersOpen ? 'Ocultar' : 'Mostrar'} filtros${filterSummary.activeCount > 0 ? `, ${filterSummary.activeCount} activos` : ''}`} onClick={() => setFiltersOpen(open => !open)}>{`Filtros${filterSummary.activeCount > 0 ? ` · ${filterSummary.activeCount}` : ''}`}</Button></div>} />
+    <section className="cm-exec-filters-region" aria-label="Controles de filtrado">
+      <div id="home-executive-filters" className={`cm-exec-filters-collapse ${filtersOpen ? 'is-open' : ''}`} aria-hidden={!filtersOpen} inert={!filtersOpen}>
+        <div><ExecutiveFilters activeCount={filterSummary.activeCount} /></div>
+      </div>
+      {!filtersOpen && <p className="cm-exec-filters-summary" aria-live="polite">{filterSummary.context}</p>}
+    </section>
     {platformLoadError && <div className="cm-data-warning" role="status"><Info /> <span><b>Información parcial.</b> {platformLoadError}</span><button onClick={() => window.location.reload()}>Reintentar</button></div>}
 
     <section className="cm-kpi-grid" aria-label="Indicadores ejecutivos">{kpis.map(kpi => <KpiCard key={kpi.label} {...kpi} loading={loading} />)}</section>
@@ -46,7 +53,7 @@ export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpe
       <div className="cm-exec-grid cm-exec-grid--priorities">
         <CampaignRanking data={data.campaignRanking} error={hardError ? platformLoadError : undefined} loading={loading} />
         <Card><CardHeader title="Supervisores que requieren atención" description={`Resultado promedio bajo ${data.criticalThreshold}%`} />{loading ? <TableSkeleton rows={4} /> : hardError ? <PanelError description="No pudimos cargar el seguimiento de supervisores." /> : data.supervisorsAttention.length ? <div className="cm-attention-list">{data.supervisorsAttention.map(item => <div key={item.id}><Avatar name={item.name} /><span><b title={item.name}>{item.name}</b><small title={item.context}>{item.context}</small></span><strong>{item.score}%<small>{item.evaluations} eval.</small></strong></div>)}</div> : <EmptyState description="No hay supervisores bajo el umbral crítico en este alcance." />}</Card>
-        <Card><CardHeader title="Agentes con seguimiento pendiente" description="Planes de acción no completados" action={<button className="cm-link" onClick={() => setCurrentSection('action_plans')}>Ver planes →</button>} />{loading ? <TableSkeleton rows={4} /> : hardError ? <PanelError description="No pudimos cargar los seguimientos pendientes." /> : data.pendingAdvisors.length ? <div className="cm-attention-list">{data.pendingAdvisors.map(item => <button key={item.id} onClick={() => setCurrentSection('action_plans')}><Avatar name={item.name} /><span><b title={item.name}>{item.name}</b><small>{item.reason}</small></span><Badge variant={item.status === 'VENCIDO' ? 'danger' : item.status === 'PENDIENTE' ? 'warning' : 'info'}>{item.count}</Badge></button>)}</div> : <EmptyState description="No hay agentes con planes de acción pendientes." />}</Card>
+        <Card><CardHeader title="Asesores con menor resultado" description={`Ranking por nota promedio ${mode === 'D3C' ? 'D+3C' : 'PUE'}`} action={<button className="cm-link" onClick={() => setCurrentSection('evaluations')}>Ver evaluaciones →</button>} />{loading ? <TableSkeleton rows={4} /> : hardError ? <PanelError description="No pudimos calcular el ranking de asesores." /> : data.lowestAdvisors.length ? <div className="cm-attention-list">{data.lowestAdvisors.map((item, index) => <button key={item.id} onClick={() => setCurrentSection('evaluations')}><Avatar name={item.name} /><span><b title={item.name}>{index + 1}. {item.name}</b><small title={item.context}>{item.context}</small></span><strong>{item.score}%<small>{item.evaluations} eval.</small></strong></button>)}</div> : <EmptyState description={`No hay asesores con evaluaciones ${mode === 'D3C' ? 'D+3C' : 'PUE'} en este alcance.`} />}</Card>
       </div>
     </section>
 
@@ -58,8 +65,8 @@ export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpe
     </section>
 
     <section className="cm-exec-grid cm-exec-grid--closing">
-      <FeatureCard icon={<TrendingUp />} title="Mejora Continua" description="Identifica brechas, prioriza acciones y realiza seguimiento." action="Ir a Mejora Continua" onClick={() => setCurrentSection('dashboard')} />
-      <FeatureCard icon={<ShieldCheck />} title="Calidad" description="Gestiona evaluaciones, cumplimiento y consistencia." action="Ir a Calidad" onClick={() => setCurrentSection('dashboard_quality')} />
+      <FeatureCard image="improvement" icon={<TrendingUp />} title="Mejora Continua" description="Identifica brechas, prioriza acciones y realiza seguimiento." action="Ir a Mejora Continua" onClick={() => setCurrentSection('dashboard')} />
+      <FeatureCard image="quality" icon={<ShieldCheck />} title="Calidad" description="Gestiona evaluaciones, cumplimiento y consistencia." action="Ir a Calidad" onClick={() => setCurrentSection('dashboard_quality')} />
       <Card><CardHeader title="Evaluaciones recientes" description={`Últimos registros ${methodologyName}`} action={<button className="cm-link" onClick={() => setCurrentSection('evaluations')}>Ver todas →</button>} />{loading ? <TableSkeleton rows={5} /> : hardError ? <PanelError description="No pudimos cargar las evaluaciones recientes." /> : data.recentEvaluations.length ? <div className="cm-recent-list">{data.recentEvaluations.map(evaluation => <button onClick={() => setCurrentSection('evaluations')} key={evaluation.id}><span>{evaluation.initials}</span><i><b title={evaluation.advisor}>{evaluation.advisor}</b><small title={evaluation.operation}>{evaluation.date} · {evaluation.operation}</small></i><div><strong>{scoreLabel(evaluation.score)}</strong><Badge variant={evaluation.status.tone}>{evaluation.status.label}</Badge></div></button>)}</div> : <EmptyState description="No hay evaluaciones recientes en este alcance." />}</Card>
     </section>
   </div>;
@@ -82,4 +89,4 @@ const ParetoCard: React.FC<{ data: ReturnType<typeof useExecutiveHome>['pareto']
   return <Card><CardHeader title={mode === 'D3C' ? 'Pareto de brechas (80/20)' : 'Pareto de incumplimientos'} description="Top de oportunidades por frecuencia" action={<button className="cm-link" onClick={onDetail}>Ver detalle →</button>} />{loading ? <TableSkeleton rows={5} /> : error ? <PanelError description="No pudimos cargar el Pareto de brechas." /> : data.length ? <div className="cm-ranked-list">{data.map(item => <div key={item.id} title={`${item.name}: ${item.frequency} casos, ${item.percentage}%`}><span>{item.name}</span><i><em style={{ width: `${item.frequency / max * 100}%` }} /></i><b>{item.frequency}<small>{item.percentage}%</small></b></div>)}</div> : <EmptyState description="Aún no hay brechas registradas en este alcance." />}</Card>;
 };
 
-const FeatureCard: React.FC<{ icon: React.ReactNode; title: string; description: string; action: string; onClick: () => void }> = ({ icon, title, description, action, onClick }) => <Card className="cm-feature-card" interactive><span>{icon}</span><div><small>C&amp;M</small><h2>{title}</h2><p>{description}</p><button onClick={onClick}>{action} <ArrowRight /></button></div><Sparkles aria-hidden="true" /></Card>;
+const FeatureCard: React.FC<{ image: 'improvement' | 'quality'; icon: React.ReactNode; title: string; description: string; action: string; onClick: () => void }> = ({ image, icon, title, description, action, onClick }) => <Card className={`cm-feature-card cm-feature-card--${image}`} interactive><span>{icon}</span><div><small>C&amp;M</small><h2>{title}</h2><p>{description}</p><button onClick={onClick}>{action} <ArrowRight /></button></div></Card>;

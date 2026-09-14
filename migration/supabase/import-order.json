@@ -1,0 +1,19 @@
+[
+  "companies",
+  "campaign_definitions",
+  "operations",
+  "people",
+  "users",
+  "teams",
+  "operation_supervisors",
+  "assignments",
+  "staffing_movements",
+  "evaluations",
+  "evaluation_items",
+  "evaluation_media",
+  "feedback",
+  "development_capsules",
+  "development_assignments",
+  "app_state_fragments",
+  "legacy_sessions"
+]

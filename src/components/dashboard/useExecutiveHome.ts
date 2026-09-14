@@ -12,6 +12,7 @@ export interface StatusItem { id: string; label: string; count: number; tone: 's
 export interface CampaignRank { operationId: string; label: string; evaluations: number; score: number | null; trend: number | null; }
 export interface AttentionSupervisor { id: string; name: string; context: string; score: number; evaluations: number; }
 export interface PendingAdvisor { id: string; name: string; reason: string; count: number; status: ActionPlan['status']; }
+export interface AdvisorRank { id: string; name: string; context: string; score: number; evaluations: number; }
 
 const scoredValue = (evaluation: Evaluation, mode: ExecutiveMode) => mode === 'QUALITY'
   ? evaluation.technicalScore ?? evaluation.scoreTotal
@@ -177,6 +178,24 @@ export const useExecutiveHome = (mode: ExecutiveMode) => {
       };
     }).filter(item => item.score < criticalThreshold).sort((a, b) => a.score - b.score).slice(0, 5);
 
+    const advisorScoreGroups = new Map<string, Evaluation[]>();
+    scopedEvaluations.forEach(evaluation => {
+      if (scoredValue(evaluation, mode) == null) return;
+      advisorScoreGroups.set(evaluation.advisorId, [...(advisorScoreGroups.get(evaluation.advisorId) || []), evaluation]);
+    });
+    const lowestAdvisors: AdvisorRank[] = [...advisorScoreGroups.entries()].map(([id, items]) => {
+      const advisor = advisorById.get(id);
+      const operation = resolveOperation(items[0]);
+      const company = operation && companyById.get(operation.companyId);
+      return {
+        id,
+        name: advisor?.name || 'Asesor no identificado',
+        context: operation ? `${company?.name || 'Sin empresa'} / ${operation.name}` : 'Operación no resuelta',
+        score: average(items.map(item => scoredValue(item, mode))) ?? 0,
+        evaluations: items.length,
+      };
+    }).sort((a, b) => a.score - b.score || b.evaluations - a.evaluations || a.name.localeCompare(b.name)).slice(0, 5);
+
     const planPriority: Record<ActionPlan['status'], number> = { VENCIDO: 0, PENDIENTE: 1, EN_CURSO: 2, COMPLETADO: 3 };
     const planGroups = new Map<string, ActionPlan[]>();
     pendingPlans.forEach(plan => planGroups.set(plan.advisorId, [...(planGroups.get(plan.advisorId) || []), plan]));
@@ -253,6 +272,7 @@ export const useExecutiveHome = (mode: ExecutiveMode) => {
       evaluationStatus,
       campaignRanking,
       supervisorsAttention,
+      lowestAdvisors,
       pendingAdvisors,
       pareto,
       dimensions,

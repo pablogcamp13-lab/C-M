@@ -6,8 +6,9 @@ import {join} from 'node:path';
 
 const temp=await mkdtemp(join(tmpdir(),'cm-operations-'));
 const port=3900+Math.floor(Math.random()*300),base=`http://127.0.0.1:${port}`;
-const app=spawn(process.execPath,['node_modules/tsx/dist/cli.mjs','server.ts'],{cwd:process.cwd(),env:{...process.env,NODE_ENV:'production',PORT:String(port),SQLITE_PATH:join(temp,'contact.sqlite'),INITIAL_ADMIN_PASSWORD:'Admin-test-2026',GOOGLE_SHEET_ID:'',GOOGLE_DRIVE_FOLDER_ID:'',GOOGLE_CLIENT_ID:'',GOOGLE_CLIENT_SECRET:'',GOOGLE_REFRESH_TOKEN:'',GMAIL_CLIENT_ID:'',GMAIL_CLIENT_SECRET:'',GMAIL_REFRESH_TOKEN:''}});
-const api=async(path,{token,method='GET',body}={})=>{const response=await fetch(base+path,{method,headers:{...(token?{Authorization:`Bearer ${token}`}:{}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});let data={};try{data=await response.json()}catch{}return{response,data};};
+const app=spawn(process.execPath,['node_modules/tsx/dist/cli.mjs','server.ts'],{cwd:process.cwd(),env:{...process.env,NODE_ENV:'production',PORT:String(port),SQLITE_PATH:join(temp,'contact.sqlite'),INITIAL_ADMIN_PASSWORD:'Admin-test-2026',SUPABASE_DATABASE_URL:'',REQUIRE_SUPABASE:'false',ALLOW_GOOGLE_SHEETS_FALLBACK:'false',GOOGLE_SHEET_ID:'',GOOGLE_DRIVE_FOLDER_ID:'',GOOGLE_CLIENT_ID:'',GOOGLE_CLIENT_SECRET:'',GOOGLE_REFRESH_TOKEN:'',GMAIL_CLIENT_ID:'',GMAIL_CLIENT_SECRET:'',GMAIL_REFRESH_TOKEN:''}});
+let serverLog='';app.stdout.on('data',data=>serverLog+=String(data));app.stderr.on('data',data=>serverLog+=String(data));
+const api=async(path,{token,method='GET',body}={})=>{try{const response=await fetch(base+path,{method,headers:{...(token?{Authorization:`Bearer ${token}`}:{}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});let data={};try{data=await response.json()}catch{}return{response,data};}catch(error){throw new Error(`${error.message}\n${serverLog.slice(-4000)}`);}};
 try{
   for(let attempt=0;attempt<100;attempt++){try{if((await fetch(`${base}/api/health`)).ok)break}catch{}await new Promise(resolve=>setTimeout(resolve,80));}
   const login=await api('/api/auth/login',{method:'POST',body:{identity:'admin',password:'Admin-test-2026'}});assert.equal(login.response.status,200);const admin=login.data.token;

@@ -13,8 +13,9 @@ try{
   for(let i=0;i<80;i++){try{if((await fetch(`${base}/api/health`)).ok)break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
   const admin=await login('admin','Admin-test-2026');
   const current=(await request('/api/shared-repository',{token:admin})).data.repository;
+  const testOperation=current.operations.find(item=>item.status==='ACTIVA'&&!item.legacy);assert.ok(testOperation);
   const agent={id:'usr_agent',name:'Agente Uno',email:'agent@example.test',username:'agent.one',role:'ASESOR',status:'ACTIVO',advisorId:'adv_1',createdAt:new Date().toISOString(),password:'Agent-test-2026'};
-  const advisors=[{id:'adv_1',dni:'70000001',employeeCode:'A1',name:'Agente Uno',campaignId:'camp_1',teamId:'',supervisorId:'usr_admin',status:'ACTIVO',hireDate:'2026-01-01',active:true},{id:'adv_2',dni:'70000002',employeeCode:'A2',name:'Agente Dos',campaignId:'camp_1',teamId:'',supervisorId:'usr_admin',status:'ACTIVO',hireDate:'2026-01-01',active:true}];
+  const advisors=[{id:'adv_1',dni:'70000001',employeeCode:'A1',name:'Agente Uno',campaignId:testOperation.campaignId,operationId:testOperation.id,teamId:'',supervisorId:'usr_admin',status:'ACTIVO',hireDate:'2026-01-01',active:true},{id:'adv_2',dni:'70000002',employeeCode:'A2',name:'Agente Dos',campaignId:testOperation.campaignId,operationId:testOperation.id,teamId:'',supervisorId:'usr_admin',status:'ACTIVO',hireDate:'2026-01-01',active:true}];
   assert.equal((await request('/api/shared-repository/sync',{method:'PUT',token:admin,body:{...current,users:[...current.users,agent],advisors}})).response.status,200);
   const manual=(await request('/api/evaluations',{method:'POST',token:admin,body:evaluation('eval_1','adv_1')})).data.evaluation;assert.equal(manual.validationStatus,'VALIDATED');
   const foreign=(await request('/api/evaluations',{method:'POST',token:admin,body:evaluation('eval_2','adv_2')})).data.evaluation;
@@ -22,7 +23,7 @@ try{
   assert.equal((await request('/api/platform-state',{method:'PUT',token:admin,body:{evaluations:[manual,foreign,legacy,automatic],actionPlans:[],interventions:[],advisorInterventions:[],operationalMeasurements:[],importHistory:[],config:{}}})).response.status,200);
   const feedback=(await request('/api/feedbacks',{method:'POST',token:admin,body:{evaluation_id:'eval_1',feedback_text:'Feedback real'}})).data.feedback;
   const agentToken=await login('agent.one','Agent-test-2026');
-  const state=(await request('/api/platform-state',{token:agentToken})).data.state;assert.deepEqual(new Set(state.evaluations.map(item=>item.id)),new Set(['eval_1','eval_legacy']));
+  const state=(await request('/api/platform-state',{token:agentToken})).data.state;assert.deepEqual(new Set(state.evaluations.map(item=>item.id)),new Set(['eval_1']));
   assert.equal((await request('/api/evaluations/eval_2/agent-detail',{token:agentToken})).response.status,404);
   assert.equal((await request('/api/evaluations/eval_2/audio',{token:agentToken})).response.status,404);
   assert.equal((await request('/api/evaluations/eval_1/commitment',{method:'PATCH',token:agentToken,body:{commitment:'Aplicar sondeo antes de presentar la oferta.',commitmentDate:'2026-09-15'}})).response.status,200);

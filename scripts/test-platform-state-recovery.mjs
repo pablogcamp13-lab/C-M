@@ -33,9 +33,9 @@ const db = { prepare(sql) {
   return { get: () => ({ payload_json: JSON.stringify({ evaluations: history.slice(3, 10) }) }), all: () => history.slice(10).map(e => ({ payload_json: JSON.stringify(e) })) };
 } };
 const compiled = ts.transpileModule(route, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-new Function('app', 'requireAuth', 'readRepository', 'googleStorage', 'db', 'mergeEvaluationSources', 'correctMigracionesQualityEvaluation', 'console', 'lastCompletePlatformState', compiled)(
+new Function('app', 'requireAuth', 'readRepository', 'googleStorage', 'db', 'mergeEvaluationSources', 'correctMigracionesQualityEvaluation', 'console', 'lastCompletePlatformState', 'supabaseStorage', 'scopedRecord', compiled)(
   { get: (_path, _auth, callback) => { handler = callback; } }, () => {}, async () => ({ advisors: [], campaigns: [] }),
-  source, db, mergeEvaluationSources, evaluation => evaluation, { log() {}, error() {}, warn() {} }, null
+  source, db, mergeEvaluationSources, evaluation => evaluation, { log() {}, error() {}, warn() {} }, null, {enabled:false}, () => true
 );
 function response() { return { statusCode: 200, setHeader() {}, status(value) { this.statusCode = value; return this; }, json(value) { this.body = value; return this; } }; }
 let res = response();

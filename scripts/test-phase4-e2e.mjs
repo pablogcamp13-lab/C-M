@@ -1,0 +1,45 @@
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+
+const temp=await mkdtemp(join(tmpdir(),'cm-phase4-'));
+const port=4300+Math.floor(Math.random()*300),base=`http://127.0.0.1:${port}`,password='Phase4-test-2026';
+const app=spawn(process.execPath,['node_modules/tsx/dist/cli.mjs','server.ts'],{cwd:process.cwd(),env:{...process.env,NODE_ENV:'production',PORT:String(port),SQLITE_PATH:join(temp,'test.sqlite'),INITIAL_ADMIN_PASSWORD:password,SUPABASE_DATABASE_URL:'',REQUIRE_SUPABASE:'false',ALLOW_GOOGLE_SHEETS_FALLBACK:'false',GOOGLE_SHEET_ID:'',GOOGLE_DRIVE_FOLDER_ID:'',GOOGLE_CLIENT_ID:'',GOOGLE_CLIENT_SECRET:'',GOOGLE_REFRESH_TOKEN:'',GMAIL_CLIENT_ID:'',GMAIL_CLIENT_SECRET:'',GMAIL_REFRESH_TOKEN:''}});
+const api=async(path,{token,method='GET',body}={})=>{const response=await fetch(base+path,{method,headers:{...(token?{Authorization:`Bearer ${token}`}:{}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});let data={};try{data=await response.json()}catch{}return{response,data};};
+try{
+  for(let i=0;i<100;i++){try{if((await fetch(`${base}/api/health`)).ok)break}catch{}await new Promise(resolve=>setTimeout(resolve,80));}
+  const login=await api('/api/auth/login',{method:'POST',body:{identity:'admin',password}});assert.equal(login.response.status,200);const global=login.data.token;
+  const initial=(await api('/api/shared-repository',{token:global})).data.repository;
+  const companies=initial.companies.filter(item=>item.status==='ACTIVA');assert.ok(companies.length>=2,'Fixture aislada requiere dos empresas');
+  const companyA=companies[0],companyB=companies[1];
+  const operationA=initial.operations.find(item=>item.companyId===companyA.id&&item.status==='ACTIVA'&&!item.legacy);
+  const operationB=initial.operations.find(item=>item.companyId===companyB.id&&item.status==='ACTIVA'&&!item.legacy);assert.ok(operationA&&operationB);
+  const now=new Date().toISOString(),advisorA={id:'phase4_advisor_a',dni:'94000001',employeeCode:'P4A',name:'Persona Empresa A',campaignId:operationA.campaignId,operationId:operationA.id,supervisorId:'phase4_supervisor_a',status:'ACTIVO',active:true},advisorB={id:'phase4_advisor_b',dni:'94000002',employeeCode:'P4B',name:'Persona Empresa B',campaignId:operationB.campaignId,operationId:operationB.id,supervisorId:'phase4_supervisor_b',status:'ACTIVO',active:true};
+  const users=[...initial.users,{id:'phase4_supervisor_a',name:'Supervisor A',email:'supervisor.a@phase4.test',username:'phase4.supervisor.a',role:'SUPERVISOR',status:'ACTIVO',createdAt:now,password},{id:'phase4_supervisor_b',name:'Supervisor B',email:'supervisor.b@phase4.test',username:'phase4.supervisor.b',role:'SUPERVISOR',status:'ACTIVO',createdAt:now,password},{id:'phase4_agent_a',name:'Agente A',email:'agent.a@phase4.test',username:'phase4.agent.a',role:'ASESOR',status:'ACTIVO',advisorId:advisorA.id,createdAt:now,password},{id:'phase4_agent_b',name:'Agente B',email:'agent.b@phase4.test',username:'phase4.agent.b',role:'ASESOR',status:'ACTIVO',advisorId:advisorB.id,createdAt:now,password}];
+  const synced=await api('/api/shared-repository/sync',{token:global,method:'PUT',body:{...initial,users,advisors:[...initial.advisors,advisorA,advisorB]}});assert.equal(synced.response.status,200);
+  const createdCompanyAdmin=await api('/api/admin/users',{token:global,method:'POST',body:{name:'Admin Empresa A',email:'admin.a@phase4.test',username:'phase4.admin.a',role:'ADMINISTRADOR',accessScope:'COMPANY',companyIds:[companyA.id]}});assert.equal(createdCompanyAdmin.response.status,201);
+  const companyLogin=await api('/api/auth/login',{method:'POST',body:{identity:'phase4.admin.a',password}});assert.equal(companyLogin.response.status,200);const companyAdmin=companyLogin.data.token;
+  const scoped=(await api('/api/shared-repository',{token:companyAdmin})).data.repository;assert.deepEqual(scoped.companies.map(item=>item.id),[companyA.id]);assert.ok(scoped.operations.every(item=>item.companyId===companyA.id));
+  assert.equal((await api('/api/shared-repository/sync',{token:companyAdmin,method:'PUT',body:scoped})).response.status,403,'Admin empresa no sobrescribe repositorio global');
+  assert.equal((await api(`/api/admin/campaigns/${operationB.campaignId}?companyId=${companyB.id}`,{token:companyAdmin,method:'DELETE'})).response.status,404,'Payload cross-company bloqueado');
+  assert.equal((await api(`/api/staffing?operationId=${operationB.id}`,{token:companyAdmin})).response.status,403,'operation_id cross-company bloqueado');
+  assert.equal((await api('/api/admin/users',{token:companyAdmin,method:'POST',body:{name:'Escalación',email:'escalation@phase4.test',role:'ADMINISTRADOR',accessScope:'GLOBAL'}})).response.status,403,'Escalación de privilegios bloqueada');
+  const ownCampaignPreview=await api('/api/operations',{token:companyAdmin,method:'POST',body:{companyId:companyA.id,name:'Operación propia Fase 4',supervisorIds:['phase4_supervisor_a'],selection:{advisorIds:[advisorA.id]},supervisorMode:'KEEP',effectiveAt:'2026-09-09',dryRun:true}});assert.equal(ownCampaignPreview.response.status,200,'Admin empresa administra su propio alcance');
+  const evaluation={id:'phase4_eval_b',advisorId:advisorB.id,evaluatorId:'usr_admin',evaluationType:'QUALITY',date:'2026-09-09',time:'09:00',technicalScore:80,items:[]};
+  const savedEvaluation=await api('/api/evaluations',{token:global,method:'POST',body:evaluation});assert.equal(savedEvaluation.response.status,201);
+  assert.equal((await api('/api/evaluations',{token:companyAdmin,method:'POST',body:{...evaluation,id:'phase4_cross_eval'}})).response.status,404,'person_id cross-company bloqueado');
+  const alert=await api('/api/quality-alerts',{token:global,method:'POST',body:{title:'Alerta B',detail:'Prueba IDOR',advisorId:advisorB.id,supervisorId:'phase4_supervisor_b',campaignId:operationB.campaignId,validUntil:'2099-01-01'}});assert.equal(alert.response.status,201);
+  assert.equal((await api(`/api/quality-alerts/${alert.data.alert.id}`,{token:companyAdmin,method:'PATCH',body:{title:'Cruce'}})).response.status,404,'alert_id cross-company bloqueado');
+  const calibration=await api('/api/calibrations',{token:global,method:'POST',body:{evaluation:savedEvaluation.data.evaluation,expertId:'usr_admin',participantIds:['phase4_supervisor_b'],title:'Calibración B'}});assert.equal(calibration.response.status,201,JSON.stringify(calibration.data));
+  assert.equal((await api(`/api/calibrations/${calibration.data.calibration.id}`,{token:companyAdmin,method:'PATCH',body:{title:'Cruce'}})).response.status,404,'calibration_id cross-company bloqueado');
+  const agentLogin=await api('/api/auth/login',{method:'POST',body:{identity:'phase4.agent.a',password}});assert.equal(agentLogin.response.status,200);const agent=agentLogin.data.token;
+  assert.equal((await api('/api/evaluations/phase4_eval_b/agent-detail',{token:agent})).response.status,404,'evaluation_id ajeno bloqueado');
+  assert.equal((await api('/api/evaluations/phase4_eval_b/audio',{token:agent})).response.status,404,'audio ajeno bloqueado antes de Drive');
+  assert.equal((await api('/api/files/fake/content',{token:agent})).response.status,404,'file_id no asociado bloqueado');
+  const supervisorLogin=await api('/api/auth/login',{method:'POST',body:{identity:'phase4.supervisor.a',password}});assert.equal(supervisorLogin.response.status,200);
+  assert.equal((await api(`/api/supervisor/advisors/${advisorB.id}/evaluations`,{token:supervisorLogin.data.token})).response.status,404,'person_id ajeno al equipo bloqueado');
+  const health=await api('/api/health');assert.equal(health.response.status,200);assert.equal(health.data.sheetsFallback.enabled,false,'Cutover funciona sin Sheets');
+  console.log('Fase 4 E2E: admin global/empresa, supervisor, agente, IDOR, audio y cutover sin Sheets correctos.');
+}finally{app.kill();await new Promise(resolve=>setTimeout(resolve,400));try{await rm(temp,{recursive:true,force:true,maxRetries:8,retryDelay:200});}catch{}}

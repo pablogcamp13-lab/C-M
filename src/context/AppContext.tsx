@@ -155,8 +155,6 @@ interface AppContextType {
   resetDemoData: () => void;
 }
 
-const STORAGE_PREFIX = 'METODOLOGIA_3C_PROD_V1_';
-
 const initialFilters: FilterState = {
   dateFrom: '',
   dateTo: '',
@@ -228,10 +226,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return [];
   });
 
-  const [config, setConfig] = useState<MethodologyConfig>(() => {
-    const saved = localStorage.getItem(`${STORAGE_PREFIX}config`);
-    return saved ? JSON.parse(saved) : DEFAULT_METHODOLOGY_CONFIG;
-  });
+  const [config, setConfig] = useState<MethodologyConfig>(() => DEFAULT_METHODOLOGY_CONFIG);
 
   const [filters, setFilters] = useState<FilterState>(initialFilters);
   const [currentSection, setCurrentSection] = useState<NavigationSection>('home');
@@ -336,51 +331,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setUsers(persisted.users);setCampaigns(persisted.campaigns);setCompanies(persisted.companies||[]);setOperations(persisted.operations||[]);setTeams(persisted.teams);setAdvisors(persisted.advisors);
     return persisted;
   };
-
-  // Sync to LocalStorage on changes
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_PREFIX}users`, JSON.stringify(users));
-  }, [users]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_PREFIX}campaigns`, JSON.stringify(campaigns));
-  }, [campaigns]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_PREFIX}teams`, JSON.stringify(teams));
-  }, [teams]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_PREFIX}advisors`, JSON.stringify(advisors));
-  }, [advisors]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_PREFIX}evaluations`, JSON.stringify(evaluations));
-  }, [evaluations]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_PREFIX}action_plans`, JSON.stringify(actionPlans));
-  }, [actionPlans]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_PREFIX}interventions`, JSON.stringify(interventions));
-  }, [interventions]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_PREFIX}advisor_interventions`, JSON.stringify(advisorInterventions));
-  }, [advisorInterventions]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_PREFIX}operational_measurements`, JSON.stringify(operationalMeasurements));
-  }, [operationalMeasurements]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_PREFIX}import_history`, JSON.stringify(importHistory));
-  }, [importHistory]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_PREFIX}config`, JSON.stringify(config));
-  }, [config]);
 
   const setUserRole = (role: UserRole) => {
     const matching = users.find(u => u.role === role) || {
@@ -1153,7 +1103,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setConfig(DEFAULT_METHODOLOGY_CONFIG);
     setFilters(initialFilters);
 
-    localStorage.clear();
   };
 
   const resetToDemoData = () => {

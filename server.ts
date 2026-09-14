@@ -2,7 +2,9 @@ import express from "express";
 import { mergeEvaluationSources } from "./server/platformStateRecovery";
 import { registerOperationsModule } from "./server/operationsModule";
 import path from "path";
-import { googleStorage } from "./server/googleStorage";
+import { googleStorage as googleDriveStorage } from "./server/googleStorage";
+import { supabaseStorage } from "./server/supabaseStorage";
+import { normalizeAccessUser, scopedRepository } from './server/authorization';
 import { emailService } from "./server/emailService";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -14,6 +16,16 @@ import { DatabaseSync } from "node:sqlite";
 import * as XLSX from 'xlsx';
 import { calculateEvaluationSummary, getItemCompliance } from './src/utils/calculations';
 
+const legacySheetsAllowed = process.env.ALLOW_GOOGLE_SHEETS_FALLBACK === 'true';
+const structuredStorage: any = supabaseStorage.enabled ? supabaseStorage : legacySheetsAllowed && googleDriveStorage.sheetsEnabled ? googleDriveStorage : null;
+// Compatibility facade: structured methods resolve to Supabase (or an explicit
+// legacy fallback), while file methods always remain on private Google Drive.
+const googleStorage: any = new Proxy(googleDriveStorage as any, { get(target, property) {
+  if (property === 'enabled') return Boolean(structuredStorage);
+  const owner = structuredStorage && property in structuredStorage ? structuredStorage : target;
+  const value = owner[property]; return typeof value === 'function' ? value.bind(owner) : value;
+} });
+
 const PORT = Number(process.env.PORT || 3001);
 const isProduction = process.env.NODE_ENV === 'production' || /dist[\\/]server\.cjs$/.test(process.argv[1] || '');
 
@@ -24,6 +36,7 @@ const db = new DatabaseSync(sqlitePath);
 // Only a fully consolidated snapshot is retained. It is a read-only fallback
 // for transient Sheets quota errors; it is never written back to Google.
 let lastCompletePlatformState: any | null = null;
+let structuredRepositoryCache:{expiresAt:number,value:SharedRepository}|null=null;
 db.exec(`PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, username TEXT UNIQUE, role TEXT NOT NULL, status TEXT NOT NULL, team_id TEXT, advisor_id TEXT UNIQUE, avatar TEXT, created_at TEXT NOT NULL, password_hash TEXT NOT NULL, must_change_password INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS campaigns (id TEXT PRIMARY KEY, name TEXT NOT NULL, client TEXT NOT NULL, status TEXT NOT NULL, products_json TEXT NOT NULL, description TEXT, quality_guidelines_json TEXT NOT NULL DEFAULT '[]', quality_criterion_weights_json TEXT, quality_critical_errors_json TEXT NOT NULL DEFAULT '[]');
@@ -61,6 +74,7 @@ if (!(db.prepare('PRAGMA table_info(campaigns)').all() as any[]).some(column => 
 if (!(db.prepare('PRAGMA table_info(campaigns)').all() as any[]).some(column => column.name === 'background_image')) db.exec('ALTER TABLE campaigns ADD COLUMN background_image TEXT');
 const addColumn = (table:string,column:string,definition:string) => { if (!(db.prepare(`PRAGMA table_info(${table})`).all() as any[]).some(item=>item.name===column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); };
 addColumn('companies','updated_at','TEXT');
+addColumn('users','access_scope',"TEXT NOT NULL DEFAULT 'GLOBAL'"); addColumn('users','company_ids_json',"TEXT NOT NULL DEFAULT '[]'"); addColumn('users','operation_ids_json',"TEXT NOT NULL DEFAULT '[]'");
 addColumn('operations','normalized_name','TEXT'); addColumn('operations','created_at','TEXT'); addColumn('operations','updated_at','TEXT'); addColumn('operations','closed_at','TEXT'); addColumn('operations','version','INTEGER NOT NULL DEFAULT 1'); addColumn('operations','metadata_json',"TEXT NOT NULL DEFAULT '{}'");
 addColumn('staffing_movements','effective_at','TEXT'); addColumn('staffing_movements','created_at','TEXT'); addColumn('staffing_movements','reversed_movement_id','TEXT');
 db.exec(`CREATE TABLE IF NOT EXISTS operation_supervisors (operation_id TEXT NOT NULL REFERENCES operations(id), supervisor_id TEXT NOT NULL REFERENCES users(id), active INTEGER NOT NULL, start_at TEXT NOT NULL, end_at TEXT, PRIMARY KEY(operation_id,supervisor_id,start_at));
@@ -81,7 +95,7 @@ const INITIAL_PASSWORD = '12345678';
 const DEFAULT_ADMIN_PASSWORD = process.env.INITIAL_ADMIN_PASSWORD || INITIAL_PASSWORD;
 const hashPassword = (password: string) => { const salt = randomBytes(16).toString('hex'); return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`; };
 const validPassword = (password: string, stored: string) => { const [salt, hash] = stored.split(':'); if (!salt || !hash) return false; const derived = scryptSync(password, salt, 64); return timingSafeEqual(derived, Buffer.from(hash, 'hex')); };
-const publicUser = (row: any): User => ({ id: row.id, name: row.name, email: row.email, username: row.username || undefined, role: row.role, status: row.status, teamId: row.team_id || undefined, advisorId: row.advisor_id || undefined, avatar: row.avatar || undefined, createdAt: row.created_at, mustChangePassword: Boolean(row.must_change_password) });
+const publicUser = (row: any): User => normalizeAccessUser(row);
 const evaluationIdentity = (item: any) => [item?.advisorId, item?.evaluationType, item?.date, item?.time, item?.callId || item?.recordingCode || item?.id].join('|');
 const uniqueEvaluations = (items: any[] = []) => { const seen = new Set<string>(); return items.filter(item => { const key=evaluationIdentity(item); if(seen.has(key)) return false; seen.add(key); return true; }); };
 const normalizedValidationStatus = (item: any) => item?.validationStatus === 'AUTOMATIC_PENDING' || item?.validationStatus === 'PENDIENTE_AUTOMATICO' ? 'AUTOMATIC_PENDING' : 'VALIDATED';
@@ -270,7 +284,8 @@ function persistRepository(input: SharedRepository) {
     db.prepare(`UPDATE campaigns SET status='INACTIVA' WHERE id IN (SELECT campaign_id FROM operations WHERE legacy=0 GROUP BY campaign_id HAVING SUM(CASE WHEN status='ACTIVA' THEN 1 ELSE 0 END)=0 AND SUM(CASE WHEN closed_at IS NOT NULL THEN 1 ELSE 0 END)>0)`).run();
     for (const user of source.users || []) {
       const existing = db.prepare('SELECT password_hash,must_change_password FROM users WHERE id=?').get(user.id);
-      db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar`).run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt || now, existing?.password_hash || hashPassword(user.password || INITIAL_PASSWORD), existing ? existing.must_change_password : 1);
+      const accessScope=user.accessScope||(user.role==='ASESOR'?'SELF':user.role==='SUPERVISOR'?'TEAM':'GLOBAL');
+      db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash,must_change_password,access_scope,company_ids_json,operation_ids_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar,access_scope=excluded.access_scope,company_ids_json=excluded.company_ids_json,operation_ids_json=excluded.operation_ids_json`).run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt || now, existing?.password_hash || hashPassword(user.password || INITIAL_PASSWORD), existing ? existing.must_change_password : 1,accessScope,JSON.stringify(user.companyIds||[]),JSON.stringify(user.operationIds||[]));
     }
     for (const team of source.teams || []) {
       const validCampaign=db.prepare('SELECT 1 FROM campaigns WHERE id=?').get(team.campaignId);
@@ -337,6 +352,7 @@ function hasEquivalentActiveOperations(source: SharedRepository) {
 
 async function readRepository() {
   if (!googleStorage.enabled) return repository();
+  if(structuredRepositoryCache&&structuredRepositoryCache.expiresAt>Date.now())return structuredRepositoryCache.value;
   try {
     const remote = await googleStorage.loadRepository();
     if (remote && (remote.users.length || remote.campaigns.length || remote.teams.length || remote.advisors.length)) {
@@ -351,25 +367,27 @@ async function readRepository() {
         if (mustRepairOperationIndex || repairedHistoricalRetirement) {
           try {
             await googleStorage.saveRepository(normalized, passwordHashes());
-            console.log('[operations] Operaciones duplicadas normalizadas y guardadas en Sheets.');
+            console.log('[operations] Operaciones duplicadas normalizadas y guardadas en el repositorio principal.');
           } catch (syncError) {
-            console.error('[operations] Se normalizó la caché local, pero no pudo guardarse la reparación en Sheets.', syncError instanceof Error ? syncError.message : '');
+            console.error('[operations] Se normalizó la caché local, pero no pudo guardarse la reparación principal.', syncError instanceof Error ? syncError.message : '');
           }
         }
-        return normalized;
+        structuredRepositoryCache={value:normalized,expiresAt:Date.now()+15_000};return normalized;
       }
       catch (cacheError) {
         console.error('[google-storage] La caché local no pudo actualizarse; se entrega la dotación remota.', cacheError instanceof Error ? cacheError.message : '');
         const local=repository(),legacyOperations=remote.campaigns.map(campaign=>({id:`op_legacy_${campaign.id}`,companyId:'company_legacy',campaignId:campaign.id,name:`LEGACY / ${campaign.name}`,status:'ACTIVA' as const,legacy:true}));
-        return {...remote,companies:local.companies,operations:[...(local.operations||[]),...legacyOperations.filter(operation=>!(local.operations||[]).some(item=>item.id===operation.id))]};
+        const fallback={...remote,companies:local.companies,operations:[...(local.operations||[]),...legacyOperations.filter(operation=>!(local.operations||[]).some(item=>item.id===operation.id))]};structuredRepositoryCache={value:fallback,expiresAt:Date.now()+15_000};return fallback;
       }
     }
+    if(supabaseStorage.enabled)throw new Error('Supabase no contiene el repositorio migrado. Ejecuta la migración antes del corte.');
     const local = repository();
     await googleStorage.saveRepository(local, passwordHashes());
     console.log('[google-storage] Google Sheets inicializado con la persistencia local existente.');
-    return local;
+    structuredRepositoryCache={value:local,expiresAt:Date.now()+15_000};return local;
   } catch (error) {
-    console.error('[google-storage] No fue posible leer Sheets; se usa la caché local.', error instanceof Error ? error.message : '');
+    if(supabaseStorage.enabled)throw error;
+    console.error('[structured-storage] No fue posible leer el fallback histórico; se usa la caché local.', error instanceof Error ? error.message : '');
     return repository();
   }
 }
@@ -378,10 +396,12 @@ async function saveRepository(input: SharedRepository) {
   const persisted = persistRepository(input);
   if (googleStorage.enabled) {
     try { await googleStorage.saveRepository(persisted, passwordHashes()); }
-    catch (error) { console.error('[google-storage] No fue posible guardar la dotación en Sheets.', error instanceof Error ? error.message : ''); throw new Error('No fue posible sincronizar la información con Google Sheets.'); }
+    catch (error) { console.error('[structured-storage] No fue posible guardar la dotación.', error instanceof Error ? error.message : ''); throw new Error('No fue posible sincronizar la información con el repositorio principal.'); }
   }
+  structuredRepositoryCache={value:persisted,expiresAt:Date.now()+15_000};
   return persisted;
 }
+async function syncRepositorySnapshot(){const current=repository();if(googleStorage.enabled)await googleStorage.saveRepository(current,passwordHashes());structuredRepositoryCache={value:current,expiresAt:Date.now()+15_000};return current;}
 
 async function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
@@ -410,14 +430,14 @@ async function syncAuthUsersFromGoogle(force = false) {
   if (!googleStorage.enabled || (!force && Date.now() - lastGoogleAuthSync < 60_000)) return;
   const users = await googleStorage.loadUsersForAuthentication();
   if (!users?.length) return;
-  const upsert = db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash,must_change_password)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar,created_at=excluded.created_at,password_hash=excluded.password_hash,must_change_password=excluded.must_change_password`);
+  const upsert = db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,avatar,created_at,password_hash,must_change_password,access_scope,company_ids_json,operation_ids_json)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,avatar=excluded.avatar,created_at=excluded.created_at,password_hash=excluded.password_hash,must_change_password=excluded.must_change_password,access_scope=excluded.access_scope,company_ids_json=excluded.company_ids_json,operation_ids_json=excluded.operation_ids_json`);
   db.exec('BEGIN IMMEDIATE');
   const repaired: Array<{ id: string; passwordHash: string }> = [];
   try {
     for (const user of users) {
       const passwordHash = user.passwordHash || hashPassword(INITIAL_PASSWORD);
-      upsert.run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt, passwordHash, user.passwordHash ? (user.mustChangePassword ? 1 : 0) : 1);
+      upsert.run(user.id, user.name, user.email, user.username || null, user.role, user.status, user.teamId || null, user.advisorId || null, user.avatar || null, user.createdAt, passwordHash, user.passwordHash ? (user.mustChangePassword ? 1 : 0) : 1,user.accessScope||(user.role==='ASESOR'?'SELF':user.role==='SUPERVISOR'?'TEAM':'GLOBAL'),JSON.stringify(user.companyIds||[]),JSON.stringify(user.operationIds||[]));
       if (!user.passwordHash) repaired.push({ id: user.id, passwordHash });
       if (user.advisorId && user.advisorDni) { advisorDnisForAuth.set(user.advisorId, user.advisorDni); advisorUsersByDni.set(user.advisorDni, user.id); }
     }
@@ -427,12 +447,14 @@ async function syncAuthUsersFromGoogle(force = false) {
 }
 
 async function startServer() {
+  if (isProduction && process.env.REQUIRE_SUPABASE === 'true' && !supabaseStorage.enabled) throw new Error('SUPABASE_DATABASE_URL es obligatoria cuando REQUIRE_SUPABASE=true.');
   const app = express();
   try { await cleanupEvaluationDuplicates(); } catch (error) { console.error('[evaluations] No fue posible completar la limpieza de duplicados.', error instanceof Error ? error.message : ''); }
 
   // Increase payload size for base64 audio files
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  app.use((req,res,next)=>{const requestId=req.header('x-request-id')||randomBytes(8).toString('hex'),started=Date.now();res.setHeader('X-Request-Id',requestId);res.on('finish',()=>console.log(JSON.stringify({event:'http_request',requestId,method:req.method,path:req.path,status:res.statusCode,durationMs:Date.now()-started,userId:(req as any).authUser?.id||null})));next();});
   const rawFileParser = express.raw({ type: () => true, limit: 36 * 1024 * 1024 });
   const parseRawFile = (req: express.Request, res: express.Response, next: express.NextFunction) => {
     rawFileParser(req, res, (error?: any) => {
@@ -441,7 +463,7 @@ async function startServer() {
       return res.status(400).json({ error: 'No fue posible leer el archivo enviado.' });
     });
   };
-  registerOperationsModule({app,db,requireAuth,repository,sync:async()=>{if(googleStorage.enabled)await googleStorage.saveRepository(repository(),passwordHashes());}});
+  registerOperationsModule({app,db,requireAuth,repository,sync:async()=>{await syncRepositorySnapshot();}});
 
   app.post('/api/auth/login', async (req, res) => {
     const { identity, password } = req.body || {};
@@ -472,7 +494,7 @@ async function startServer() {
     const { password } = req.body || {}; if (typeof password !== 'string' || password.length < 8) return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres.' });
     const user = (req as any).authUser as User; const passwordHash = hashPassword(password);
     try { if (googleStorage.enabled) await googleStorage.updateUserPasswordHash(user.id, passwordHash, false); }
-    catch (error) { console.error('[google-storage] No fue posible guardar la contraseña.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible guardar la contraseña en el repositorio central. Revisa la autorización de Google Sheets.' }); }
+    catch (error) { console.error('[structured-storage] No fue posible guardar la contraseña.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible guardar la contraseña en el repositorio principal.' }); }
     db.prepare('UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?').run(passwordHash, user.id);
     lastGoogleAuthSync = Date.now();
     res.json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)) });
@@ -484,6 +506,12 @@ async function startServer() {
     res.status(204).end();
   });
   const requireAdmin = (req: express.Request, res: express.Response) => (req as any).authUser?.role === 'ADMINISTRADOR' || res.status(403).json({ error: 'Acceso restringido a administración.' });
+  const isGlobalActor = (user: User) => (user.accessScope || 'GLOBAL') === 'GLOBAL';
+  const scopeWithinActor = (actor: User, accessScope: string, companyIds: string[], operationIds: string[]) => {
+    if (isGlobalActor(actor)) return true;
+    if (accessScope !== 'COMPANY') return false;
+    return companyIds.length > 0 && companyIds.every(id => (actor.companyIds || []).includes(id)) && operationIds.length === 0;
+  };
   app.post('/api/admin/email/test', requireAuth, async (req, res) => {
     if (requireAdmin(req, res) !== true) return;
     const recipient = String(req.body?.recipient || '').trim();
@@ -500,6 +528,7 @@ async function startServer() {
   });
   app.post('/api/admin/users', requireAuth, async (req, res) => {
     if (requireAdmin(req, res) !== true) return;
+    const actor = (req as any).authUser as User;
     const body = req.body || {}; const name = String(body.name || '').trim(); const email = String(body.email || '').trim().toLowerCase();
     const validRoles = ['ADMINISTRADOR','CONSULTOR','MONITOR','SUPERVISOR','FORMADOR','GERENCIA','ASESOR']; const role = validRoles.includes(body.role) ? body.role : 'ASESOR'; const status = body.status === 'INACTIVO' ? 'INACTIVO' : 'ACTIVO';
     if (!name || !email) return res.status(400).json({ error: 'Nombre y correo son obligatorios.' });
@@ -508,24 +537,31 @@ async function startServer() {
     const base = String(body.username || name).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\s.]/g, '').trim().replace(/[\s.]+/g, '.').replace(/^\.|\.$/g, '') || `usuario.${Date.now()}`;
     let username = base; let suffix = 1; while (db.prepare('SELECT 1 FROM users WHERE lower(username)=lower(?)').get(username)) username = `${base}.${++suffix}`;
     const id = `usr_${randomBytes(8).toString('hex')}`; const createdAt = new Date().toISOString();
-    db.prepare('INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,created_at,password_hash,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,?,1)').run(id,name,email,username,role,status,body.teamId||null,body.advisorId||null,createdAt,hashPassword(INITIAL_PASSWORD));
-    try { if (googleStorage.enabled) await googleStorage.saveRepository(repository(), passwordHashes()); }
-    catch (error) { db.prepare('DELETE FROM users WHERE id=?').run(id); console.error('[google-storage] No fue posible crear el usuario.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible guardar el usuario en Google Sheets.' }); }
+    const accessScope=['GLOBAL','COMPANY','OPERATION','TEAM','SELF'].includes(body.accessScope)?body.accessScope:(role==='ASESOR'?'SELF':role==='SUPERVISOR'?'TEAM':'GLOBAL');
+    const companyIds=Array.isArray(body.companyIds)?body.companyIds.map(String):[],operationIds=Array.isArray(body.operationIds)?body.operationIds.map(String):[];
+    if(accessScope==='COMPANY'&&!companyIds.length)return res.status(422).json({error:'El administrador por empresa requiere al menos una empresa.'});
+    if(!scopeWithinActor(actor,accessScope,companyIds,operationIds))return res.status(403).json({error:'No puedes otorgar acceso fuera de tu alcance.'});
+    db.prepare('INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,created_at,password_hash,must_change_password,access_scope,company_ids_json,operation_ids_json) VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?,?)').run(id,name,email,username,role,status,body.teamId||null,body.advisorId||null,createdAt,hashPassword(DEFAULT_ADMIN_PASSWORD),accessScope,JSON.stringify(companyIds),JSON.stringify(operationIds));
+    try { await syncRepositorySnapshot(); }
+    catch (error) { db.prepare('DELETE FROM users WHERE id=?').run(id); console.error('[structured-storage] No fue posible crear el usuario.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible guardar el usuario en el repositorio principal.' }); }
     return res.status(201).json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id)) });
   });
   app.patch('/api/admin/users/:id', requireAuth, async (req, res) => {
     if (requireAdmin(req, res) !== true) return;
+    const actor = (req as any).authUser as User;
     const current = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id) as any; if (!current) return res.status(404).json({ error: 'Usuario no encontrado.' });
-    const body = req.body || {}; const validRoles = ['ADMINISTRADOR','CONSULTOR','MONITOR','SUPERVISOR','FORMADOR','GERENCIA','ASESOR']; const next = { name: String(body.name ?? current.name).trim(), email: String(body.email ?? current.email).trim(), username: String((body.username ?? current.username) || '').trim() || null, role: validRoles.includes(body.role) ? body.role : current.role, status: body.status ?? current.status, teamId: body.teamId ?? current.team_id, advisorId: body.advisorId ?? current.advisor_id };
+    const body = req.body || {}; const validRoles = ['ADMINISTRADOR','CONSULTOR','MONITOR','SUPERVISOR','FORMADOR','GERENCIA','ASESOR']; const next = { name: String(body.name ?? current.name).trim(), email: String(body.email ?? current.email).trim(), username: String((body.username ?? current.username) || '').trim() || null, role: validRoles.includes(body.role) ? body.role : current.role, status: body.status ?? current.status, teamId: body.teamId ?? current.team_id, advisorId: body.advisorId ?? current.advisor_id, accessScope:['GLOBAL','COMPANY','OPERATION','TEAM','SELF'].includes(body.accessScope)?body.accessScope:current.access_scope, companyIds:Array.isArray(body.companyIds)?body.companyIds:JSON.parse(current.company_ids_json||'[]'), operationIds:Array.isArray(body.operationIds)?body.operationIds:JSON.parse(current.operation_ids_json||'[]') };
     if (!next.name || !next.email) return res.status(400).json({ error: 'Nombre y correo son obligatorios.' });
     if (next.role === 'SUPERVISOR' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.email)) return res.status(400).json({ error: 'El supervisor debe tener un correo válido.' });
-    try { db.prepare('UPDATE users SET name=?,email=?,username=?,role=?,status=?,team_id=?,advisor_id=? WHERE id=?').run(next.name, next.email, next.username, next.role, next.status, next.teamId || null, next.advisorId || null, current.id); if (googleStorage.enabled) await googleStorage.saveRepository(repository(), passwordHashes()); return res.json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(current.id)) }); }
+    if(next.accessScope==='COMPANY'&&!next.companyIds.length)return res.status(422).json({error:'El administrador por empresa requiere al menos una empresa.'});
+    if(!scopeWithinActor(actor,next.accessScope,next.companyIds.map(String),next.operationIds.map(String)) || (!isGlobalActor(actor) && !scopeWithinActor(actor,current.access_scope,JSON.parse(current.company_ids_json||'[]'),JSON.parse(current.operation_ids_json||'[]'))))return res.status(404).json({error:'Usuario no encontrado.'});
+    try { db.prepare('UPDATE users SET name=?,email=?,username=?,role=?,status=?,team_id=?,advisor_id=?,access_scope=?,company_ids_json=?,operation_ids_json=? WHERE id=?').run(next.name, next.email, next.username, next.role, next.status, next.teamId || null, next.advisorId || null,next.accessScope,JSON.stringify(next.companyIds),JSON.stringify(next.operationIds), current.id); await syncRepositorySnapshot(); return res.json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(current.id)) }); }
     catch { return res.status(400).json({ error: 'No fue posible actualizar el usuario.' }); }
   });
   app.post('/api/admin/users/:id/reset-password', requireAuth, async (req, res) => {
     if (requireAdmin(req, res) !== true) return;
     const user = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id) as any; if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
-    const passwordHash = hashPassword(INITIAL_PASSWORD); db.prepare('UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?').run(passwordHash, user.id);
+    const passwordHash = hashPassword(DEFAULT_ADMIN_PASSWORD); db.prepare('UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?').run(passwordHash, user.id);
     try { if (googleStorage.enabled) await googleStorage.updateUserPasswordHash(user.id, passwordHash, true); return res.json({ ok: true }); }
     catch { return res.status(502).json({ error: 'No fue posible sincronizar el reseteo.' }); }
   });
@@ -534,12 +570,13 @@ async function startServer() {
     const actor = (req as any).authUser as User; if (actor.id === req.params.id) return res.status(400).json({ error: 'No puedes eliminar tu propia cuenta.' });
     const user = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id) as any; if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
     db.prepare('DELETE FROM sessions WHERE user_id=?').run(user.id); db.prepare('DELETE FROM users WHERE id=?').run(user.id);
-    try { if (googleStorage.enabled) await googleStorage.saveRepository(repository(), passwordHashes()); return res.status(204).end(); }
+    try { await syncRepositorySnapshot(); return res.status(204).end(); }
     catch { return res.status(502).json({ error: 'No fue posible sincronizar la eliminación.' }); }
   });
 
   app.get('/api/shared-repository', requireAuth, async (req, res) => {
     const source = await readRepository(); const user = (req as any).authUser as User;
+    if (['ADMINISTRADOR','CONSULTOR','FORMADOR','GERENCIA'].includes(user.role) && user.accessScope && user.accessScope !== 'GLOBAL') return res.json({ repository: scopedRepository(user,source) });
     if (user.role === 'MONITOR') {
       const advisors = source.advisors.filter(item => item.active !== false && item.status === 'ACTIVO');
       const campaignIds = new Set(advisors.map(item => item.campaignId));
@@ -565,12 +602,14 @@ async function startServer() {
     } });
   });
   app.post('/api/shared-repository/migrate', requireAuth, async (req, res) => {
-    if (!['ADMINISTRADOR','CONSULTOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'No tienes permiso para modificar la dotación.' });
+    const user=(req as any).authUser as User;
+    if (!['ADMINISTRADOR','CONSULTOR'].includes(user.role) || !isGlobalActor(user)) return res.status(403).json({ error: 'La migración global requiere alcance global.' });
     try { return res.json({ repository: await saveRepository(req.body as SharedRepository) }); }
     catch (error: any) { return res.status(400).json({ error: error.message || 'No fue posible migrar la dotación.' }); }
   });
   app.put('/api/shared-repository/sync', requireAuth, async (req, res) => {
-    if (!['ADMINISTRADOR','CONSULTOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'No tienes permiso para modificar la dotación.' });
+    const user=(req as any).authUser as User;
+    if (!['ADMINISTRADOR','CONSULTOR'].includes(user.role) || !isGlobalActor(user)) return res.status(403).json({ error: 'La sincronización global requiere alcance global.' });
     try { return res.json({ repository: await saveRepository(req.body as SharedRepository) }); }
     catch (error: any) { return res.status(400).json({ error: error.message || 'No fue posible guardar la dotación.' }); }
   });
@@ -578,6 +617,8 @@ async function startServer() {
     if (requireAdmin(req, res) !== true) return;
     try {
       const campaignId=req.params.id,companyId=String(req.query.companyId||'');
+      const actor=(req as any).authUser as User;
+      if(!isGlobalActor(actor)&&(!companyId||!(actor.companyIds||[]).includes(companyId)))return res.status(404).json({error:'Campaña no encontrada.'});
       const now=new Date().toISOString(),today=now.slice(0,10);
       db.exec('BEGIN IMMEDIATE');
       try {
@@ -603,10 +644,11 @@ async function startServer() {
         if(!active)db.prepare('UPDATE campaigns SET status=? WHERE id=?').run('INACTIVA',campaignId);
         db.exec('COMMIT');
       }catch(error){db.exec('ROLLBACK');throw error;}
-      if (googleStorage.enabled) await googleStorage.saveRepository(repository(), passwordHashes());
+      await syncRepositorySnapshot();
       res.json({ repository: repository() });
     } catch (error: any) { res.status(400).json({ error: error.message || 'No se pudo eliminar la campaña.' }); }
   });
+  const scopedRecord=(user:User,item:any)=>{const scope=user.accessScope||(user.role==='ASESOR'?'SELF':user.role==='SUPERVISOR'?'TEAM':'GLOBAL');if(scope==='GLOBAL')return true;if(scope==='COMPANY')return (user.companyIds||[]).includes(String(item.companyId||item.company_id||''));if(scope==='OPERATION')return (user.operationIds||[]).includes(String(item.operationId||item.operation_id||''));if(scope==='TEAM')return user.id===String(item.supervisorId||item.supervisor_id||'')||(item.supervisorIds||[]).includes(user.id)||(user.operationIds||[]).includes(String(item.operationId||item.operation_id||''));return user.advisorId===String(item.advisorId||item.advisor_id||'');};
   app.post('/api/evaluations', requireAuth, async (req, res) => {
     const authUser = (req as any).authUser as User;
     if (!['ADMINISTRADOR','CONSULTOR','MONITOR'].includes(authUser.role)) return res.status(403).json({ error: 'Solo Calidad, Monitor o Administración puede crear evaluaciones.' });
@@ -626,6 +668,7 @@ async function startServer() {
       const campaign=directory.campaigns.find(item=>item.id===advisor.campaignId);
       if (!operation || operation.legacy || operation.status !== 'ACTIVA' || operation.campaignId !== advisor.campaignId || !campaign || campaign.status !== 'ACTIVA') return res.status(400).json({ error: 'La campaña del asesor ya no está activa. Selecciona una campaña vigente.' });
       evaluation = { ...evaluation, campaignId:advisor.campaignId, teamId:advisor.teamId, supervisorId:advisor.supervisorId, operationId:operation.id, companyId:operation.companyId, supervisorAtEvaluation:advisor.supervisorId, validationStatus: 'VALIDATED' };
+      if(!scopedRecord(authUser,evaluation))return res.status(404).json({error:'Asesor no encontrado en tu alcance.'});
       evaluation = correctMigracionesQualityEvaluation(evaluation, directory.campaigns);
       const localDuplicate = (db.prepare('SELECT payload_json FROM evaluations WHERE advisor_id=? AND evaluation_type=? AND evaluated_at=?').all(evaluation.advisorId,evaluation.evaluationType,evaluatedAt) as any[]).flatMap(row=>{try{return [JSON.parse(row.payload_json)];}catch{return [];}}).find(item=>evaluationIdentity(item)===evaluationIdentity(evaluation));
       if (localDuplicate) return res.status(200).json({ evaluation: localDuplicate, deduplicated: true });
@@ -656,8 +699,7 @@ async function startServer() {
     } catch (error: any) {
       const status=Number(error?.response?.status||error?.code||0),detail=[error?.message,error?.response?.data?.error,error?.response?.data?.error_description].filter(Boolean).map(String).join(' ').toLowerCase();
       console.error('[google-storage] No fue posible guardar la evaluación.', `status=${status||'unknown'}`, error instanceof Error ? error.message : '');
-      if(status===429||/quota exceeded|rate.?limit/.test(detail))return res.status(503).json({error:'Google Sheets alcanzó temporalmente su límite. Espera un minuto y vuelve a guardar; la evaluación permanece abierta.'});
-      if(/invalid_grant|token has been expired|token has been revoked/.test(detail))return res.status(503).json({error:'La autorización de Google Sheets venció. Debe renovarse GOOGLE_REFRESH_TOKEN en Railway.'});
+      if(status===429||/quota exceeded|rate.?limit/.test(detail))return res.status(503).json({error:'El repositorio principal alcanzó temporalmente su límite. La evaluación permanece abierta.'});
       return res.status(status>=500?503:400).json({ error: error.message || 'No fue posible guardar la evaluación.' });
     }
   });
@@ -682,7 +724,7 @@ async function startServer() {
     if (!adminRoles.has(user.role)) return res.status(403).json({ error: 'Sólo Administración o Calidad puede eliminar evaluaciones.' });
     const id = String(req.params.id || '').trim();
     const current = await loadEvaluationById(id);
-    if (!current) return res.status(404).json({ error: 'La evaluación ya no existe.' });
+    if (!current || !scopedRecord(user,current)) return res.status(404).json({ error: 'La evaluación ya no existe.' });
     if ((db.prepare('SELECT 1 FROM calibrations WHERE evaluation_id=? LIMIT 1').get(id) as any)) return res.status(409).json({ error: 'La evaluación tiene una calibración asociada. Elimina primero esa calibración.' });
     try {
       if (googleStorage.enabled) await googleStorage.deleteEvaluation(id);
@@ -707,19 +749,18 @@ async function startServer() {
     } catch (error: any) {
       const status=Number(error?.response?.status||error?.code||0),detail=[error?.message,error?.response?.data?.error,error?.response?.data?.error_description].filter(Boolean).map(String).join(' ').toLowerCase();
       console.error('[evaluations] No fue posible eliminar la evaluación.', `status=${status||'unknown'}`, error instanceof Error ? error.message : '');
-      if(status===429||/quota exceeded|rate.?limit/.test(detail))return res.status(503).json({error:'Google Sheets alcanzó temporalmente su límite. Espera un minuto y vuelve a eliminar.'});
-      if(/invalid_grant|token has been expired|token has been revoked/.test(detail))return res.status(503).json({error:'La autorización de Google Sheets venció. Debe renovarse GOOGLE_REFRESH_TOKEN en Railway.'});
+      if(status===429||/quota exceeded|rate.?limit/.test(detail))return res.status(503).json({error:'El repositorio principal alcanzó temporalmente su límite. Reintenta la eliminación.'});
       return res.status(status>=500?503:400).json({ error: error.message || 'No fue posible eliminar la evaluación.' });
     }
   });
-  const adminEvaluationRows = async () => { let rows=(db.prepare('SELECT payload_json FROM evaluations ORDER BY evaluated_at DESC').all() as any[]).flatMap(row=>{try{return[JSON.parse(row.payload_json)]}catch{return[]}});if(googleStorage.enabled)try{rows=uniqueEvaluations([...(await googleStorage.loadEvaluations()),...rows]);}catch{}return rows; };
-  const adminFilteredEvaluations = async (query:any) => { const directory=await readRepository(),campaignId=String(query.campaignId||''),supervisorId=String(query.supervisorId||''),advisorName=String(query.advisorName||'').trim().toLocaleLowerCase(),feedbackStatus=String(query.feedbackStatus||''),validationStatus=String(query.validationStatus||'');let feedbacks=(db.prepare('SELECT * FROM feedbacks').all() as any[]);if(googleStorage.enabled)try{feedbacks=await googleStorage.loadFeedbacks();}catch{}const feedbackByEvaluation=new Map(feedbacks.map(item=>[item.evaluation_id,item]));const rows=(await adminEvaluationRows()).filter(item=>{const advisor=directory.advisors.find(a=>a.id===item.advisorId),fb=feedbackByEvaluation.get(item.id),fbState=fb&&['VALIDADO_ASESOR','CERRADO_SUPERVISOR'].includes(fb.status)?'FIRMADO':'PENDIENTE';return(!campaignId||item.campaignId===campaignId)&&(!supervisorId||item.supervisorId===supervisorId||advisor?.supervisorId===supervisorId)&&(!advisorName||advisor?.name.toLocaleLowerCase().includes(advisorName))&&(!feedbackStatus||fbState===feedbackStatus)&&(!validationStatus||normalizedValidationStatus(item)===validationStatus);});return{rows,feedbacks,directory,feedbackByEvaluation}; };
-  app.get('/api/admin/dashboard',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(!adminRoles.has(user.role))return res.status(403).json({error:'Acceso restringido a Calidad y Administración.'});const {rows,feedbacks,directory}=await adminFilteredEvaluations(req.query);const valid=rows.filter(item=>normalizedValidationStatus(item)==='VALIDATED'),average=(items:any[])=>items.length?Math.round(items.reduce((sum,item)=>sum+Number(item.technicalScore??item.scoreTotal??0),0)/items.length):null;const by=(key:(item:any)=>string)=>Object.entries(valid.reduce((out:any,item)=>{const id=key(item);(out[id]??=[]).push(item);return out;},{})).map(([id,items]:any)=>({id,name:directory.campaigns.find(c=>c.id===id)?.name||directory.users.find(u=>u.id===id)?.name||'Sin asignar',average:average(items),count:items.length}));const signed=feedbacks.filter(item=>['VALIDADO_ASESOR','CERRADO_SUPERVISOR'].includes(item.status)).length;res.json({metrics:{feedbackDone:signed,feedbackPending:Math.max(0,feedbacks.length-signed),automaticPending:rows.filter(item=>normalizedValidationStatus(item)==='AUTOMATIC_PENDING').length},byCampaign:by(item=>item.campaignId),bySupervisor:by(item=>item.supervisorId),evaluations:rows.map(item=>({...item,feedbackStatus:(()=>{const fb=feedbacks.find(f=>f.evaluation_id===item.id);return fb&&['VALIDADO_ASESOR','CERRADO_SUPERVISOR'].includes(fb.status)?'FIRMADO':'PENDIENTE';})()}))});});
+  const adminEvaluationRows = async () => { let rows=(db.prepare('SELECT payload_json FROM evaluations ORDER BY evaluated_at DESC').all() as any[]).flatMap(row=>{try{return[JSON.parse(row.payload_json)]}catch{return[]}});if(googleStorage.enabled)try{const primary=await googleStorage.loadEvaluations();rows=supabaseStorage.enabled?primary:uniqueEvaluations([...primary,...rows]);}catch{}return rows; };
+  const adminFilteredEvaluations = async (query:any,user:User) => { const directory=await readRepository(),campaignId=String(query.campaignId||''),supervisorId=String(query.supervisorId||''),advisorName=String(query.advisorName||'').trim().toLocaleLowerCase(),feedbackStatus=String(query.feedbackStatus||''),validationStatus=String(query.validationStatus||'');let feedbacks=(db.prepare('SELECT * FROM feedbacks').all() as any[]);if(googleStorage.enabled)try{feedbacks=await googleStorage.loadFeedbacks();}catch{}const feedbackByEvaluation=new Map(feedbacks.map(item=>[item.evaluation_id,item]));const rows=(await adminEvaluationRows()).filter(item=>{const advisor=directory.advisors.find(a=>a.id===item.advisorId),fb=feedbackByEvaluation.get(item.id),fbState=fb&&['VALIDADO_ASESOR','CERRADO_SUPERVISOR'].includes(fb.status)?'FIRMADO':'PENDIENTE';return scopedRecord(user,item)&&(!campaignId||item.campaignId===campaignId)&&(!supervisorId||item.supervisorId===supervisorId||advisor?.supervisorId===supervisorId)&&(!advisorName||advisor?.name.toLocaleLowerCase().includes(advisorName))&&(!feedbackStatus||fbState===feedbackStatus)&&(!validationStatus||normalizedValidationStatus(item)===validationStatus);});const visibleIds=new Set(rows.map((item:any)=>item.id));feedbacks=feedbacks.filter((item:any)=>visibleIds.has(item.evaluation_id));return{rows,feedbacks,directory,feedbackByEvaluation}; };
+  app.get('/api/admin/dashboard',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(!adminRoles.has(user.role))return res.status(403).json({error:'Acceso restringido a Calidad y Administración.'});const {rows,feedbacks,directory}=await adminFilteredEvaluations(req.query,user);const valid=rows.filter(item=>normalizedValidationStatus(item)==='VALIDATED'),average=(items:any[])=>items.length?Math.round(items.reduce((sum,item)=>sum+Number(item.technicalScore??item.scoreTotal??0),0)/items.length):null;const by=(key:(item:any)=>string)=>Object.entries(valid.reduce((out:any,item)=>{const id=key(item);(out[id]??=[]).push(item);return out;},{})).map(([id,items]:any)=>({id,name:directory.campaigns.find(c=>c.id===id)?.name||directory.users.find(u=>u.id===id)?.name||'Sin asignar',average:average(items),count:items.length}));const signed=feedbacks.filter(item=>['VALIDADO_ASESOR','CERRADO_SUPERVISOR'].includes(item.status)).length;res.json({metrics:{feedbackDone:signed,feedbackPending:Math.max(0,feedbacks.length-signed),automaticPending:rows.filter(item=>normalizedValidationStatus(item)==='AUTOMATIC_PENDING').length},byCampaign:by(item=>item.campaignId),bySupervisor:by(item=>item.supervisorId),evaluations:rows.map(item=>({...item,feedbackStatus:(()=>{const fb=feedbacks.find(f=>f.evaluation_id===item.id);return fb&&['VALIDADO_ASESOR','CERRADO_SUPERVISOR'].includes(fb.status)?'FIRMADO':'PENDIENTE';})()}))});});
   app.patch('/api/admin/evaluations/:id', requireAuth, async (req,res) => {
     const user=(req as any).authUser as User;
     if(user.role!=='ADMINISTRADOR') return res.status(403).json({error:'Sólo el usuario Administrador puede editar evaluaciones finalizadas.'});
     const current=await loadEvaluationById(req.params.id);
-    if(!current) return res.status(404).json({error:'Evaluación no encontrada.'});
+    if(!current || !scopedRecord(user,current)) return res.status(404).json({error:'Evaluación no encontrada.'});
     const body=req.body||{},now=new Date().toISOString();
     const editableFields=['date','time','callId','recordingCode','type','product','sale','saleResult','noSaleReason','comments','items','qualityCriticalErrorIds','qualityCriticalErrorSnapshot'];
     const changes=Object.fromEntries(editableFields.filter(key=>body[key]!==undefined).map(key=>[key,body[key]]));
@@ -744,12 +785,11 @@ async function startServer() {
       return res.json({evaluation:next});
     } catch(error:any) {
       const status=Number(error?.response?.status||error?.code||0),detail=[error?.message,error?.response?.data?.error,error?.response?.data?.error_description].filter(Boolean).map(String).join(' ').toLowerCase();
-      if(status===429||/quota exceeded|rate.?limit/.test(detail))return res.status(503).json({error:'Google Sheets alcanzó temporalmente su límite. Espera un minuto y vuelve a guardar.'});
-      if(/invalid_grant|token has been expired|token has been revoked/.test(detail))return res.status(503).json({error:'La autorización de Google Sheets venció. Debe renovarse GOOGLE_REFRESH_TOKEN en Railway.'});
+      if(status===429||/quota exceeded|rate.?limit/.test(detail))return res.status(503).json({error:'El repositorio principal alcanzó temporalmente su límite. Reintenta el guardado.'});
       return res.status(status>=500?503:400).json({error:error.message||'No fue posible actualizar la evaluación.'});
     }
   });
-  const canReadEvaluation = (user: User, evaluation: any) => user.role === 'ASESOR'
+  const canReadEvaluation = (user: User, evaluation: any) => !scopedRecord(user,evaluation)?false:user.role === 'ASESOR'
     ? user.advisorId === evaluation.advisorId
     : user.role === 'SUPERVISOR'
       ? user.id === evaluation.supervisorId || Boolean(user.teamId && user.teamId === evaluation.teamId)
@@ -853,6 +893,7 @@ async function startServer() {
     const onlyOwn = (state: any) => {
       if (!state) return state;
       if (user.role === 'MONITOR') return { ...state, evaluations: (state.evaluations || []).filter((item: any) => item.evaluatorId === user.id), actionPlans: [], advisorInterventions: [], operationalMeasurements: [], importHistory: [] };
+      if (user.accessScope && user.accessScope !== 'GLOBAL' && !['ASESOR','SUPERVISOR'].includes(user.role)) { const mine=(items:any[]|undefined)=>(items||[]).filter(item=>scopedRecord(user,item));return{...state,evaluations:mine(state.evaluations),actionPlans:mine(state.actionPlans),advisorInterventions:mine(state.advisorInterventions),operationalMeasurements:mine(state.operationalMeasurements),importHistory:[]}; }
       if (!['ASESOR','SUPERVISOR'].includes(user.role)) return state;
       const advisorIds = user.role === 'ASESOR' && user.advisorId ? new Set([user.advisorId]) : new Set(directory.advisors.filter(item => item.supervisorId === user.id || (user.teamId && item.teamId === user.teamId)).map(item => item.id));
       const mine = (items: any[] | undefined) => (items || []).filter(item => advisorIds.has(item.advisorId));
@@ -862,22 +903,22 @@ async function startServer() {
     try {
       if (googleStorage.enabled) {
         const [state, storedEvaluations] = await Promise.all([googleStorage.loadPlatformState(), googleStorage.loadEvaluations()]);
-        const localRow = db.prepare('SELECT payload_json FROM app_state WHERE id=?').get('global') as any;
+        const localRow = supabaseStorage.enabled ? null : db.prepare('SELECT payload_json FROM app_state WHERE id=?').get('global') as any;
         const localState = localRow ? JSON.parse(localRow.payload_json) : {};
-        const localEvaluations = (db.prepare('SELECT payload_json FROM evaluations').all() as any[]).map(row => JSON.parse(row.payload_json));
+        const localEvaluations = supabaseStorage.enabled ? [] : (db.prepare('SELECT payload_json FROM evaluations').all() as any[]).map(row => JSON.parse(row.payload_json));
         const consolidated = { ...localState, ...(state || {}), evaluations: mergeEvaluationSources(storedEvaluations || [], state?.evaluations || [], localEvaluations, localState.evaluations || []) };
         const corrected = { ...consolidated, evaluations: consolidated.evaluations.map((evaluation:any) => correctMigracionesQualityEvaluation(evaluation, directory.campaigns)) };
         lastCompletePlatformState = corrected;
         const evaluationTypes=corrected.evaluations.reduce((totals:any,item:any)=>{const type=item.evaluationType||'SIN_TIPO';totals[type]=(totals[type]||0)+1;return totals;},{});
-        console.log(`[platform-state] fuente=Sheets evaluaciones=${corrected.evaluations.length} tipos=${JSON.stringify(evaluationTypes)} asesores=${directory.advisors.length}`);
-        console.log('[platform-state] fuentes=' + JSON.stringify({ sheetsEvaluations: storedEvaluations.length, sheetsState: state?.evaluations?.length || 0, sqliteEvaluations: localEvaluations.length, sqliteState: localState.evaluations?.length || 0, total: corrected.evaluations.length }));
+        console.log(`[platform-state] fuente=${supabaseStorage.enabled?'Supabase':'Sheets legacy'} evaluaciones=${corrected.evaluations.length} tipos=${JSON.stringify(evaluationTypes)} asesores=${directory.advisors.length}`);
+        console.log('[platform-state] fuentes=' + JSON.stringify({ primaryEvaluations: storedEvaluations.length, primaryState: state?.evaluations?.length || 0, cacheEvaluations: localEvaluations.length, cacheState: localState.evaluations?.length || 0, total: corrected.evaluations.length }));
         return res.json({ state: onlyOwn(corrected) });
       }
     }
     catch (error) {
       console.error('[google-storage] No fue posible leer el estado de plataforma.', error instanceof Error ? error.message : '');
       if (lastCompletePlatformState) {
-        console.warn('[platform-state] Se entrega el último estado completo en caché por una falla transitoria de Google Sheets.');
+        console.warn('[platform-state] Se entrega el último estado completo en caché por una falla transitoria del repositorio principal.');
         return res.json({ state: onlyOwn(lastCompletePlatformState), source: 'LAST_COMPLETE_CACHE' });
       }
       return res.status(502).json({ error: 'No se pudo cargar el historial completo. Se detuvo la sincronización para proteger los registros. Reintenta la carga.' });
@@ -893,14 +934,15 @@ async function startServer() {
     res.json({ state: onlyOwn(corrected) });
   });
   app.put('/api/platform-state', requireAuth, async (req, res) => {
-    if (['ASESOR','SUPERVISOR','MONITOR'].includes((req as any).authUser.role)) return res.status(403).json({ error: 'Este rol no puede sobrescribir el estado global.' });
+    const actor=(req as any).authUser as User;
+    if (!['ADMINISTRADOR','CONSULTOR'].includes(actor.role) || !isGlobalActor(actor)) return res.status(403).json({ error: 'Sólo un administrador global puede sobrescribir el estado global.' });
     const now = new Date().toISOString();
     let canonicalEvaluations = (db.prepare('SELECT payload_json FROM evaluations ORDER BY created_at DESC').all() as any[]).flatMap(row=>{try{return[JSON.parse(row.payload_json)]}catch{return[]}});
     try { if (googleStorage.enabled) canonicalEvaluations = await googleStorage.loadEvaluations(); }
     catch (error) { console.error('[google-storage] No fue posible validar EVALUATIONS antes de guardar el estado.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No se pudo validar el historial de evaluaciones; no se modificó el estado.' }); }
     const normalizedState = normalizePlatformState({ ...(req.body || {}), evaluations: canonicalEvaluations });
     try { if (googleStorage.enabled) await googleStorage.savePlatformState(normalizedState); }
-    catch (error) { console.error('[google-storage] No fue posible guardar el estado de plataforma.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible sincronizar el estado con Google Sheets.' }); }
+    catch (error) { console.error('[structured-storage] No fue posible guardar el estado de plataforma.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible sincronizar el estado con el repositorio principal.' }); }
     db.prepare(`INSERT INTO app_state (id,payload_json,updated_at) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,updated_at=excluded.updated_at`).run('global', JSON.stringify(normalizedState), now);
     for (const evaluation of (normalizedState?.evaluations || [])) { if (!evaluation?.id || !evaluation?.advisorId || !evaluation?.evaluatorId || !['QUALITY','D3C'].includes(evaluation?.evaluationType)) continue; try { db.prepare(`INSERT OR IGNORE INTO evaluations (id,advisor_id,evaluator_id,evaluation_type,evaluated_at,payload_json,created_at) VALUES (?,?,?,?,?,?,?)`).run(evaluation.id, evaluation.advisorId, evaluation.evaluatorId, evaluation.evaluationType, `${evaluation.date}T${evaluation.time || '00:00'}:00`, JSON.stringify(evaluation), evaluation.createdAt || now); } catch {} }
     res.json({ ok: true });
@@ -944,15 +986,16 @@ async function startServer() {
   app.get('/api/files/:id/content', requireAuth, async (req, res) => {
     try {
       const user = (req as any).authUser as User;
-      if (user.role === 'ASESOR') {
-        const pathPart = `/api/files/${req.params.id}/content`;
-        let evaluations = (db.prepare('SELECT payload_json FROM evaluations').all() as any[]).flatMap(row=>{try{return[JSON.parse(row.payload_json)];}catch{return[];}});
-        let feedbacks = db.prepare('SELECT advisor_id,advisor_evidence_url FROM feedbacks').all() as any[];
-        if (googleStorage.enabled) { try { evaluations=uniqueEvaluations([...(await googleStorage.loadEvaluations()),...evaluations]);feedbacks=[...(await googleStorage.loadFeedbacks()),...feedbacks]; } catch {} }
-        const directory=await readRepository();const advisor=directory.advisors.find(a=>a.id===user.advisorId);const alerts=(db.prepare('SELECT data_json FROM quality_alerts').all() as any[]).flatMap(row=>{try{return[JSON.parse(row.data_json)]}catch{return[]}});const today=new Date().toISOString().slice(0,10);
-        const allowed = evaluations.some(item=>item.advisorId===user.advisorId&&normalizedValidationStatus(item)==='VALIDATED'&&String(item.audioUrl||'').includes(pathPart)) || feedbacks.some(item=>item.advisor_id===user.advisorId&&String(item.advisor_evidence_url||'').includes(pathPart)) || alerts.some(item=>advisor&&item.campaignId===advisor.campaignId&&item.status!=='CERRADA'&&String(item.validUntil||'')>=today&&String(item.audioUrl||'').includes(pathPart));
-        if (!allowed) return res.status(404).json({ error:'Archivo no encontrado.' });
-      }
+      const pathPart = `/api/files/${req.params.id}/content`;
+      let evaluations = (db.prepare('SELECT payload_json FROM evaluations').all() as any[]).flatMap(row=>{try{return[JSON.parse(row.payload_json)];}catch{return[];}});
+      let feedbacks = db.prepare('SELECT * FROM feedbacks').all() as any[];
+      let alerts=(db.prepare('SELECT data_json FROM quality_alerts').all() as any[]).flatMap(row=>{try{return[JSON.parse(row.data_json)]}catch{return[]}});
+      if (googleStorage.enabled) { try { evaluations=supabaseStorage.enabled?await googleStorage.loadEvaluations():uniqueEvaluations([...(await googleStorage.loadEvaluations()),...evaluations]);feedbacks=await googleStorage.loadFeedbacks();alerts=await googleStorage.loadQualityAlerts(); } catch {} }
+      const canRead=(item:any)=>canReadEvaluation(user,item);
+      const allowed = evaluations.some(item=>canRead(item)&&String(item.audioUrl||'').includes(pathPart))
+        || feedbacks.some(item=>{const evaluation=evaluations.find(e=>e.id===item.evaluation_id);return evaluation&&canRead(evaluation)&&String(item.advisor_evidence_url||'').includes(pathPart);})
+        || alerts.some(item=>scopedRecord(user,item)&&(qualityManagers.has(user.role)||(user.role==='SUPERVISOR'&&item.supervisorIds?.includes(user.id))||(user.role==='ASESOR'&&item.advisorId===user.advisorId))&&String(item.audioUrl||'').includes(pathPart));
+      if (!allowed) return res.status(404).json({ error:'Archivo no encontrado.' });
       const file = await googleStorage.fileMetadata(req.params.id);
       const stream = await googleStorage.downloadFile(req.params.id);
       res.set({
@@ -967,8 +1010,8 @@ async function startServer() {
       if (!res.headersSent) res.status(404).json({ error: 'Archivo no encontrado.' });
     }
   });
-  app.get('/api/files/:id', requireAuth, async (req, res) => { if((req as any).authUser.role==='ASESOR')return res.status(403).json({error:'Acceso denegado.'});try { res.json({ file: await googleStorage.fileMetadata(req.params.id) }); } catch { res.status(404).json({ error: 'Archivo no encontrado.' }); } });
-  app.delete('/api/files/:id', requireAuth, async (req, res) => { if(!['ADMINISTRADOR','CONSULTOR'].includes((req as any).authUser.role))return res.status(403).json({error:'Acceso denegado.'});try { await googleStorage.deleteFile(req.params.id); res.status(204).end(); } catch { res.status(404).json({ error: 'Archivo no encontrado.' }); } });
+  app.get('/api/files/:id', requireAuth, async (_req, res) => res.status(404).json({error:'Usa el endpoint autorizado del registro asociado.'}));
+  app.delete('/api/files/:id', requireAuth, async (req, res) => { const user=(req as any).authUser as User;if(user.role!=='ADMINISTRADOR'||!isGlobalActor(user))return res.status(403).json({error:'Acceso denegado.'});try { await googleStorage.deleteFile(req.params.id); res.status(204).end(); } catch { res.status(404).json({ error: 'Archivo no encontrado.' }); } });
 
   const qualityManagers = new Set(['ADMINISTRADOR', 'CONSULTOR']);
   const alertRows = () => (db.prepare('SELECT data_json FROM quality_alerts ORDER BY updated_at DESC').all() as any[]).map(row => JSON.parse(row.data_json));
@@ -981,12 +1024,12 @@ async function startServer() {
   const loadAlerts = async () => { let items=alertRows(); try { const remote=googleStorage.enabled?await googleStorage.loadQualityAlerts():[]; if(remote.length){items=remote;remote.forEach(persistAlert);} } catch {} return items.map(normalizeAlert); };
   const teamAdvisorIds = (user:User, directory:SharedRepository) => new Set(directory.advisors.filter(item=>item.supervisorId===user.id || (!!user.teamId&&item.teamId===user.teamId)).map(item=>item.id));
   const visibleAlerts = (items:any[], user:User, directory:SharedRepository) => {
-    if (qualityManagers.has(user.role)) return items;
+    if (qualityManagers.has(user.role)) return items.filter(item=>scopedRecord(user,item));
     if (user.role === 'SUPERVISOR') { const team=teamAdvisorIds(user,directory), campaigns=new Set(directory.advisors.filter(a=>team.has(a.id)).map(a=>a.campaignId)); return items.filter(item=>item.supervisorIds.includes(user.id)||team.has(item.advisorId)||campaigns.has(item.campaignId)); }
     if (user.role === 'ASESOR') { const advisor=directory.advisors.find(a=>a.id===user.advisorId); const operationId=advisor?.operationId||`op_legacy_${advisor?.campaignId||''}`; return items.filter(item=>isAlertActive(item)&&!!advisor&&(item.operationId?item.operationId===operationId:item.campaignId===advisor.campaignId)).map(({ supervisorResponses,managementDetail,evidenceUrl,feedbackPerformed,managedAt,elapsedMinutes,...safe })=>safe); }
     return [];
   };
-  const loadVisibleEvaluations = async () => { let rows=(db.prepare('SELECT payload_json FROM evaluations').all() as any[]).flatMap(r=>{try{return[JSON.parse(r.payload_json)]}catch{return[]}}); if(googleStorage.enabled)try{rows=uniqueEvaluations([...(await googleStorage.loadEvaluations()),...rows]);}catch{} return rows; };
+  const loadVisibleEvaluations = async () => { let rows=(db.prepare('SELECT payload_json FROM evaluations').all() as any[]).flatMap(r=>{try{return[JSON.parse(r.payload_json)]}catch{return[]}}); if(googleStorage.enabled)try{const primary=await googleStorage.loadEvaluations();rows=supabaseStorage.enabled?primary:uniqueEvaluations([...primary,...rows]);}catch{} return rows; };
   app.get('/api/supervisor/dashboard', requireAuth, async (req,res) => {
     const user=(req as any).authUser as User; if(user.role!=='SUPERVISOR')return res.status(403).json({error:'Acceso restringido al supervisor.'});
     const directory=await readRepository(), team=teamAdvisorIds(user,directory), name=String(req.query.advisor||'').trim().toLocaleLowerCase(), state=String(req.query.feedbackStatus||'').toUpperCase();
@@ -1008,7 +1051,9 @@ async function startServer() {
     const user = (req as any).authUser as User; if (!qualityManagers.has(user.role)) return res.status(403).json({ error:'Solo Calidad o Administración puede publicar alertas.' });
     const body = req.body || {}, directory=await readRepository(); if (!body.title || !body.advisorId || !body.campaignId || !body.validUntil || !String(body.detail||'').trim()) return res.status(400).json({ error:'Completa los datos obligatorios.' });
     const advisor=directory.advisors.find(a=>a.id===body.advisorId); if(!advisor||advisor.campaignId!==body.campaignId)return res.status(400).json({error:'El asesor y la campaña no coinciden.'}); const supervisorIds=[...new Set((Array.isArray(body.supervisorIds)?body.supervisorIds:[body.supervisorId||advisor.supervisorId]).filter(Boolean))];if(!supervisorIds.length||supervisorIds.some(id=>!directory.users.some(u=>u.id===id&&u.role==='SUPERVISOR'&&u.status==='ACTIVO')))return res.status(400).json({error:'Selecciona supervisores activos.'});
-    const operationId=advisor.operationId||`op_legacy_${advisor.campaignId}`; const now = new Date().toISOString(); const alert = { id:`alert_${randomBytes(8).toString('hex')}`,title:String(body.title).trim(),audioUrl:body.audioUrl || undefined,contactNumber:String(body.contactNumber || ''),detail:String(body.detail).trim(),advisorId:body.advisorId,supervisorId:supervisorIds[0],supervisorIds,supervisorResponses:[],campaignId:body.campaignId,operationId,validUntil:body.validUntil,criticality:['BAJA','MEDIA','ALTA','CRITICA'].includes(body.criticality)?body.criticality:'MEDIA',status:'NUEVA',publishedAt:now,createdBy:user.id,updatedAt:now };
+    const operationId=advisor.operationId||`op_legacy_${advisor.campaignId}`; const now = new Date().toISOString(); const alert:any = { id:`alert_${randomBytes(8).toString('hex')}`,title:String(body.title).trim(),audioUrl:body.audioUrl || undefined,contactNumber:String(body.contactNumber || ''),detail:String(body.detail).trim(),advisorId:body.advisorId,supervisorId:supervisorIds[0],supervisorIds,supervisorResponses:[],campaignId:body.campaignId,operationId,validUntil:body.validUntil,criticality:['BAJA','MEDIA','ALTA','CRITICA'].includes(body.criticality)?body.criticality:'MEDIA',status:'NUEVA',publishedAt:now,createdBy:user.id,updatedAt:now };
+    const operation=directory.operations?.find(item=>item.id===operationId);alert.companyId=operation?.companyId;
+    if(!scopedRecord(user,alert))return res.status(404).json({error:'Asesor no encontrado en tu alcance.'});
     try {
       persistAlert(alert); if (googleStorage.enabled) await googleStorage.saveQualityAlert(alert);
       try {
@@ -1022,7 +1067,7 @@ async function startServer() {
   });
   app.patch('/api/quality-alerts/:id', requireAuth, async (req, res) => {
     const user = (req as any).authUser as User; let items = await loadAlerts();
-    const current = items.find(item => item.id === req.params.id); if (!current) return res.status(404).json({ error:'Alerta no encontrada.' });
+    const current = items.find(item => item.id === req.params.id); if (!current || !scopedRecord(user,current)) return res.status(404).json({ error:'Alerta no encontrada.' });
     const isAssigned = user.role === 'SUPERVISOR' && current.supervisorIds.includes(user.id); if (!isAssigned && !qualityManagers.has(user.role)) return res.status(403).json({ error:'No puedes gestionar esta alerta.' });
     const body=req.body||{}; const now=new Date().toISOString(); const nextStatus=body.status || current.status;
     if (isAssigned && !['PENDIENTE_GESTION','GESTIONADA'].includes(nextStatus)) return res.status(403).json({ error:'El supervisor solo puede gestionar la alerta.' });
@@ -1031,18 +1076,20 @@ async function startServer() {
     const managedAt=nextStatus==='GESTIONADA'?now:undefined; const response={supervisorId:user.id,status:nextStatus,feedbackPerformed:nextStatus==='GESTIONADA',managementDetail:String(body.managementDetail||'').trim(),evidenceUrl:body.evidenceUrl||undefined,managedAt,elapsedMinutes:managedAt?Math.max(0,Math.round((new Date(managedAt).getTime()-new Date(current.publishedAt).getTime())/60000)):undefined,updatedAt:now}; const responses=[...current.supervisorResponses.filter((r:any)=>r.supervisorId!==user.id),response]; const allManaged=current.supervisorIds.every((id:string)=>responses.some((r:any)=>r.supervisorId===id&&r.status==='GESTIONADA')); const alert={...current,status:allManaged?'GESTIONADA':nextStatus,supervisorResponses:responses,updatedAt:now};
     try { persistAlert(alert); if (googleStorage.enabled) await googleStorage.saveQualityAlert(alert); res.json({ alert }); } catch { res.status(502).json({ error:'No fue posible actualizar la alerta.' }); }
   });
-  app.delete('/api/quality-alerts/:id',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(!qualityManagers.has(user.role))return res.status(403).json({error:'Acceso denegado.'});const current=(await loadAlerts()).find(i=>i.id===req.params.id);if(!current)return res.status(404).json({error:'Alerta no encontrada.'});db.prepare('DELETE FROM quality_alerts WHERE id=?').run(current.id);if(googleStorage.enabled)await googleStorage.deleteQualityAlert(current.id);res.json({ok:true});});
+  app.delete('/api/quality-alerts/:id',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(!qualityManagers.has(user.role))return res.status(403).json({error:'Acceso denegado.'});const current=(await loadAlerts()).find(i=>i.id===req.params.id);if(!current||!scopedRecord(user,current))return res.status(404).json({error:'Alerta no encontrada.'});db.prepare('DELETE FROM quality_alerts WHERE id=?').run(current.id);if(googleStorage.enabled)await googleStorage.deleteQualityAlert(current.id);res.json({ok:true});});
   app.get('/api/quality-alerts/:id/audio',requireAuth,async(req,res)=>{const user=(req as any).authUser as User,directory=await readRepository(),alert=(await loadAlerts()).find(i=>i.id===req.params.id);if(!alert||!visibleAlerts([alert],user,directory).length||!alert.audioUrl)return res.status(404).json({error:'Audio no encontrado.'});const fileId=String(alert.audioUrl).match(/\/api\/files\/([^/]+)\/content/)?.[1];if(!fileId)return res.status(404).json({error:'Audio no encontrado.'});try{const file=await googleStorage.fileMetadata(fileId),stream=await googleStorage.downloadFile(fileId);res.set({'Content-Type':file.mimeType||'audio/mpeg','Content-Disposition':`inline; filename="${String(file.name||'audio.mp3').replace(/[\\\r\n"]/g,'_')}"`,'Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff'});stream.pipe(res);}catch{res.status(404).json({error:'Audio no encontrado.'});}});
 
   const loadCalibrations=async()=>{let rows=calibrationRows();try{const remote=googleStorage.enabled?await googleStorage.loadCalibrations():[];if(remote.length){rows=remote;remote.forEach(persistCalibration);}}catch{}const now=Date.now();for(const item of rows){if(['PROGRAMADA','EN_VIVO'].includes(item.status)&&item.dueAt&&new Date(item.dueAt).getTime()<=now){const participants=(item.participants||[]).map((p:any)=>p.response?p:{...p,status:'VENCIDA',expiredAt:new Date().toISOString()});const expired={...item,status:'FINALIZADA',participants,expiredAt:new Date().toISOString(),updatedAt:new Date().toISOString(),audit:[...(item.audit||[]),{action:'VENCIDA',userId:'SYSTEM',at:new Date().toISOString()}]};await saveCalibration(expired);Object.assign(item,expired);}}return rows;};
   const saveCalibration=async(item:any)=>{persistCalibration(item);if(googleStorage.enabled)await googleStorage.saveCalibration(item);};
   const calibrationManagers=(role:string)=>['ADMINISTRADOR','CONSULTOR'].includes(role);
+  app.use('/api/calibrations',requireAuth,async(req,res,next)=>{const user=(req as any).authUser as User;if(req.method==='GET'||!calibrationManagers(user.role)||isGlobalActor(user))return next();const id=req.path.split('/').filter(Boolean)[0];const item=!id?req.body?.evaluation:(await loadCalibrations()).find(row=>row.id===id);if(!item||!scopedRecord(user,item))return res.status(404).json({error:'Calibración no encontrada en tu alcance.'});next();});
   const responseScore=(answers:Record<string,string>,items:any[]=[])=>{const applicable=items.filter(item=>answers[item.criterionId]&&answers[item.criterionId]!=='NO_APLICA');const total=applicable.reduce((sum,item)=>sum+Number(item.qualityGuideline?.weight||1),0);return total?Math.round(applicable.reduce((sum,item)=>sum+(answers[item.criterionId]==='CUMPLE'?Number(item.qualityGuideline?.weight||1):0),0)/total*100):0;};
+  app.use(['/api/reports','/api/admin/calibration-kpi'],requireAuth,(req,res,next)=>{const user=(req as any).authUser as User;if(['ADMINISTRADOR','CONSULTOR'].includes(user.role)&&!isGlobalActor(user))return res.status(403).json({error:'Este reporte global requiere alcance global.'});next();});
   // @ts-ignore Los identificadores se normalizan a texto al persistir.
   // Agreement Rev.3: coincidencias exactas / atributos aplicables. No mezcla nota ni tipificación.
   const withAffinity=(item:any)=>{const expert=item.expertResponse;if(!expert)return item;const participants=(item.participants||[]).map((p:any)=>{if(!p.response)return p;const keys=Object.keys(expert.answers||{}).filter(key=>Object.prototype.hasOwnProperty.call(p.response.answers||{},key));const matches=keys.filter(key=>p.response.answers[key]===expert.answers[key]).length;const agreement=keys.length?Math.round(matches/keys.length*1000)/10:0;const differences=keys.filter(key=>p.response.answers[key]!==expert.answers[key]).map(key=>item.attributeLabels?.[key]||key);return{...p,answers:p.response.answers,agreement,affinity:agreement,affinityLevel:agreement>=90?'Muy calibrado':agreement>=80?'Calibrado':agreement>=70?'Requiere ajuste':'No calibrado',deviation:Math.round((Number(p.response.score)-Number(expert.score))*10)/10,mainDifferences:differences.slice(0,5)};});return{...item,participants};};
   const audited=(item:any,action:string,userId:string,extra:any={})=>({...item,...extra,audit:[...(item.audit||[]),{action,userId,at:new Date().toISOString()}],updatedAt:new Date().toISOString()});
-  app.get('/api/calibrations',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(['ASESOR','GERENCIA','MONITOR'].includes(user.role))return res.json({calibrations:[]});let rows=(await loadCalibrations()).map(withAffinity);if(['SUPERVISOR','FORMADOR'].includes(user.role))rows=rows.filter(i=>i.expertId===user.id||i.participants?.some((p:any)=>p.supervisorId===user.id));rows=rows.map(i=>{if(calibrationManagers(user.role)||i.status==='CERRADA')return i;const{expertResponse,officialAnswers,results,...safe}=i;return safe;});res.json({calibrations:rows});});
+  app.get('/api/calibrations',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(['ASESOR','GERENCIA','MONITOR'].includes(user.role))return res.json({calibrations:[]});let rows=(await loadCalibrations()).map(withAffinity).filter(item=>scopedRecord(user,item));if(['SUPERVISOR','FORMADOR'].includes(user.role))rows=rows.filter(i=>i.expertId===user.id||i.participants?.some((p:any)=>p.supervisorId===user.id));rows=rows.map(i=>{if(calibrationManagers(user.role)||i.status==='CERRADA')return i;const{expertResponse,officialAnswers,results,...safe}=i;return safe;});res.json({calibrations:rows});});
   app.post('/api/calibrations',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(!calibrationManagers(user.role))return res.status(403).json({error:'Acceso denegado.'});const b=req.body||{},e=b.evaluation,repo=repository(),participantIds=[...new Set((b.participantIds||b.supervisorIds||[]).filter(Boolean))] as string[];if(!e?.id||e.evaluationType!=='QUALITY')return res.status(400).json({error:'Selecciona una evaluación de Calidad.'});if(!b.expertId||!repo.users.some(u=>u.id===b.expertId&&u.status==='ACTIVO'))return res.status(400).json({error:'Selecciona un Referente Experto activo.'});const validIds=participantIds.filter(id=>id!==b.expertId&&repo.users.some(u=>u.id===id&&u.status==='ACTIVO'));if(!validIds.length)return res.status(400).json({error:'Selecciona participantes activos.'});const now=new Date().toISOString(),labels=Object.fromEntries((e.items||[]).map((x:any)=>[x.criterionId,x.qualityGuideline?.name||x.attribute||x.criterionId])),item={id:`cal_${randomBytes(8).toString('hex')}`,evaluationId:e.id,campaignId:e.campaignId,operationId:e.operationId||`op_legacy_${e.campaignId}`,title:String(b.title||`Calibración ${e.callId}`),description:String(b.description||''),callType:b.callType||(e.sale?'VENTA':'NO_VENTA'),scheduledAt:b.scheduledAt||'',dueAt:b.dueAt||'',status:'BORRADOR',expertId:b.expertId,participants:validIds.map(supervisorId=>({supervisorId,status:'PENDIENTE'})),attributeLabels:labels,caseSnapshot:{callId:e.callId,date:e.date,time:e.time,advisorId:e.advisorId,operationId:e.operationId||`op_legacy_${e.campaignId}`,product:e.product,typification:e.noSaleReason||e.saleResult,result:e.qualityResult,observation:b.observation||e.comments,audioUrl:e.audioUrl,audioFileName:e.audioFileName,audioDurationSeconds:e.audioDurationSeconds,items:e.items||[]},createdBy:user.id,createdAt:now,updatedAt:now,audit:[{action:'CREADA',userId:user.id,at:now}]};try{await saveCalibration(item);res.status(201).json({calibration:item});}catch{res.status(502).json({error:'No fue posible crear la calibración.'});}});
   app.patch('/api/calibrations/:id',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(!calibrationManagers(user.role))return res.status(403).json({error:'Acceso denegado.'});const current=(await loadCalibrations()).find(i=>i.id===req.params.id);if(!current)return res.status(404).json({error:'Calibración no encontrada.'});if(['CERRADA','ANULADA'].includes(current.status)&&user.role!=='ADMINISTRADOR')return res.status(403).json({error:'Solo Admin puede corregir registros cerrados o anulados.'});const allowed=['title','description','callType','scheduledAt','dueAt','expertId','participants'],changes=Object.fromEntries(allowed.filter(k=>req.body?.[k]!==undefined).map(k=>[k,req.body[k]]));if(changes.participants)changes.participants=(changes.participants as any[]).filter(p=>p.supervisorId!==(changes.expertId||current.expertId));const next=audited(current,'EDITADA',user.id,changes);await saveCalibration(next);res.json({calibration:next});});
   app.patch('/api/calibrations/:id/state',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(!calibrationManagers(user.role))return res.status(403).json({error:'Acceso denegado.'});const current=(await loadCalibrations()).find(i=>i.id===req.params.id);if(!current)return res.status(404).json({error:'Calibración no encontrada.'});if(['CERRADA','ANULADA'].includes(current.status)&&user.role!=='ADMINISTRADOR')return res.status(403).json({error:'Solo Admin puede corregir este estado.'});const target=String(req.body?.status||''),transitions:Record<string,string[]>={BORRADOR:['PROGRAMADA','ANULADA'],PROGRAMADA:['EN_VIVO','ANULADA'],EN_VIVO:['FINALIZADA','ANULADA'],FINALIZADA:['CERRADA','ANULADA'],CERRADA:[],ANULADA:[]};if(!(transitions[current.status]||[]).includes(target)&&user.role!=='ADMINISTRADOR')return res.status(400).json({error:'Transición no permitida.'});if(target==='EN_VIVO'&&(!current.title||!current.campaignId||!current.caseSnapshot?.callId||!current.caseSnapshot?.audioUrl||!current.expertId||!current.participants?.length))return res.status(400).json({error:'Completa obligatorios, audio, referente y participantes.'});if(target==='CERRADA'&&!current.expertResponse)return res.status(400).json({error:'No se puede cerrar sin evaluación del Referente Experto.'});let next=withAffinity(audited(current,target,user.id,{status:target}));if(target==='CERRADA'){const values=next.participants.filter((p:any)=>p.affinity!==undefined).map((p:any)=>p.affinity);next={...next,results:{patternScore:next.expertResponse.score,averageAffinity:values.length?Math.round(values.reduce((a:number,b:number)=>a+b,0)/values.length*10)/10:0,highestAffinity:values.length?Math.max(...values):0,lowestAffinity:values.length?Math.min(...values):0,closedAt:new Date().toISOString()}};}await saveCalibration(next);res.json({calibration:next});});
@@ -1151,9 +1198,10 @@ async function startServer() {
     db.prepare('UPDATE development_assignments SET status=?,data_json=?,updated_at=? WHERE id=?').run(assignment.status, JSON.stringify(assignment), updatedAt, assignment.id); await syncDevelopment(); return res.json({ assignment });
   });
 
-  // Health checks independientes de autenticación, datos y servicios externos.
-  app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
-  app.get('/api/health', (_req, res) => res.status(200).json({ status: 'ok' }));
+  // Readiness verifica el repositorio principal sin exponer secretos.
+  const health=async(_req:express.Request,res:express.Response)=>{let database:any={configured:supabaseStorage.enabled,ok:!supabaseStorage.enabled};try{if(supabaseStorage.enabled)database={configured:true,...await supabaseStorage.health()};}catch{database={configured:true,ok:false};}const required=process.env.REQUIRE_SUPABASE==='true';return res.status(required&&!database.ok?503:200).json({status:database.ok||!required?'ok':'degraded',database,drive:{configured:googleDriveStorage.driveEnabled},sheetsFallback:{enabled:legacySheetsAllowed}});};
+  app.get('/health', health);
+  app.get('/api/health', health);
 
   // Vite middleware setup
   if (!isProduction) {

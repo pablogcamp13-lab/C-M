@@ -5,7 +5,7 @@ import { readPlatformStateRows } from './platformStateRecovery';
 import type { Advisor, Campaign, Company, Operation, OperationAssignment, OperationSupervisor, StaffingMovement, Team, User } from '../src/types';
 
 export type SharedRepository = { users: User[]; campaigns: Campaign[]; teams: Team[]; advisors: Advisor[]; companies?:Company[]; operations?:Operation[]; operationSupervisors?:OperationSupervisor[]; operationAssignments?:OperationAssignment[]; staffingMovements?:StaffingMovement[] };
-export type AuthUserRecord = { id: string; name: string; email: string; username?: string; role: User['role']; status: User['status']; teamId?: string; advisorId?: string; advisorDni?: string; avatar?: string; createdAt: string; passwordHash: string; mustChangePassword: boolean };
+export type AuthUserRecord = { id: string; name: string; email: string; username?: string; role: User['role']; status: User['status']; teamId?: string; advisorId?: string; advisorDni?: string; avatar?: string; createdAt: string; passwordHash: string; mustChangePassword: boolean; accessScope?:User['accessScope']; companyIds?:string[]; operationIds?:string[] };
 
 const SHEETS = {
   USERS: ['id', 'name', 'email', 'username', 'role', 'status', 'team_id', 'advisor_id', 'avatar', 'created_at', 'password_hash', 'must_change_password'],
@@ -30,7 +30,7 @@ const SHEETS = {
 type SheetName = keyof typeof SHEETS;
 type Row = Record<string, string | null | undefined>;
 const log = (message: string, error?: unknown) => console.error(`[google-storage] ${message}`, error instanceof Error ? error.message : '');
-const configured = () => Boolean(process.env.GOOGLE_SHEET_ID && process.env.GOOGLE_DRIVE_FOLDER_ID && process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN);
+const oauthConfigured = () => Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN);
 const clean = (value: unknown) => value == null ? '' : String(value);
 const driveFolderId = () => {
   const value = String(process.env.GOOGLE_DRIVE_FOLDER_ID || '').trim();
@@ -59,9 +59,12 @@ class GoogleStorage {
   private readonly rowsCache = new Map<SheetName, { expiresAt: number; rows: Row[] }>();
   private readonly rowsLoading = new Map<SheetName, Promise<Row[]>>();
   private readonly rowsCacheTtlMs = 30_000;
-  get enabled() { return configured(); }
+  /** Legacy structured-data capability. Drive is intentionally independent. */
+  get sheetsEnabled() { return Boolean(process.env.GOOGLE_SHEET_ID && oauthConfigured()); }
+  get driveEnabled() { return Boolean(process.env.GOOGLE_DRIVE_FOLDER_ID && oauthConfigured()); }
+  get enabled() { return this.sheetsEnabled; }
   private auth() {
-    if (!this.enabled) throw new Error('Google Storage no está configurado.');
+    if (!oauthConfigured()) throw new Error('Google OAuth no está configurado.');
     const auth = new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
     auth.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
     return auth;
@@ -308,7 +311,7 @@ class GoogleStorage {
   async deleteCalibration(id: string) { await this.replace('CALIBRATIONS', (await this.rows('CALIBRATIONS') || []).filter(row => row.id !== id)); }
 
   async uploadFile(input: { name: string; mimeType: string; data: Buffer }) {
-    if (!this.enabled) throw new Error('Google Drive no está configurado.');
+    if (!this.driveEnabled) throw new Error('Google Drive no está configurado.');
     if (!input.data.length || input.data.length > 35 * 1024 * 1024) throw new Error('Archivo inválido o excede el límite permitido.');
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {

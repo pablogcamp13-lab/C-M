@@ -12,3 +12,11 @@ logs/
 *-credentials.json
 credentials*.json
 service-account*.json
+
+# Generated migration data may contain production records and stays local.
+migration/supabase/data/
+migration/supabase/staging/
+migration/supabase/reports/
+migration/supabase/scripts/*.backup.mjs
+migration/supabase/scripts/*.before-*.mjs
+migration/supabase/scripts/import-to-supabase-api.mjs

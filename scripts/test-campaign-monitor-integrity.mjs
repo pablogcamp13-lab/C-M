@@ -15,6 +15,7 @@ const child = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'server.
     NODE_ENV: 'production',
     SQLITE_PATH: join(directory, 'test.sqlite'),
     INITIAL_ADMIN_PASSWORD: 'Admin-test-2026',
+    SUPABASE_DATABASE_URL: '', REQUIRE_SUPABASE: 'false', ALLOW_GOOGLE_SHEETS_FALLBACK: 'false',
     GOOGLE_SHEET_ID: '', GOOGLE_DRIVE_FOLDER_ID: '', GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '', GOOGLE_REFRESH_TOKEN: '',
     GMAIL_CLIENT_ID: '', GMAIL_CLIENT_SECRET: '', GMAIL_REFRESH_TOKEN: ''
   },

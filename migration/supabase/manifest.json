@@ -1,0 +1,58 @@
+{
+  "package_version": 1,
+  "generated_at": "2026-09-09T01:46:54.785Z",
+  "source_file": "BBDD (1).xlsx",
+  "source_sha256": "973a4017b96ee5fff8fa80b0fefa1360ae58608cde3bf547e0d1c5e612b5adb1",
+  "source_sheet_count": 25,
+  "source_rows": 2538,
+  "source_status_counts": {
+    "READY": 901,
+    "REVIEW_REQUIRED": 1637,
+    "INVALID": 0
+  },
+  "destination_counts": {
+    "companies": 4,
+    "campaign_definitions": 19,
+    "operations": 30,
+    "people": 238,
+    "users": 314,
+    "teams": 3,
+    "assignments": 290,
+    "operation_supervisors": 21,
+    "staffing_movements": 1480,
+    "evaluations": 63,
+    "evaluation_items": 418,
+    "evaluation_media": 61,
+    "feedback": 8,
+    "development_capsules": 2,
+    "development_assignments": 19,
+    "app_state_fragments": 12,
+    "legacy_sessions": 35
+  },
+  "destination_rows": 3017,
+  "source_reference_counts": {
+    "http_urls": 2,
+    "drive_or_file_references": 120
+  },
+  "import_order": [
+    "companies",
+    "campaign_definitions",
+    "operations",
+    "people",
+    "users",
+    "teams",
+    "operation_supervisors",
+    "assignments",
+    "staffing_movements",
+    "evaluations",
+    "evaluation_items",
+    "evaluation_media",
+    "feedback",
+    "development_capsules",
+    "development_assignments",
+    "app_state_fragments",
+    "legacy_sessions"
+  ],
+  "network_writes": false,
+  "source_modified": false
+}

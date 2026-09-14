@@ -1,9 +1,22 @@
 import React, { useMemo } from 'react';
 import { CalendarDays, RotateCcw } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import type { Company, FilterState, Operation } from '../../types';
 import { Button, DateInput, Field, Select } from '../ui';
 
-export const ExecutiveFilters: React.FC = () => {
+export const getExecutiveFilterSummary = (filters: FilterState, companies: Company[], operations: Operation[], evaluationCount: number) => {
+  const activeCount = [filters.companyId, filters.operationId, filters.supervisorId, filters.advisorId, filters.dateFrom, filters.dateTo].filter(Boolean).length;
+  const company = companies.find(item => item.id === filters.companyId)?.name || 'Todas las empresas';
+  const operation = operations.find(item => item.id === filters.operationId)?.name || 'Todas las operaciones';
+  return { activeCount, context: `${evaluationCount} evaluaciones · ${company} · ${operation}` };
+};
+
+export const useExecutiveFilterSummary = () => {
+  const { filters, companies, operations, filteredEvaluations } = useApp();
+  return useMemo(() => getExecutiveFilterSummary(filters, companies, operations, filteredEvaluations.length), [companies, filteredEvaluations.length, filters, operations]);
+};
+
+export const ExecutiveFilters: React.FC<{ activeCount: number }> = ({ activeCount }) => {
   const { currentUser, filters, setFilters, resetFilters, companies, operations, campaigns, advisors, users, filteredEvaluations } = useApp();
   const campaignById = useMemo(() => new Map(campaigns.map(campaign => [campaign.id, campaign])), [campaigns]);
   const companyById = useMemo(() => new Map(companies.map(company => [company.id, company])), [companies]);
@@ -31,8 +44,6 @@ export const ExecutiveFilters: React.FC = () => {
     const ids = new Set(availableAdvisors.map(advisor => advisor.supervisorId).filter(Boolean));
     return [...ids].map(id => ({ id, name: users.find(user => user.id === id)?.name || advisors.find(advisor => advisor.supervisorId === id)?.supervisor || 'Supervisor no identificado' })).sort((a, b) => a.name.localeCompare(b.name));
   }, [advisors, availableAdvisors, users]);
-
-  const activeCount = [filters.companyId, filters.operationId, filters.supervisorId, filters.advisorId, filters.dateFrom, filters.dateTo].filter(Boolean).length;
 
   return <section className="cm-exec-filters" aria-label="Filtros ejecutivos">
     <div className="cm-exec-filters__grid">

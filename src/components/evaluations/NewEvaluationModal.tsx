@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useApp } from '../../context/AppContext';
 import { 
   EvaluationType, 
@@ -53,7 +54,7 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
   preselectedOperationId,
   preselectedAdvisor
 }) => {
-  const { advisors, users, campaigns, teams, currentUser, config, addEvaluation } = useApp();
+  const { advisors, users, campaigns, currentUser, config, addEvaluation } = useApp();
 
   // Evaluators (exclude ASESOR role)
   const evaluators = useMemo(() => currentUser.role === 'MONITOR' ? [currentUser] : users.filter(u => u.role !== 'ASESOR'), [users, currentUser]);
@@ -61,16 +62,16 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
   // Form State
   const campaignAdvisors = advisors.filter(advisor => advisor.status === 'ACTIVO' && advisor.active !== false && (!preselectedCampaignId || advisor.campaignId === preselectedCampaignId) && (!preselectedOperationId || advisor.operationId === preselectedOperationId));
   const [selectedAdvisorId, setSelectedAdvisorId] = useState<string>(preselectedAdvisor?.id || campaignAdvisors[0]?.id || '');
-  const [selectedCampaignId] = useState<string>(preselectedCampaignId || preselectedAdvisor?.campaignId || campaigns[0]?.id || 'camp_bitel_migra');
-  const [product, setProduct] = useState<string>(COMMERCIAL_PLANS[1]?.name || 'Plan Ilimitado S/ 39.90');
+  const [selectedCampaignId] = useState<string>(preselectedCampaignId || preselectedAdvisor?.campaignId || campaigns[0]?.id || '');
+  const [product, setProduct] = useState<string>(COMMERCIAL_PLANS[1]?.name || COMMERCIAL_PLANS[0]?.name || '');
   const [evaluatorId, setEvaluatorId] = useState<string>(() => {
     if (currentUser && currentUser.role !== 'ASESOR') return currentUser.id;
     return users.find(u => u.role !== 'ASESOR')?.id || currentUser.id;
   });
   const [evalDate, setEvalDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [evalTime, setEvalTime] = useState<string>('10:30');
+  const [evalTime, setEvalTime] = useState<string>(() => new Date().toTimeString().slice(0, 5));
   const [callId, setCallId] = useState<string>(`LLAM-${Math.floor(10000 + Math.random() * 90000)}`);
-  const [recordingCode, setRecordingCode] = useState<string>(`REC-2025-${Math.floor(1000 + Math.random() * 9000)}`);
+  const [recordingCode, setRecordingCode] = useState<string>(`REC-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`);
   const [evalType, setEvalType] = useState<EvaluationType>('DIAGNOSTICO_INICIAL');
   const [sale, setSale] = useState<boolean>(false);
   const [saleResult, setSaleResult] = useState<string>('No Venta - Dudas sobre recarga BiPay');
@@ -82,9 +83,12 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
   const [audioFileName, setAudioFileName] = useState<string>('');
   const [audioFileSize, setAudioFileSize] = useState<number>(0);
   const [audioDurationSeconds, setAudioDurationSeconds] = useState<number>(380);
-  const [currentPlaybackSeconds, setCurrentPlaybackSeconds] = useState<number>(0);
-  const [formattedTimestamp, setFormattedTimestamp] = useState<string>('00:00');
+  const [audioMimeType, setAudioMimeType] = useState<string>('');
+  const playbackTimestampRef = useRef('00:00');
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [audioUploadError, setAudioUploadError] = useState<string | null>(null);
+  const [isUploadingAudio, setIsUploadingAudio] = useState(false);
+  const [restoredAudioHint, setRestoredAudioHint] = useState('');
 
   // A criterion starts unanswered. It only enters the score after the evaluator
   // records a result; "No aplica" is explicitly excluded from the denominator.
@@ -99,12 +103,16 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
   const [openComments, setOpenComments] = useState<Record<string, boolean>>({});
   const [openGuides, setOpenGuides] = useState<Record<string, boolean>>({});
   const [draftSaved, setDraftSaved] = useState(false);
+  const [draftReady, setDraftReady] = useState(false);
+  const [savedDraftSnapshot, setSavedDraftSnapshot] = useState('');
+  const [showCallDetails, setShowCallDetails] = useState(false);
+  const restoringDraftRef = useRef(false);
 
   // Accordion open states
   const [openDimensions, setOpenDimensions] = useState<Record<DimensionId, boolean>>({
     CONECTAR: true,
-    CLARIFICAR: true,
-    CONVERTIR: true
+    CLARIFICAR: false,
+    CONVERTIR: false
   });
 
   // Result screen modal step
@@ -114,10 +122,9 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
 
   const selectedAdvisor = advisors.find(a => a.id === selectedAdvisorId);
   const selectedSupervisor = users.find(u => u.id === selectedAdvisor?.supervisorId);
-  const selectedTeam = teams.find(t => t.id === selectedAdvisor?.teamId);
 
   // Compute live score preview
-  const currentItemsList: EvaluationItem[] = CRITERIA_DEFINITIONS.map(c => {
+  const currentItemsList: EvaluationItem[] = useMemo(() => CRITERIA_DEFINITIONS.map(c => {
     const s = criteriaScores[c.id] || {
       compliance: undefined,
       level: 0,
@@ -137,9 +144,9 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
       evidence: s.evidence,
       recommendedAction: s.recommendedAction
     };
-  });
+  }), [criteriaScores]);
 
-  const liveSummary = calculateEvaluationSummary(currentItemsList.filter(item => item.compliance !== undefined), config);
+  const liveSummary = useMemo(() => calculateEvaluationSummary(currentItemsList.filter(item => item.compliance !== undefined), config), [currentItemsList, config]);
   const d3cScore = useMemo(() => {
     const answered = currentItemsList.filter(item => item.compliance !== undefined);
     const evaluable = answered.filter(item => item.compliance !== 'NO_APLICA');
@@ -153,6 +160,72 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
   }, [currentItemsList]);
 
   const configuredWeights = `C1 ${config.weights.CONECTAR}% · C2 ${config.weights.CLARIFICAR}% · C3 ${config.weights.CONVERTIR}%`;
+  const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId);
+  const selectedPlan = COMMERCIAL_PLANS.find(p => p.name === product);
+  const evaluationTypeLabel = ({DIAGNOSTICO_INICIAL:'Diagnóstico inicial',SEGUIMIENTO:'Seguimiento',COACHING:'Coaching',REEVALUACION:'Reevaluación',CERTIFICACION:'Certificación'} as Record<EvaluationType,string>)[evalType];
+  const contextualMetadata = [selectedAdvisor?.name, selectedCampaign?.name, selectedSupervisor?.name, evaluationTypeLabel, evalDate && evalTime ? `${evalDate} ${evalTime}` : ''].filter(Boolean).join(' · ');
+  const draftStorageKey = `cm:d3c-draft:${currentUser.id}:${preselectedOperationId || selectedCampaignId}:${preselectedAdvisor?.id || 'new'}`;
+  const draftData = useMemo(() => ({
+    selectedAdvisorId,evaluatorId,evalDate,evalTime,callId,recordingCode,evalType,sale,saleResult,product,comments,criteriaScores,
+    audioUrl:audioUrl && !audioUrl.startsWith('blob:') ? audioUrl : '',audioFileName,audioFileSize,audioDurationSeconds,audioMimeType,audioNeedsReselect:Boolean(audioFile)
+  }), [selectedAdvisorId,evaluatorId,evalDate,evalTime,callId,recordingCode,evalType,sale,saleResult,product,comments,criteriaScores,audioUrl,audioFileName,audioFileSize,audioDurationSeconds,audioMimeType,audioFile]);
+  const draftSnapshot = useMemo(() => JSON.stringify(draftData), [draftData]);
+  const hasUnsavedChanges = draftReady && draftSnapshot !== savedDraftSnapshot;
+
+  useEffect(() => {
+    restoringDraftRef.current = true;
+    try {
+      const raw = localStorage.getItem(draftStorageKey);
+      if (raw) {
+        const draft = JSON.parse(raw);
+        if (draft.selectedAdvisorId && campaignAdvisors.some(advisor => advisor.id === draft.selectedAdvisorId)) setSelectedAdvisorId(draft.selectedAdvisorId);
+        if (draft.evaluatorId && evaluators.some(user => user.id === draft.evaluatorId)) setEvaluatorId(draft.evaluatorId);
+        if (draft.evalDate) setEvalDate(draft.evalDate); if (draft.evalTime) setEvalTime(draft.evalTime);
+        if (draft.callId) setCallId(draft.callId); if (draft.recordingCode) setRecordingCode(draft.recordingCode);
+        if (draft.evalType) setEvalType(draft.evalType); if (typeof draft.sale === 'boolean') setSale(draft.sale);
+        if (draft.saleResult) setSaleResult(draft.saleResult); if (draft.product) setProduct(draft.product);
+        if (typeof draft.comments === 'string') setComments(draft.comments); if (draft.criteriaScores) setCriteriaScores(draft.criteriaScores);
+        if (draft.audioUrl) { setAudioUrl(draft.audioUrl); setAudioFileName(draft.audioFileName || 'Audio asociado'); setAudioFileSize(Number(draft.audioFileSize || 0)); setAudioDurationSeconds(Number(draft.audioDurationSeconds || 380)); setAudioMimeType(String(draft.audioMimeType || '')); }
+        else if (draft.audioNeedsReselect && draft.audioFileName) setRestoredAudioHint(`Vuelve a seleccionar “${draft.audioFileName}” para adjuntarlo antes de finalizar.`);
+      }
+    } catch { localStorage.removeItem(draftStorageKey); }
+    setDraftReady(true);
+  }, [draftStorageKey]);
+
+  useEffect(() => {
+    if (!draftReady || !restoringDraftRef.current) return;
+    restoringDraftRef.current = false;
+    setSavedDraftSnapshot(draftSnapshot);
+  }, [draftReady, draftSnapshot]);
+
+  const requestClose = useCallback(() => {
+    if (isSaving || isUploadingAudio) return;
+    if (savedEvaluation) { onClose(); return; }
+    if (hasUnsavedChanges && !window.confirm('Hay cambios sin guardar. ¿Deseas cerrar la evaluación?')) return;
+    onClose();
+  }, [hasUnsavedChanges, isSaving, isUploadingAudio, onClose, savedEvaluation]);
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') requestClose(); };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [requestClose]);
+
+  useEffect(() => () => {
+    if (audioUrl.startsWith('blob:')) URL.revokeObjectURL(audioUrl);
+  }, [audioUrl]);
+
+  const saveDraft = () => {
+    try {
+      localStorage.setItem(draftStorageKey, draftSnapshot);
+      setSavedDraftSnapshot(draftSnapshot);
+      setDraftSaved(true);
+      setSaveError(null);
+      window.setTimeout(() => setDraftSaved(false), 2200);
+    } catch { setSaveError('No fue posible guardar el borrador en este navegador.'); }
+  };
+
+  const handleAudioTimeUpdate = useCallback((_seconds:number, formatted:string) => { playbackTimestampRef.current = formatted; }, []);
 
   const handleComplianceChange = (criterionId: string, compliance: ComplianceStatus) => {
     const autoRec = compliance === 'NO_CUMPLE' ? (AUTOMATIC_RECOMMENDATIONS[criterionId]?.[1] || '') : '';
@@ -185,11 +258,15 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
   };
 
   const handleAudioUpload = (file: File, objectUrl: string, durationSeconds: number) => {
+    if (audioUrl.startsWith('blob:')) URL.revokeObjectURL(audioUrl);
     setAudioFile(file);
     setAudioUrl(objectUrl);
     setAudioFileName(file.name);
     setAudioFileSize(file.size);
     setAudioDurationSeconds(durationSeconds || 380);
+    setAudioMimeType(file.type || (/\.(mp3|mpeg|mpg)$/i.test(file.name) ? 'audio/mpeg' : 'application/octet-stream'));
+    setAudioUploadError(null);
+    setRestoredAudioHint('');
     // Suggest recording code from file name
     if (file.name) {
       const cleanName = file.name.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, "_").substring(0, 30);
@@ -198,14 +275,16 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
   };
 
   const handleRemoveAudio = () => {
+    if (audioUrl.startsWith('blob:')) URL.revokeObjectURL(audioUrl);
     setAudioFile(null);
     setAudioUrl('');
     setAudioFileName('');
     setAudioFileSize(0);
+    setAudioMimeType('');
   };
 
   const handleInsertTimestampToCriterion = (criterionId: string) => {
-    const ts = formattedTimestamp;
+    const ts = playbackTimestampRef.current;
     setCriteriaScores(prev => {
       const currentEvidence = prev[criterionId]?.evidence || '';
       const prefix = currentEvidence ? `${currentEvidence} · ` : '';
@@ -221,15 +300,20 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedAdvisor || savingRef.current) return;
+    if (savingRef.current) return;
+    if (!selectedAdvisor || !evaluatorId || !product || !evalDate || !evalTime || !callId.trim() || !recordingCode.trim()) { setSaveError('Completa los datos obligatorios de la llamada antes de finalizar.'); return; }
+    if (!d3cScore.answered || !d3cScore.evaluable) { setSaveError('Responde al menos un criterio evaluable antes de finalizar.'); return; }
     savingRef.current = true;
     setIsSaving(true);
     setSaveError(null);
 
     let persistedAudioUrl = audioUrl;
+    let persistedAudioMimeType = audioMimeType;
     if (audioFile) {
-      try { persistedAudioUrl = (await filesApi.upload(audioFile)).url || audioUrl; }
-      catch (error: any) { setSaveError(error.message || 'No fue posible guardar el audio.'); savingRef.current = false; setIsSaving(false); return; }
+      setIsUploadingAudio(true);
+      try { const uploaded = await filesApi.upload(audioFile); persistedAudioUrl = uploaded.url || audioUrl; persistedAudioMimeType = uploaded.mimeType || audioMimeType; setAudioUrl(persistedAudioUrl); setAudioMimeType(persistedAudioMimeType); setAudioFile(null); }
+      catch (error: any) { const message=error.message || 'No fue posible guardar el audio.';setAudioUploadError(message);setSaveError(message);savingRef.current=false;setIsSaving(false);return; }
+      finally { setIsUploadingAudio(false); }
     }
 
     const evaluationToSave = {
@@ -251,11 +335,14 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
       audioFileName: audioFileName || undefined,
       audioFileSize: audioFileSize || undefined,
       audioDurationSeconds: audioDurationSeconds || undefined,
+      audioMimeType: persistedAudioMimeType || undefined,
       items: currentItemsList
     };
 
     try {
       const result = await addEvaluation(evaluationToSave);
+      localStorage.removeItem(draftStorageKey);
+      setSavedDraftSnapshot(draftSnapshot);
       setSavedEvaluation(result);
       if (onSuccess) onSuccess(result);
     } catch (error: any) {
@@ -267,7 +354,7 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
 
   // If already saved, show Instant Result Screen (Section 8)
   if (savedEvaluation) {
-    return (
+    return createPortal(
       <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
         <div className="cm-modal cm-evaluation-modal max-w-2xl w-full p-6 sm:p-8 animate-in fade-in zoom-in-95">
           
@@ -363,44 +450,49 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
           </div>
 
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
-      <div className="cm-modal cm-evaluation-modal max-w-5xl w-full max-h-[94vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95">
+  return createPortal(
+    <div className="cm-eval-overlay fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/85 p-3 backdrop-blur-sm sm:p-5" onMouseDown={(event) => { if (event.target === event.currentTarget) requestClose(); }}>
+      <div className="cm-modal cm-evaluation-modal cm-d3c-evaluation-modal flex w-full max-w-[960px] flex-col overflow-hidden animate-in fade-in zoom-in-95" role="dialog" aria-modal="true" aria-labelledby="d3c-evaluation-title">
         
         {/* Header */}
-        <div className="bg-white text-[#102A2E] px-6 py-4 flex items-center justify-between border-b border-[#E2E9E9]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#004F50] text-white flex items-center justify-center font-black text-sm">
-              D+3C
+        <header className="cm-d3c-header flex items-center justify-between gap-4 border-b border-[var(--cm-border)] px-4 py-3 sm:px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[rgba(31,214,255,.12)] text-[10px] font-black text-[var(--cm-primary)] ring-1 ring-[var(--cm-border-strong)]">
+              3C
             </div>
-            <div>
-              <h3 className="font-bold text-lg">Evaluación MEJORA CONTINUA · D+3C</h3>
-              <p className="text-xs text-[#66767A]">{configuredWeights}</p>
+            <div className="min-w-0">
+              <h3 id="d3c-evaluation-title" className="truncate text-base font-bold text-[var(--cm-text)] sm:text-lg">Nueva evaluación D+3C</h3>
+              <p className="mt-0.5 truncate text-xs text-[var(--cm-text-muted)]" title={contextualMetadata}>{contextualMetadata}</p>
             </div>
           </div>
 
           <button
-            onClick={onClose}
-            className="text-[#102A2E] p-1.5 rounded-lg hover:bg-[#F1F6F6] transition-colors"
+            type="button"
+            onClick={requestClose}
+            aria-label="Cerrar evaluación"
+            disabled={isSaving || isUploadingAudio}
+            className="rounded-lg p-2 text-[var(--cm-text-secondary)] transition-colors hover:bg-[rgba(31,214,255,.08)] hover:text-[var(--cm-text)] disabled:opacity-50"
           >
             <X className="w-5 h-5" />
           </button>
-        </div>
+        </header>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col" aria-busy={isSaving || isUploadingAudio}>
+         <div className="cm-d3c-body min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
           
-          {/* Section 1: Header / Metadata Fields */}
-          <div className="bg-[#FBFCFC] border border-[#E2E9E9] rounded-xl p-4 space-y-4">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-200 pb-1">
-              1. Datos Generales de la Llamada y Asesor
+          {/* Section 1: Essential evaluation context */}
+          <section className="cm-d3c-call-data space-y-3 border-b border-[var(--cm-border)] pb-4">
+            <h4 className="text-sm font-bold text-[var(--cm-text)]">
+              Información principal
             </h4>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+            <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
               
               {/* Asesor Selection */}
               <div>
@@ -424,26 +516,6 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
                     DNI: {selectedAdvisor.dni} · Sup: {selectedSupervisor?.name || 'Supervisor'}
                   </div>
                 )}
-              </div>
-
-              {/* Evaluador */}
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Evaluador / Consultor *
-                </label>
-                <select
-                  value={evaluatorId}
-                  onChange={(e) => setEvaluatorId(e.target.value)}
-                  disabled={currentUser.role === 'MONITOR'}
-                  className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-teal-500 font-medium text-slate-800"
-                  required
-                >
-                  {evaluators.map(u => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} ({u.role})
-                    </option>
-                  ))}
-                </select>
               </div>
 
               {/* Tipo de Evaluación */}
@@ -483,89 +555,15 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
                   ))}
                 </select>
 
-                {/* Selected Plan Details Card */}
-                {(() => {
-                  const selectedPlan = COMMERCIAL_PLANS.find(p => p.name === product);
-                  if (!selectedPlan) return null;
-                  return (
-                    <div className="mt-1.5 bg-slate-50 border border-slate-200 rounded-lg p-2 text-[11px] grid grid-cols-3 gap-1 text-center">
-                      <div className="bg-white p-1 rounded border border-slate-100">
-                        <span className="text-slate-400 block text-[9px] uppercase font-bold">Cargo Fijo</span>
-                        <span className="font-mono font-bold text-[#031E3C]">S/ {selectedPlan.fixedFee.toFixed(2)}</span>
-                      </div>
-                      <div className="bg-emerald-50/70 p-1 rounded border border-emerald-100">
-                        <span className="text-emerald-700 block text-[9px] uppercase font-bold">Pago BiPay</span>
-                        <span className="font-mono font-bold text-emerald-800">S/ {selectedPlan.bipayPayment.toFixed(2)}</span>
-                      </div>
-                      <div className="bg-amber-50/70 p-1 rounded border border-amber-100">
-                        <span className="text-amber-700 block text-[9px] uppercase font-bold">Retorno BiPay</span>
-                        <span className="font-mono font-bold text-[#FF6B00]">S/ {selectedPlan.bipayReturn.toFixed(2)}</span>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* Fecha */}
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Fecha de Llamada
-                </label>
-                <input
-                  type="date"
-                  value={evalDate}
-                  onChange={(e) => setEvalDate(e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-teal-500 text-slate-800"
-                  required
-                />
-              </div>
-
-              {/* Hora */}
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Hora de Llamada
-                </label>
-                <input
-                  type="time"
-                  value={evalTime}
-                  onChange={(e) => setEvalTime(e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-teal-500 text-slate-800"
-                  required
-                />
-              </div>
-
-              {/* ID Llamada */}
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  ID de Llamada
-                </label>
-                <input
-                  type="text"
-                  value={callId}
-                  onChange={(e) => setCallId(e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-teal-500 text-slate-800"
-                  required
-                />
-              </div>
-
-              {/* Código de Grabación */}
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Código de Grabación
-                </label>
-                <input
-                  type="text"
-                  value={recordingCode}
-                  onChange={(e) => setRecordingCode(e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-teal-500 text-slate-800"
-                  required
-                />
+                {selectedPlan && <p className="mt-1.5 truncate text-xs text-[var(--cm-text-muted)]" title={`Cargo S/ ${selectedPlan.fixedFee.toFixed(2)} · BiPay S/ ${selectedPlan.bipayPayment.toFixed(2)} · Retorno S/ ${selectedPlan.bipayReturn.toFixed(2)}`}>
+                  Cargo S/ {selectedPlan.fixedFee.toFixed(2)} · BiPay S/ {selectedPlan.bipayPayment.toFixed(2)} · Retorno S/ {selectedPlan.bipayReturn.toFixed(2)}
+                </p>}
               </div>
 
             </div>
 
             {/* Commercial Result Row */}
-            <div className="pt-2 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs items-center">
+            <div className="grid grid-cols-1 items-end gap-3 border-t border-slate-200 pt-3 text-xs sm:grid-cols-3">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">
                   ¿Resultado Comercial (Venta)? *
@@ -598,7 +596,7 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
                 </div>
               </div>
 
-              <div className="sm:col-span-2">
+              {!sale && <div className="sm:col-span-2">
                 <label className="block font-semibold text-slate-700 mb-1">
                   Detalle / Motivo del Resultado Comercial
                 </label>
@@ -609,74 +607,89 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
                   placeholder="Ej: Cliente dudó por recarga BiPay, no se cerró objeción..."
                   className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-teal-500 text-slate-800 text-xs"
                 />
-              </div>
+              </div>}
             </div>
 
-          </div>
+            <button
+              type="button"
+              onClick={() => setShowCallDetails(value => !value)}
+              aria-expanded={showCallDetails}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold text-[var(--cm-text-secondary)] transition-colors hover:bg-[rgba(31,214,255,.07)] hover:text-[var(--cm-primary)]"
+            >
+              {showCallDetails ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              Datos técnicos
+            </button>
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_320px]">
-            <div className="rounded-xl border border-[#E2E9E9] bg-white p-4">
-              <h4 className="text-sm font-bold text-[#102A2E]">Contexto de la evaluación</h4>
-              <div className="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
-                <div><span className="block text-[#66767A]">Asesor</span><strong>{selectedAdvisor?.name || 'Sin asesor'}</strong></div>
-                <div><span className="block text-[#66767A]">Cuartil</span><strong className="text-[#006B6B]">{selectedAdvisor?.quartile || 'Sin cuartil'}</strong></div>
-                <div><span className="block text-[#66767A]">Supervisor</span><strong>{selectedSupervisor?.name || 'Sin supervisor'}</strong></div>
-                <div><span className="block text-[#66767A]">Campaña</span><strong>{campaigns.find(c => c.id === selectedCampaignId)?.name || 'Sin campaña'}</strong></div>
+            {showCallDetails && (
+              <div className="grid grid-cols-1 gap-3 rounded-xl border border-[var(--cm-border)] bg-[rgba(31,214,255,.025)] p-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
+                <div>
+                  <label className="mb-1 block font-semibold text-slate-700">Evaluador</label>
+                  <select value={evaluatorId} onChange={(e) => setEvaluatorId(e.target.value)} disabled={currentUser.role === 'MONITOR'} className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-medium text-slate-800" required>
+                    {evaluators.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold text-slate-700">Fecha y hora</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="date" value={evalDate} onChange={(e) => setEvalDate(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-slate-800" required />
+                    <input type="time" value={evalTime} onChange={(e) => setEvalTime(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-slate-800" required />
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block font-semibold text-slate-700">Identificadores</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="text" value={callId} onChange={(e) => setCallId(e.target.value)} aria-label="ID de llamada" title="ID de llamada" className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-slate-800" required />
+                    <input type="text" value={recordingCode} onChange={(e) => setRecordingCode(e.target.value)} aria-label="Código de grabación" title="Código de grabación" className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-slate-800" required />
+                  </div>
+                </div>
               </div>
-            </div>
-            <aside className="rounded-xl border border-[#DCEAE8] bg-[#FBFDFD] p-4">
-              <div className="flex items-center justify-between"><div><p className="text-xs font-bold text-[#43565A]">PROMEDIO D+3C ACTUAL</p><p className="mt-1 text-3xl font-black text-[#008B88]">{d3cScore.total === null ? '—' : `${d3cScore.total}%`}</p><p className="text-xs text-[#66767A]">{d3cScore.fulfilled} cumplidos de {d3cScore.evaluable} evaluables</p></div><div className="flex h-14 w-14 items-center justify-center rounded-full border-[8px] border-[#00B8B0] text-xs font-bold text-[#006B6B]">{d3cScore.total === null ? '—' : `${d3cScore.total}%`}</div></div>
-              <div className="mt-3 grid grid-cols-3 gap-2 text-[11px]">{[['Conectar', liveSummary.scoreConnect], ['Clarificar', liveSummary.scoreClarify], ['Convertir', liveSummary.scoreConvert]].map(([label, score]) => <span key={label as string} className="text-[#43565A]">{label} <strong className="text-[#008B88]">{score === null ? '—' : `${score}%`}</strong></span>)}</div>
-            </aside>
-          </div>
+            )}
+
+          </section>
 
           {/* AUDIO PLAYER & UPLOAD SECTION */}
-          <div className="bg-white text-[#102A2E] rounded-xl p-4 shadow-sm border border-[#E2E9E9] space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+          <section className="cm-d3c-audio space-y-2 border-b border-[var(--cm-border)] pb-4">
+            <div className="flex items-center gap-2">
               <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-teal-500/20 text-teal-400">
+                <div className="rounded-lg bg-[rgba(31,214,255,.1)] p-1.5 text-[var(--cm-primary)]">
                   <FileAudio className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold tracking-wider">
-                    Grabación de Audio de la Llamada
-                  </h4>
-                  <p className="text-[11px] text-[#66767A]">
-                    Sube el archivo de audio en formato <strong className="text-teal-300">MP3</strong> o <strong className="text-teal-300">MPEG</strong> (.mp3, .mpeg, .mpg) para reproducirlo y registrar marcas de tiempo
-                  </p>
+                  <h4 className="text-sm font-bold text-[var(--cm-text)]">Audio de llamada</h4>
+                  <p className="text-xs text-[var(--cm-text-muted)]">MP3, MPEG, WAV, M4A, OGG, WEBM o AAC · máximo 35 MB</p>
                 </div>
               </div>
-
-              {audioUrl && (
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-mono bg-slate-800 text-teal-400 px-2 py-0.5 rounded border border-slate-700">
-                    ⏱️ Posición: {formattedTimestamp}
-                  </span>
-                </div>
-              )}
             </div>
-
+            {restoredAudioHint&&<p className="cm-d3c-inline-warning" role="status">{restoredAudioHint}</p>}
+            {audioUploadError&&<p className="cm-d3c-inline-error" role="alert">{audioUploadError}</p>}
+            {isUploadingAudio&&<p className="cm-d3c-inline-status" role="status">Guardando el audio en el almacenamiento privado…</p>}
             <AudioPlayer
               audioUrl={audioUrl}
               audioFileName={audioFileName}
+              audioFileSize={audioFileSize}
               audioDurationSeconds={audioDurationSeconds}
               onAudioUpload={handleAudioUpload}
               onRemoveAudio={handleRemoveAudio}
-              onTimeUpdate={(seconds, formatted) => {
-                setCurrentPlaybackSeconds(seconds);
-                setFormattedTimestamp(formatted);
-              }}
+              onTimeUpdate={handleAudioTimeUpdate}
+              busy={isUploadingAudio || isSaving}
+              compact
             />
-          </div>
+          </section>
 
           {/* Section 2: The 3 Dimensions and 9 Criteria */}
-          <div className="space-y-4">
+          <section className="cm-d3c-criteria space-y-3">
+            <div className="cm-d3c-scorebar" aria-live="polite">
+              <strong>D+3C <span>{liveSummary.scoreTotal === null ? '—' : `${liveSummary.scoreTotal}%`}</span></strong>
+              <span>C1 Conectar <b>{liveSummary.scoreConnect === null ? '—' : `${liveSummary.scoreConnect}%`}</b></span>
+              <span>C2 Clarificar <b>{liveSummary.scoreClarify === null ? '—' : `${liveSummary.scoreClarify}%`}</b></span>
+              <span>C3 Convertir <b>{liveSummary.scoreConvert === null ? '—' : `${liveSummary.scoreConvert}%`}</b></span>
+            </div>
             <div className="flex items-center justify-between">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                2. Evaluación de Criterios Metodología 3C
+              <h4 className="text-sm font-bold text-[var(--cm-text)]">
+                Criterios de evaluación
               </h4>
-              <span className="text-xs text-slate-500">
-                Selecciona el nivel para cada criterio (1 a 4)
+              <span className="text-xs text-[var(--cm-text-muted)]">
+                {d3cScore.answered} de {CRITERIA_DEFINITIONS.length} respondidos
               </span>
             </div>
 
@@ -686,11 +699,7 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
               const dimCriteria = CRITERIA_DEFINITIONS.filter(c => c.dimensionId === dim);
               
               // Calculate live score for this dimension using QA Rubric logic
-              const evaluableCriteria = dimCriteria.filter(c => (criteriaScores[c.id]?.compliance || 'CUMPLE') !== 'NO_APLICA');
-              const fulfilledCriteria = evaluableCriteria.filter(c => (criteriaScores[c.id]?.compliance || 'CUMPLE') === 'CUMPLE');
-              const dimAvg = evaluableCriteria.length > 0
-                ? Math.round((fulfilledCriteria.length / evaluableCriteria.length) * 100)
-                : null;
+              const dimAvg = dim === 'CONECTAR' ? liveSummary.scoreConnect : dim === 'CLARIFICAR' ? liveSummary.scoreClarify : liveSummary.scoreConvert;
 
               const dimColor = 
                 dim === 'CONECTAR' ? 'border-sky-300 bg-sky-50/30' :
@@ -850,7 +859,7 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
                                       title="Insertar minuto de reproducción actual"
                                     >
                                       <Clock className="w-3 h-3" />
-                                      <span>+ Min {formattedTimestamp}</span>
+                                      <span>Insertar minuto actual</span>
                                     </button>
                                   )}
                                 </div>
@@ -904,13 +913,13 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
                 </div>
               );
             })}
-          </div>
+          </section>
 
           {/* Evaluator conclusions */}
-          <div className="bg-[#F6F7F9] border border-[#E5E8EC] rounded-xl p-4 space-y-2">
+          <section className="space-y-2 border-t border-[var(--cm-border)] pt-4">
             <div className="flex items-center justify-between">
               <label className="block text-xs font-bold uppercase tracking-wider text-[#031E3C] font-heading">
-                3. Conclusiones y Observaciones Generales del Evaluador
+                Conclusiones y observaciones
               </label>
             </div>
             <textarea
@@ -920,7 +929,7 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
               placeholder="Añade retroalimentación adicional para el asesor o su supervisor..."
               className="w-full bg-white border border-[#E5E8EC] rounded-lg p-2.5 text-xs text-[#031E3C] focus:outline-none focus:ring-1 focus:ring-[#FF6B00]"
             />
-          </div>
+          </section>
 
           {saveError && (
             <div role="alert" className="rounded-xl border border-rose-500/50 bg-rose-950/35 px-4 py-3 text-xs text-rose-200">
@@ -929,48 +938,35 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
             </div>
           )}
 
-          {/* Live Preview Floating Footer Bar */}
-          <div className="sticky bottom-0 bg-white text-[#102A2E] rounded-xl p-4 border border-[#E2E9E9] shadow-lg flex flex-col sm:flex-row items-center justify-between gap-4">
-            
-            <div className="flex items-center gap-4">
-              <div>
-                <span className="text-[10px] uppercase font-bold text-[#006B6B] block font-heading">Score total D+3C</span>
-                <span className="text-2xl font-black text-[#008B88] font-kpi">
-                  {d3cScore.total === null ? '—' : `${d3cScore.total}%`}
-                </span>
-              </div>
-              <div className="hidden md:flex items-center gap-3 text-xs text-[#66767A] border-l border-[#E2E9E9] pl-4">
-                <span>Conectar: <strong className="text-[#008B88]">{liveSummary.scoreConnect === null ? '—' : `${liveSummary.scoreConnect}%`}</strong></span>
-                <span>Clarificar: <strong className="text-[#008B88]">{liveSummary.scoreClarify === null ? '—' : `${liveSummary.scoreClarify}%`}</strong></span>
-                <span>Convertir: <strong className="text-[#008B88]">{liveSummary.scoreConvert === null ? '—' : `${liveSummary.scoreConvert}%`}</strong></span>
-              </div>
-            </div>
+         </div>
 
-            <div className="flex items-center gap-3 w-full sm:w-auto">
+          <footer className="cm-d3c-footer flex items-center justify-end gap-2 border-t border-[var(--cm-border)] px-4 py-3 sm:px-5">
+            <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
               <button
                 type="button"
-                onClick={onClose}
-                className="w-1/2 sm:w-auto px-4 py-2 text-xs font-semibold text-[#66767A] hover:bg-[#F1F6F6] rounded-lg transition-colors cursor-pointer"
+                onClick={requestClose}
+                disabled={isSaving || isUploadingAudio}
+                className="rounded-lg px-3 py-2 text-xs font-semibold text-[var(--cm-text-secondary)] transition-colors hover:bg-[rgba(31,214,255,.07)] disabled:opacity-50"
               >
                 Cancelar
               </button>
-              <button type="button" onClick={() => setDraftSaved(true)} className="w-1/2 sm:w-auto flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold text-[#006B6B] border border-[#00B8B0] rounded-lg">
+              <button type="button" onClick={saveDraft} disabled={isSaving || isUploadingAudio} className="flex items-center justify-center gap-2 rounded-lg border border-[var(--cm-border-strong)] px-3 py-2 text-xs font-bold text-[var(--cm-primary)] disabled:opacity-50">
                 <Save className="w-4 h-4" /><span>{draftSaved ? 'Borrador guardado' : 'Guardar borrador'}</span>
               </button>
               <button
-                type="submit" disabled={!selectedAdvisor || !d3cScore.answered || isSaving}
-                className="w-1/2 sm:w-auto flex items-center justify-center gap-2 px-5 py-2 text-xs font-bold text-white bg-[#008B88] hover:bg-[#006B6B] rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                type="submit" disabled={isSaving || isUploadingAudio}
+                className="flex items-center justify-center gap-2 rounded-lg bg-[var(--cm-primary-active)] px-4 py-2 text-xs font-bold text-[#031326] transition-colors hover:bg-[var(--cm-primary)] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Save className="w-4 h-4" />
-                <span>{isSaving ? 'Guardando…' : 'Guardar y finalizar'}</span>
+                <span>{isUploadingAudio ? 'Subiendo audio…' : isSaving ? 'Guardando…' : 'Guardar y finalizar'}</span>
               </button>
             </div>
-
-          </div>
+          </footer>
 
         </form>
 
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

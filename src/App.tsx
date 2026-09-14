@@ -1,36 +1,38 @@
-import React, { useEffect, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Navbar } from './components/layout/Navbar';
 import { Sidebar } from './components/layout/Sidebar';
 import { ToastProvider } from './components/ui';
-import { DashboardView } from './components/dashboard/DashboardView';
-import { EvaluationsList } from './components/evaluations/EvaluationsList';
-import { NewEvaluationModal } from './components/evaluations/NewEvaluationModal';
-import { QualityEvaluationModal } from './components/evaluations/QualityEvaluationModal';
-import { QualityDashboardView } from './components/dashboard/QualityDashboardView';
-import { HomeView } from './components/dashboard/HomeView';
-import { AdvisorHomeView } from './components/dashboard/AdvisorHomeView';
-import { SupervisorHomeView } from './components/dashboard/SupervisorHomeView';
-import { QualityAlertsView } from './components/quality/QualityAlertsView';
-import { CalibrationsView } from './components/quality/CalibrationsView';
-import { EvaluationDetailModal } from './components/evaluations/EvaluationDetailModal';
-import { AdvisorsList } from './components/advisors/AdvisorsList';
-import { AdvisorProfileModal } from './components/advisors/AdvisorProfileModal';
-import { NewAdvisorModal } from './components/advisors/NewAdvisorModal';
-import { ParetoDeepDive } from './components/pareto/ParetoDeepDive';
-import { MethodologyGuide } from './components/methodology/MethodologyGuide';
-import { ActionPlansManager } from './components/actionplans/ActionPlansManager';
-import { InterventionsCatalog } from './components/interventions/InterventionsCatalog';
-import { ImpactAnalysisView } from './components/impact/ImpactAnalysisView';
-import { ReportsExportView } from './components/reports/ReportsExportView';
-import { AdminSettingsView } from './components/admin/AdminSettingsView';
-import { FeedbackView } from './components/feedback/FeedbackView';
-import { DevelopmentView } from './components/development/DevelopmentView';
-import { MonitorProgressView, MonitorResultsView } from './components/monitor/MonitorViews';
 import { Evaluation, Advisor, Campaign, Company, Operation } from './types';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { ForcePasswordChange } from './components/auth/ForcePasswordChange';
 import { ChevronRight, ShieldCheck, TrendingUp, X } from 'lucide-react';
+
+const DashboardView=lazy(()=>import('./components/dashboard/DashboardView').then(module=>({default:module.DashboardView})));
+const EvaluationsList=lazy(()=>import('./components/evaluations/EvaluationsList').then(module=>({default:module.EvaluationsList})));
+const NewEvaluationModal=lazy(()=>import('./components/evaluations/NewEvaluationModal').then(module=>({default:module.NewEvaluationModal})));
+const QualityEvaluationModal=lazy(()=>import('./components/evaluations/QualityEvaluationModal').then(module=>({default:module.QualityEvaluationModal})));
+const QualityDashboardView=lazy(()=>import('./components/dashboard/QualityDashboardView').then(module=>({default:module.QualityDashboardView})));
+const HomeView=lazy(()=>import('./components/dashboard/HomeView').then(module=>({default:module.HomeView})));
+const AdvisorHomeView=lazy(()=>import('./components/dashboard/AdvisorHomeView').then(module=>({default:module.AdvisorHomeView})));
+const SupervisorHomeView=lazy(()=>import('./components/dashboard/SupervisorHomeView').then(module=>({default:module.SupervisorHomeView})));
+const QualityAlertsView=lazy(()=>import('./components/quality/QualityAlertsView').then(module=>({default:module.QualityAlertsView})));
+const CalibrationsView=lazy(()=>import('./components/quality/CalibrationsView').then(module=>({default:module.CalibrationsView})));
+const EvaluationDetailModal=lazy(()=>import('./components/evaluations/EvaluationDetailModal').then(module=>({default:module.EvaluationDetailModal})));
+const AdvisorsList=lazy(()=>import('./components/advisors/AdvisorsList').then(module=>({default:module.AdvisorsList})));
+const AdvisorProfileModal=lazy(()=>import('./components/advisors/AdvisorProfileModal').then(module=>({default:module.AdvisorProfileModal})));
+const NewAdvisorModal=lazy(()=>import('./components/advisors/NewAdvisorModal').then(module=>({default:module.NewAdvisorModal})));
+const ParetoDeepDive=lazy(()=>import('./components/pareto/ParetoDeepDive').then(module=>({default:module.ParetoDeepDive})));
+const MethodologyGuide=lazy(()=>import('./components/methodology/MethodologyGuide').then(module=>({default:module.MethodologyGuide})));
+const ActionPlansManager=lazy(()=>import('./components/actionplans/ActionPlansManager').then(module=>({default:module.ActionPlansManager})));
+const InterventionsCatalog=lazy(()=>import('./components/interventions/InterventionsCatalog').then(module=>({default:module.InterventionsCatalog})));
+const ImpactAnalysisView=lazy(()=>import('./components/impact/ImpactAnalysisView').then(module=>({default:module.ImpactAnalysisView})));
+const ReportsExportView=lazy(()=>import('./components/reports/ReportsExportView').then(module=>({default:module.ReportsExportView})));
+const AdminSettingsView=lazy(()=>import('./components/admin/AdminSettingsView').then(module=>({default:module.AdminSettingsView})));
+const FeedbackView=lazy(()=>import('./components/feedback/FeedbackView').then(module=>({default:module.FeedbackView})));
+const DevelopmentView=lazy(()=>import('./components/development/DevelopmentView').then(module=>({default:module.DevelopmentView})));
+const MonitorProgressView=lazy(()=>import('./components/monitor/MonitorViews').then(module=>({default:module.MonitorProgressView})));
+const MonitorResultsView=lazy(()=>import('./components/monitor/MonitorViews').then(module=>({default:module.MonitorResultsView})));
 
 const MainLayout: React.FC = () => {
   const { currentSection, setCurrentSection, evaluations, advisors, campaigns, companies, operations, currentUser, authenticatedUserId, refreshRepository } = useApp();
@@ -51,7 +53,6 @@ const MainLayout: React.FC = () => {
   const [selectedAdvisorIdForProfile, setSelectedAdvisorIdForProfile] = useState<string | null>(null);
   const [isNewAdvisorModalOpen, setIsNewAdvisorModalOpen] = useState(false);
   const [initialEvalForActionPlan, setInitialEvalForActionPlan] = useState<any>(null);
-  const [isNavigationOpen, setIsNavigationOpen] = useState(false);
 
   const handleOpenNewEvaluation = async (advisor?: Advisor) => {
     let latest = { advisors, operations };
@@ -94,12 +95,12 @@ const MainLayout: React.FC = () => {
   const activeAdvisorsCount = advisors.filter(a => a.active).length;
 
   return (
-    <div className="cm-app-shell antialiased">
+    <Suspense fallback={<div className="cm-route-loading" role="status">Cargando módulo…</div>}><div className="cm-app-shell antialiased">
       <div className="cm-shell">
-        <Sidebar mobileOpen={isNavigationOpen} onMobileClose={() => setIsNavigationOpen(false)} />
+        <Sidebar />
         <div className="cm-shell__main">
-          <Navbar onOpenNewEvaluation={() => handleOpenNewEvaluation()} onOpenNavigation={() => setIsNavigationOpen(true)} />
-          <main className="cm-shell__content">
+          <Navbar onOpenNewEvaluation={() => handleOpenNewEvaluation()} />
+          <main className="cm-shell__content"><Suspense fallback={<div className="cm-route-loading" role="status">Cargando módulo…</div>}>
           {currentSection === 'home' && (currentUser.role === 'ASESOR' ? <AdvisorHomeView onSelectEvaluation={setSelectedEvaluationForDetail} /> : currentUser.role === 'SUPERVISOR' ? <SupervisorHomeView /> : <HomeView onOpenNewEvaluation={() => handleOpenNewEvaluation()} />)}
           
           {currentSection === 'dashboard' && (
@@ -163,7 +164,7 @@ const MainLayout: React.FC = () => {
             <AdminSettingsView />
           )}
 
-          </main>
+          </Suspense></main>
         </div>
       </div>{currentUser.mustChangePassword && currentUser.id === authenticatedUserId && <ForcePasswordChange />}
 
@@ -224,7 +225,7 @@ const MainLayout: React.FC = () => {
         />
       )}
 
-    </div>
+    </div></Suspense>
   );
 };
 
