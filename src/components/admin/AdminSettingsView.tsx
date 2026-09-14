@@ -189,7 +189,7 @@ export const AdminSettingsView: React.FC = () => {
         status: userStatus,
         advisorId: userRole === "ASESOR" ? userAdvisorId : undefined,
         teamId: userRole === "SUPERVISOR" ? userTeamId : undefined,
-        accessScope: userRole === 'ASESOR' ? 'SELF' : userRole === 'SUPERVISOR' ? 'TEAM' : userAccessScope,
+        accessScope: userRole === 'ASESOR' ? 'SELF' : userRole === 'SUPERVISOR' ? 'TEAM' : userRole === 'MONITOR' ? 'GLOBAL' : userAccessScope,
         companyIds: userAccessScope === 'COMPANY' ? userCompanyIds : [],
       });
       showNotification(

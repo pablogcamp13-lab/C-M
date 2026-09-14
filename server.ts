@@ -550,7 +550,8 @@ async function startServer() {
     const id=localEmailUser?.id||`usr_${randomBytes(8).toString('hex')}`; const createdAt=localEmailUser?.created_at||new Date().toISOString();
     const base = String(body.username || name).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\s.]/g, '').trim().replace(/[\s.]+/g, '.').replace(/^\.|\.$/g, '') || `usuario.${Date.now()}`;
     let username = base; let suffix = 1; while (db.prepare('SELECT 1 FROM users WHERE lower(username)=lower(?) AND id<>?').get(username,id)) username = `${base}.${++suffix}`;
-    const accessScope=['GLOBAL','COMPANY','OPERATION','TEAM','SELF'].includes(body.accessScope)?body.accessScope:(role==='ASESOR'?'SELF':role==='SUPERVISOR'?'TEAM':'GLOBAL');
+    const requestedAccessScope=['GLOBAL','COMPANY','OPERATION','TEAM','SELF'].includes(body.accessScope)?body.accessScope:'GLOBAL';
+    const accessScope=role==='ASESOR'?'SELF':role==='SUPERVISOR'?'TEAM':role==='MONITOR'?'GLOBAL':requestedAccessScope;
     const companyIds=Array.isArray(body.companyIds)?body.companyIds.map(String):[],operationIds=Array.isArray(body.operationIds)?body.operationIds.map(String):[];
     const advisorId=role==='ASESOR'?String(body.advisorId||'').trim():'';
     if(role==='ASESOR'&&!advisorId)return res.status(422).json({error:'Selecciona un asesor para vincular la cuenta.'});
@@ -678,7 +679,7 @@ async function startServer() {
       res.json({ repository: repository() });
     } catch (error: any) { res.status(400).json({ error: error.message || 'No se pudo eliminar la campaña.' }); }
   });
-  const scopedRecord=(user:User,item:any)=>{const scope=user.accessScope||(user.role==='ASESOR'?'SELF':user.role==='SUPERVISOR'?'TEAM':'GLOBAL');if(scope==='GLOBAL')return true;if(scope==='COMPANY')return (user.companyIds||[]).includes(String(item.companyId||item.company_id||''));if(scope==='OPERATION')return (user.operationIds||[]).includes(String(item.operationId||item.operation_id||''));if(scope==='TEAM')return user.id===String(item.supervisorId||item.supervisor_id||'')||(item.supervisorIds||[]).includes(user.id)||(user.operationIds||[]).includes(String(item.operationId||item.operation_id||''));return user.advisorId===String(item.advisorId||item.advisor_id||'');};
+  const scopedRecord=(user:User,item:any)=>{const scope=user.role==='MONITOR'?'GLOBAL':user.accessScope||(user.role==='ASESOR'?'SELF':user.role==='SUPERVISOR'?'TEAM':'GLOBAL');if(scope==='GLOBAL')return true;if(scope==='COMPANY')return (user.companyIds||[]).includes(String(item.companyId||item.company_id||''));if(scope==='OPERATION')return (user.operationIds||[]).includes(String(item.operationId||item.operation_id||''));if(scope==='TEAM')return user.id===String(item.supervisorId||item.supervisor_id||'')||(item.supervisorIds||[]).includes(user.id)||(user.operationIds||[]).includes(String(item.operationId||item.operation_id||''));return user.advisorId===String(item.advisorId||item.advisor_id||'');};
   app.post('/api/evaluations', requireAuth, async (req, res) => {
     const authUser = (req as any).authUser as User;
     if (!['ADMINISTRADOR','CONSULTOR','MONITOR'].includes(authUser.role)) return res.status(403).json({ error: 'Solo Calidad, Monitor o Administración puede crear evaluaciones.' });

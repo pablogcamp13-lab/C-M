@@ -21,7 +21,7 @@ export const normalizeAccessUser = (row: any): User => ({
   avatar: row.avatar || undefined,
   createdAt: row.created_at || row.createdAt,
   mustChangePassword: Boolean(row.must_change_password ?? row.mustChangePassword),
-  accessScope: (row.access_scope || row.accessScope || defaultScope(row.role)) as AccessScope,
+  accessScope: (row.role === 'MONITOR' ? 'GLOBAL' : row.access_scope || row.accessScope || defaultScope(row.role)) as AccessScope,
   companyIds: jsonIds(row.company_ids_json ?? row.companyIds),
   operationIds: jsonIds(row.operation_ids_json ?? row.operationIds)
 });
@@ -32,15 +32,19 @@ export const defaultScope = (role: UserRole): AccessScope => role === 'ASESOR'
     ? 'TEAM'
     : 'GLOBAL';
 
+const effectiveScope = (user: User): AccessScope => user.role === 'MONITOR'
+  ? 'GLOBAL'
+  : user.accessScope || defaultScope(user.role);
+
 export const hasRole = (user: User, roles: UserRole[]) => roles.includes(user.role);
 
 export const canAccessCompany = (user: User, companyId: string) => {
-  const scope = user.accessScope || defaultScope(user.role);
+  const scope = effectiveScope(user);
   return scope === 'GLOBAL' || (scope === 'COMPANY' && (user.companyIds || []).includes(companyId));
 };
 
 export const canAccessOperation = (user: User, operationId: string, repository: RepositoryShape) => {
-  const scope = user.accessScope || defaultScope(user.role);
+  const scope = effectiveScope(user);
   if (scope === 'GLOBAL') return true;
   if (scope === 'OPERATION') return (user.operationIds || []).includes(operationId);
   const operation = repository.operations?.find(item => item.id === operationId);
@@ -49,7 +53,7 @@ export const canAccessOperation = (user: User, operationId: string, repository: 
 };
 
 export const canAccessPerson = (user: User, advisorId: string, repository: RepositoryShape) => {
-  if ((user.accessScope || defaultScope(user.role)) === 'SELF') return user.advisorId === advisorId;
+  if (effectiveScope(user) === 'SELF') return user.advisorId === advisorId;
   const advisor = repository.advisors?.find(item => item.id === advisorId);
   if (!advisor) return false;
   if (user.role === 'SUPERVISOR' && (advisor.supervisorId === user.id || (user.teamId && advisor.teamId === user.teamId))) return true;
@@ -64,7 +68,7 @@ export const requireRole = (roles: UserRole[]): express.RequestHandler => (req, 
 };
 
 export const scopedRepository = <T extends RepositoryShape & Record<string, any>>(user: User, source: T): T => {
-  const scope = user.accessScope || defaultScope(user.role);
+  const scope = effectiveScope(user);
   if (scope === 'GLOBAL') return source;
   const operations = (source.operations || []).filter((operation: Operation) => canAccessOperation(user, operation.id, source));
   const operationIds = new Set(operations.map((operation: Operation) => operation.id));
