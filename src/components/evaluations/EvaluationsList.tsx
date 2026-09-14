@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useApp } from '../../context/AppContext';
 import { Evaluation } from '../../types';
 import { FiltersBar } from '../common/FiltersBar';
@@ -27,12 +28,13 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'QUALITY' | 'D3C'>('ALL');
   const [resultFilter, setResultFilter] = useState<'ALL' | 'VENTA' | 'NO_VENTA'>('ALL');
   const [stateFilter, setStateFilter] = useState<'ALL' | 'PENDIENTE' | 'FINALIZADA'>('ALL');
   const isAdvisor = currentUser.role === 'ASESOR';
   const isReadOnly = ['ASESOR', 'SUPERVISOR'].includes(currentUser.role);
-  const canDelete = !isReadOnly && currentUser.role !== 'MONITOR';
+  const canDelete = ['ADMINISTRADOR', 'CONSULTOR'].includes(currentUser.role);
   const visibleEvaluations = filteredEvaluations.filter(ev => {
     if (typeFilter !== 'ALL' && ev.evaluationType !== typeFilter) return false;
     if (resultFilter !== 'ALL' && (ev.sale ? 'VENTA' : 'NO_VENTA') !== resultFilter) return false;
@@ -269,15 +271,15 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
       </div>
 
       {/* Delete Confirmation Modal */}
-      {deleteConfirmId && (
-        <div className="fixed inset-0 z-50 bg-[#031E3C]/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white text-[#031E3C] rounded-xl max-w-sm w-full p-5 shadow-2xl border border-[#E5E8EC]">
+      {deleteConfirmId && createPortal(
+        <div className="fixed inset-0 z-[300] bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="delete-evaluation-title">
+          <div className="cm-modal text-[#031E3C] rounded-xl max-w-sm w-full p-5 shadow-2xl border border-red-400/30">
             <h3 className="text-sm font-bold text-[#031E3C] mb-2 flex items-center gap-2">
               <Trash2 className="w-4 h-4 text-red-600" />
-              Eliminar Evaluación
+              <span id="delete-evaluation-title">¿Eliminar esta evaluación?</span>
             </h3>
             <p className="text-xs text-[#667085] mb-4">
-              ¿Estás seguro de que deseas eliminar esta evaluación? Esta acción recalculará los promedios del dashboard en tiempo real.
+              Esta acción eliminará definitivamente la evaluación y sus registros asociados. Los promedios del dashboard se recalcularán automáticamente.
             </p>
             {deleteError && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">{deleteError}</p>}
             <div className="flex justify-end gap-2">
@@ -294,8 +296,11 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                   setDeletingId(deleteConfirmId);
                   setDeleteError(null);
                   try {
+                    const target = filteredEvaluations.find(evaluation => evaluation.id === deleteConfirmId);
+                    const advisorName = advisors.find(advisor => advisor.id === target?.advisorId)?.name;
                     await deleteEvaluation(deleteConfirmId);
                     setDeleteConfirmId(null);
+                    setDeleteSuccess(advisorName ? `La evaluación de ${advisorName} fue eliminada correctamente.` : 'La evaluación fue eliminada correctamente.');
                   } catch (error) {
                     setDeleteError(error instanceof Error ? error.message : 'No fue posible eliminar la evaluación.');
                   } finally {
@@ -305,11 +310,28 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                 disabled={Boolean(deletingId)}
                 className="px-3 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-xs transition-colors disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {deletingId ? 'Eliminando…' : 'Eliminar'}
+                {deletingId ? 'Eliminando…' : 'Sí, eliminar'}
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
+      )}
+
+      {deleteSuccess && createPortal(
+        <div className="fixed inset-0 z-[310] bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="delete-success-title">
+          <div className="cm-modal max-w-sm w-full rounded-xl border border-emerald-400/30 p-5 shadow-2xl">
+            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400">
+              <span className="text-xl" aria-hidden="true">✓</span>
+            </div>
+            <h3 id="delete-success-title" className="text-sm font-bold text-[#031E3C]">Evaluación eliminada</h3>
+            <p className="mt-2 text-xs text-[#667085]">{deleteSuccess}</p>
+            <div className="mt-5 flex justify-end border-t border-[#E5E8EC] pt-4">
+              <button autoFocus onClick={() => setDeleteSuccess(null)} className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700">Entendido</button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
     </div>
