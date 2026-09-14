@@ -154,7 +154,7 @@ export const AdminSettingsView: React.FC = () => {
     setUserEmail("");
     setUserRole("ASESOR");
     setUserStatus("ACTIVO");
-    setUserAdvisorId(advisors[0]?.id || "");
+    setUserAdvisorId(advisorsWithoutUser[0]?.id || "");
     setUserTeamId(teams[0]?.id || "");
     setUserAccessScope('SELF');
     setUserCompanyIds([]);
@@ -166,6 +166,10 @@ export const AdminSettingsView: React.FC = () => {
     e.preventDefault();
     if (!userName.trim() || !userEmail.trim()) {
       alert("Por favor completa el nombre y el correo electrónico.");
+      return;
+    }
+    if (userRole === "ASESOR" && !userAdvisorId) {
+      alert("No hay un asesor disponible para vincular. Los asesores existentes ya tienen una cuenta.");
       return;
     }
 
@@ -892,7 +896,11 @@ export const AdminSettingsView: React.FC = () => {
                   </label>
                   <select
                     value={userRole}
-                    onChange={(e) => setUserRole(e.target.value as UserRole)}
+                    onChange={(e) => {
+                      const role = e.target.value as UserRole;
+                      setUserRole(role);
+                      if (role === "ASESOR") setUserAdvisorId(advisorsWithoutUser[0]?.id || "");
+                    }}
                     className="w-full bg-[#F7F8FA] border border-[#E5E8EC] rounded-lg p-2 font-bold text-[#031E3C]"
                   >
                     <option value="ASESOR">
@@ -924,9 +932,9 @@ export const AdminSettingsView: React.FC = () => {
                     <label className="block font-bold text-emerald-900">
                       Vincular con Asesor del Directorio *
                     </label>
-                    {advisors.length === 0 ? (
+                    {advisorsWithoutUser.length === 0 ? (
                       <p className="text-[11px] text-amber-800">
-                        No hay asesores creados todavía en el directorio.
+                        No hay asesores sin cuenta. Cada asesor de la dotación ya tiene un usuario vinculado.
                       </p>
                     ) : (
                       <select
@@ -936,7 +944,7 @@ export const AdminSettingsView: React.FC = () => {
                         }
                         className="w-full bg-white border border-emerald-300 rounded-md p-1.5 font-semibold text-emerald-900"
                       >
-                        {advisors.map((a) => (
+                        {advisorsWithoutUser.map((a) => (
                           <option key={a.id} value={a.id}>
                             {a.name} ({a.employeeCode || a.dni})
                           </option>

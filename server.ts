@@ -536,18 +536,36 @@ async function startServer() {
     const validRoles = ['ADMINISTRADOR','CONSULTOR','MONITOR','SUPERVISOR','FORMADOR','GERENCIA','ASESOR']; const role = validRoles.includes(body.role) ? body.role : 'ASESOR'; const status = body.status === 'INACTIVO' ? 'INACTIVO' : 'ACTIVO';
     if (!name || !email) return res.status(400).json({ error: 'Nombre y correo son obligatorios.' });
     if (role === 'SUPERVISOR' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'El supervisor debe tener un correo válido.' });
+    try { await readRepository(); }
+    catch (error) { console.error('[structured-storage] No fue posible validar el alta del usuario.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible validar el repositorio principal. Intenta nuevamente.' }); }
     if (db.prepare('SELECT 1 FROM users WHERE lower(email)=lower(?)').get(email)) return res.status(409).json({ error: 'El correo ya está registrado.' });
     const base = String(body.username || name).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\s.]/g, '').trim().replace(/[\s.]+/g, '.').replace(/^\.|\.$/g, '') || `usuario.${Date.now()}`;
     let username = base; let suffix = 1; while (db.prepare('SELECT 1 FROM users WHERE lower(username)=lower(?)').get(username)) username = `${base}.${++suffix}`;
     const id = `usr_${randomBytes(8).toString('hex')}`; const createdAt = new Date().toISOString();
     const accessScope=['GLOBAL','COMPANY','OPERATION','TEAM','SELF'].includes(body.accessScope)?body.accessScope:(role==='ASESOR'?'SELF':role==='SUPERVISOR'?'TEAM':'GLOBAL');
     const companyIds=Array.isArray(body.companyIds)?body.companyIds.map(String):[],operationIds=Array.isArray(body.operationIds)?body.operationIds.map(String):[];
+    const advisorId=role==='ASESOR'?String(body.advisorId||'').trim():'';
+    if(role==='ASESOR'&&!advisorId)return res.status(422).json({error:'Selecciona un asesor para vincular la cuenta.'});
+    if(advisorId&&!db.prepare('SELECT 1 FROM advisors WHERE id=?').get(advisorId))return res.status(422).json({error:'El asesor seleccionado ya no existe en la dotación.'});
+    const linkedUser=advisorId?db.prepare('SELECT id,name FROM users WHERE advisor_id=?').get(advisorId) as any:null;
+    if(linkedUser)return res.status(409).json({error:`El asesor ya tiene una cuenta vinculada a ${linkedUser.name}.`});
     if(accessScope==='COMPANY'&&!companyIds.length)return res.status(422).json({error:'El administrador por empresa requiere al menos una empresa.'});
     if(!scopeWithinActor(actor,accessScope,companyIds,operationIds))return res.status(403).json({error:'No puedes otorgar acceso fuera de tu alcance.'});
-    db.prepare('INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,created_at,password_hash,must_change_password,access_scope,company_ids_json,operation_ids_json) VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?,?)').run(id,name,email,username,role,status,body.teamId||null,body.advisorId||null,createdAt,hashPassword(DEFAULT_ADMIN_PASSWORD),accessScope,JSON.stringify(companyIds),JSON.stringify(operationIds));
-    try { await syncRepositorySnapshot(); }
-    catch (error) { db.prepare('DELETE FROM users WHERE id=?').run(id); console.error('[structured-storage] No fue posible crear el usuario.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible guardar el usuario en el repositorio principal.' }); }
-    return res.status(201).json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id)) });
+    const passwordHash=hashPassword(INITIAL_PASSWORD);
+    try {
+      db.prepare('INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,created_at,password_hash,must_change_password,access_scope,company_ids_json,operation_ids_json) VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?,?)').run(id,name,email,username,role,status,body.teamId||null,advisorId||null,createdAt,passwordHash,accessScope,JSON.stringify(companyIds),JSON.stringify(operationIds));
+      const created=publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id));
+      if(supabaseStorage.enabled)await supabaseStorage.saveUser(created,passwordHash);else await syncRepositorySnapshot();
+      structuredRepositoryCache={value:repository(),expiresAt:Date.now()+15_000};
+      return res.status(201).json({ user: created });
+    } catch (error) {
+      db.prepare('DELETE FROM users WHERE id=?').run(id);
+      const detail=error instanceof Error?error.message:'';
+      console.error('[structured-storage] No fue posible crear el usuario.',detail);
+      if(/UNIQUE constraint failed: users\.advisor_id/i.test(detail))return res.status(409).json({error:'El asesor ya tiene una cuenta vinculada.'});
+      if(/UNIQUE constraint failed: users\.(email|username)/i.test(detail))return res.status(409).json({error:'El correo o usuario ya está registrado.'});
+      return res.status(502).json({ error: 'No fue posible guardar el usuario en el repositorio principal.' });
+    }
   });
   app.patch('/api/admin/users/:id', requireAuth, async (req, res) => {
     if (requireAdmin(req, res) !== true) return;
@@ -564,7 +582,7 @@ async function startServer() {
   app.post('/api/admin/users/:id/reset-password', requireAuth, async (req, res) => {
     if (requireAdmin(req, res) !== true) return;
     const user = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id) as any; if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
-    const passwordHash = hashPassword(DEFAULT_ADMIN_PASSWORD); db.prepare('UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?').run(passwordHash, user.id);
+    const passwordHash = hashPassword(INITIAL_PASSWORD); db.prepare('UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?').run(passwordHash, user.id);
     try { if (googleStorage.enabled) await googleStorage.updateUserPasswordHash(user.id, passwordHash, true); return res.json({ ok: true }); }
     catch { return res.status(502).json({ error: 'No fue posible sincronizar el reseteo.' }); }
   });
