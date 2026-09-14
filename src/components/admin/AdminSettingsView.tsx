@@ -95,6 +95,9 @@ export const AdminSettingsView: React.FC = () => {
   const [userAccessScope, setUserAccessScope] = useState<User['accessScope']>('SELF');
   const [userCompanyIds, setUserCompanyIds] = useState<string[]>([]);
   const [userSearchQuery, setUserSearchQuery] = useState<string>("");
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [userFormError, setUserFormError] = useState("");
+  const [createdUserResult, setCreatedUserResult] = useState<User | null>(null);
 
   // Campaign form state
   const [isCampaignModalOpen, setIsCampaignModalOpen] =
@@ -158,6 +161,9 @@ export const AdminSettingsView: React.FC = () => {
     setUserTeamId(teams[0]?.id || "");
     setUserAccessScope('SELF');
     setUserCompanyIds([]);
+    setUserFormError("");
+    setCreatedUserResult(null);
+    setIsCreatingUser(false);
     setIsUserModalOpen(true);
   };
 
@@ -165,14 +171,16 @@ export const AdminSettingsView: React.FC = () => {
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userName.trim() || !userEmail.trim()) {
-      alert("Por favor completa el nombre y el correo electrónico.");
+      setUserFormError("No se guardó el usuario. Completa el nombre y el correo electrónico.");
       return;
     }
     if (userRole === "ASESOR" && !userAdvisorId) {
-      alert("No hay un asesor disponible para vincular. Los asesores existentes ya tienen una cuenta.");
+      setUserFormError("No se guardó el usuario. No hay un asesor disponible para vincular.");
       return;
     }
 
+    setIsCreatingUser(true);
+    setUserFormError("");
     try {
       const created = await addUser({
         name: userName.trim(),
@@ -187,13 +195,12 @@ export const AdminSettingsView: React.FC = () => {
       showNotification(
         `Usuario "${created.name}" creado. Usuario: ${created.username} · clave inicial: 12345678`,
       );
-      setIsUserModalOpen(false);
+      setCreatedUserResult(created);
     } catch (error) {
-      alert(
-        error instanceof Error
-          ? error.message
-          : "No fue posible crear el usuario.",
-      );
+      const detail = error instanceof Error ? error.message : "No fue posible crear el usuario.";
+      setUserFormError(`No se guardó el usuario. ${detail}`);
+    } finally {
+      setIsCreatingUser(false);
     }
   };
 
@@ -888,7 +895,27 @@ export const AdminSettingsView: React.FC = () => {
                 formadores ingresen y vean sus intervenciones.
               </p>
 
-              <form onSubmit={handleCreateUser} className="space-y-3.5 text-xs">
+              {createdUserResult ? (
+                <div className="space-y-4" role="status" aria-live="polite">
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
+                    <div className="mb-2 flex items-center gap-2 text-sm font-bold">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                      Usuario guardado correctamente
+                    </div>
+                    <dl className="grid gap-1.5 text-xs">
+                      <div><dt className="inline font-semibold">Nombre: </dt><dd className="inline">{createdUserResult.name}</dd></div>
+                      <div><dt className="inline font-semibold">Usuario: </dt><dd className="inline select-all">{createdUserResult.username}</dd></div>
+                      <div><dt className="inline font-semibold">Correo: </dt><dd className="inline select-all">{createdUserResult.email}</dd></div>
+                      <div><dt className="inline font-semibold">Clave inicial: </dt><dd className="inline select-all font-bold">12345678</dd></div>
+                    </dl>
+                  </div>
+                  <p className="text-[11px] text-[#667085]">La cuenta ya está disponible para iniciar sesión y solicitará cambiar la contraseña en el primer ingreso.</p>
+                  <div className="flex justify-end gap-2 border-t border-[#E5E8EC] pt-4">
+                    <button type="button" onClick={handleOpenUserModal} className="rounded-lg px-4 py-2 text-xs font-semibold text-[#475467] hover:bg-[#F7F8FA]">Crear otro</button>
+                    <button type="button" onClick={() => setIsUserModalOpen(false)} className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700">Entendido</button>
+                  </div>
+                </div>
+              ) : <form onSubmit={handleCreateUser} className="space-y-3.5 text-xs">
                 {/* Rol */}
                 <div>
                   <label className="block font-semibold text-[#031E3C] mb-1">
@@ -1008,6 +1035,12 @@ export const AdminSettingsView: React.FC = () => {
                   </select>
                 </div>
 
+                {userFormError && (
+                  <div role="alert" aria-live="assertive" className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2.5 text-xs font-semibold text-rose-800">
+                    {userFormError}
+                  </div>
+                )}
+
                 <div className="flex justify-end gap-2 pt-4 border-t border-[#E5E8EC]">
                   <button
                     type="button"
@@ -1018,12 +1051,13 @@ export const AdminSettingsView: React.FC = () => {
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 text-xs font-bold text-white bg-[#FF6B00] hover:bg-[#e05e00] rounded-lg shadow-xs"
+                    disabled={isCreatingUser}
+                    className="px-4 py-2 text-xs font-bold text-white bg-[#FF6B00] hover:bg-[#e05e00] disabled:cursor-wait disabled:opacity-60 rounded-lg shadow-xs"
                   >
-                    Crear Usuario
+                    {isCreatingUser ? "Guardando..." : "Crear Usuario"}
                   </button>
                 </div>
-              </form>
+              </form>}
             </div>
           </div>,
           document.body,

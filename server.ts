@@ -538,28 +538,37 @@ async function startServer() {
     if (role === 'SUPERVISOR' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'El supervisor debe tener un correo válido.' });
     try { await readRepository(); }
     catch (error) { console.error('[structured-storage] No fue posible validar el alta del usuario.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible validar el repositorio principal. Intenta nuevamente.' }); }
-    if (db.prepare('SELECT 1 FROM users WHERE lower(email)=lower(?)').get(email)) return res.status(409).json({ error: 'El correo ya está registrado.' });
+    const localEmailUser=db.prepare('SELECT * FROM users WHERE lower(email)=lower(?)').get(email) as any;
+    let remoteEmailUser:User|null=null;
+    try { if(supabaseStorage.enabled)remoteEmailUser=await supabaseStorage.findUserByEmail(email); }
+    catch (error) { console.error('[supabase] No fue posible validar el correo del nuevo usuario.',error instanceof Error?error.message:'');return res.status(502).json({error:'No se pudo confirmar si el correo ya existe. El usuario no fue creado.'}); }
+    if(remoteEmailUser)return res.status(409).json({ error: `El correo ya pertenece a ${remoteEmailUser.name}. No se creó una cuenta duplicada.` });
+    if(localEmailUser&&!supabaseStorage.enabled)return res.status(409).json({ error: 'El correo ya está registrado; la cuenta nueva no fue creada.' });
+    // Si el correo sólo quedó en SQLite por un intento antiguo incompleto, se
+    // reutiliza ese identificador y se termina de persistir en Supabase.
+    const recoveredLocalUser=Boolean(localEmailUser&&supabaseStorage.enabled);
+    const id=localEmailUser?.id||`usr_${randomBytes(8).toString('hex')}`; const createdAt=localEmailUser?.created_at||new Date().toISOString();
     const base = String(body.username || name).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\s.]/g, '').trim().replace(/[\s.]+/g, '.').replace(/^\.|\.$/g, '') || `usuario.${Date.now()}`;
-    let username = base; let suffix = 1; while (db.prepare('SELECT 1 FROM users WHERE lower(username)=lower(?)').get(username)) username = `${base}.${++suffix}`;
-    const id = `usr_${randomBytes(8).toString('hex')}`; const createdAt = new Date().toISOString();
+    let username = base; let suffix = 1; while (db.prepare('SELECT 1 FROM users WHERE lower(username)=lower(?) AND id<>?').get(username,id)) username = `${base}.${++suffix}`;
     const accessScope=['GLOBAL','COMPANY','OPERATION','TEAM','SELF'].includes(body.accessScope)?body.accessScope:(role==='ASESOR'?'SELF':role==='SUPERVISOR'?'TEAM':'GLOBAL');
     const companyIds=Array.isArray(body.companyIds)?body.companyIds.map(String):[],operationIds=Array.isArray(body.operationIds)?body.operationIds.map(String):[];
     const advisorId=role==='ASESOR'?String(body.advisorId||'').trim():'';
     if(role==='ASESOR'&&!advisorId)return res.status(422).json({error:'Selecciona un asesor para vincular la cuenta.'});
     if(advisorId&&!db.prepare('SELECT 1 FROM advisors WHERE id=?').get(advisorId))return res.status(422).json({error:'El asesor seleccionado ya no existe en la dotación.'});
-    const linkedUser=advisorId?db.prepare('SELECT id,name FROM users WHERE advisor_id=?').get(advisorId) as any:null;
+    const linkedUser=advisorId?db.prepare('SELECT id,name FROM users WHERE advisor_id=? AND id<>?').get(advisorId,id) as any:null;
     if(linkedUser)return res.status(409).json({error:`El asesor ya tiene una cuenta vinculada a ${linkedUser.name}.`});
     if(accessScope==='COMPANY'&&!companyIds.length)return res.status(422).json({error:'El administrador por empresa requiere al menos una empresa.'});
     if(!scopeWithinActor(actor,accessScope,companyIds,operationIds))return res.status(403).json({error:'No puedes otorgar acceso fuera de tu alcance.'});
     const passwordHash=hashPassword(INITIAL_PASSWORD);
     try {
-      db.prepare('INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,created_at,password_hash,must_change_password,access_scope,company_ids_json,operation_ids_json) VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?,?)').run(id,name,email,username,role,status,body.teamId||null,advisorId||null,createdAt,passwordHash,accessScope,JSON.stringify(companyIds),JSON.stringify(operationIds));
-      const created=publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id));
-      if(supabaseStorage.enabled)await supabaseStorage.saveUser(created,passwordHash);else await syncRepositorySnapshot();
+      const created={id,name,email,username,role,status,teamId:body.teamId||undefined,advisorId:advisorId||undefined,createdAt,mustChangePassword:true,accessScope,companyIds,operationIds} as User;
+      if(supabaseStorage.enabled)await supabaseStorage.saveUser(created,passwordHash);
+      db.prepare(`INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,created_at,password_hash,must_change_password,access_scope,company_ids_json,operation_ids_json) VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,role=excluded.role,status=excluded.status,team_id=excluded.team_id,advisor_id=excluded.advisor_id,password_hash=excluded.password_hash,must_change_password=1,access_scope=excluded.access_scope,company_ids_json=excluded.company_ids_json,operation_ids_json=excluded.operation_ids_json`).run(id,name,email,username,role,status,body.teamId||null,advisorId||null,createdAt,passwordHash,accessScope,JSON.stringify(companyIds),JSON.stringify(operationIds));
+      if(!supabaseStorage.enabled)await syncRepositorySnapshot();
       structuredRepositoryCache={value:repository(),expiresAt:Date.now()+15_000};
-      return res.status(201).json({ user: created });
+      return res.status(201).json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id)), recovered:recoveredLocalUser });
     } catch (error) {
-      db.prepare('DELETE FROM users WHERE id=?').run(id);
+      if(!recoveredLocalUser)db.prepare('DELETE FROM users WHERE id=?').run(id);
       const detail=error instanceof Error?error.message:'';
       console.error('[structured-storage] No fue posible crear el usuario.',detail);
       if(/UNIQUE constraint failed: users\.advisor_id/i.test(detail))return res.status(409).json({error:'El asesor ya tiene una cuenta vinculada.'});

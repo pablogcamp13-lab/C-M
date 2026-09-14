@@ -68,6 +68,13 @@ class SupabaseStorage {
     ]);
   }
 
+  async findUserByEmail(email:string):Promise<User|null>{
+    if(!this.enabled)return null;
+    const row=(await this.db().query('SELECT * FROM users WHERE lower(email)=lower($1) LIMIT 1',[email])).rows[0];
+    if(!row)return null;
+    return {id:row.id,name:row.name,email:row.email,username:row.username||undefined,role:row.role,status:row.status,teamId:row.source_team_id||undefined,advisorId:row.source_advisor_id||undefined,avatar:row.avatar||undefined,createdAt:row.created_at?.toISOString?.()||row.created_at,mustChangePassword:Boolean(row.must_change_password),accessScope:row.access_scope,companyIds:json(row.company_ids_json,[]),operationIds:json(row.operation_ids_json,[])} as User;
+  }
+
   async loadUsersForAuthentication():Promise<AuthUserRecord[]>{const rows=(await this.db().query(`SELECT u.*,p.dni advisor_dni FROM users u LEFT JOIN people p ON p.id=u.person_id OR p.source_advisor_id=u.source_advisor_id`)).rows;return rows.map((row:any)=>({id:row.id,name:row.name,email:row.email,username:row.username||undefined,role:row.role,status:row.status,teamId:row.source_team_id||undefined,advisorId:row.source_advisor_id||undefined,advisorDni:row.advisor_dni||undefined,avatar:row.avatar||undefined,createdAt:row.created_at?.toISOString?.()||row.created_at,passwordHash:row.legacy_password_hash||'',mustChangePassword:Boolean(row.must_change_password),accessScope:row.access_scope,companyIds:json(row.company_ids_json,[]),operationIds:json(row.operation_ids_json,[])}));}
   async updateUserPasswordHash(id:string,passwordHash:string,mustChangePassword=false){await this.db().query('UPDATE users SET legacy_password_hash=$2,must_change_password=$3 WHERE id=$1',[id,passwordHash,mustChangePassword]);}
   async loadSession(token:string){return (await this.db().query('SELECT user_id,created_at FROM auth_sessions WHERE token_hash=$1 AND expires_at>now()',[tokenHash(token)])).rows[0]||null;}
