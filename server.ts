@@ -1064,7 +1064,7 @@ async function startServer() {
   const visibleAlerts = (items:any[], user:User, directory:SharedRepository) => {
     if (qualityManagers.has(user.role)) return items.filter(item=>scopedRecord(user,item));
     if (user.role === 'SUPERVISOR') { const team=teamAdvisorIds(user,directory), campaigns=new Set(directory.advisors.filter(a=>team.has(a.id)).map(a=>a.campaignId)); return items.filter(item=>item.supervisorIds.includes(user.id)||team.has(item.advisorId)||campaigns.has(item.campaignId)); }
-    if (user.role === 'ASESOR') { const advisor=directory.advisors.find(a=>a.id===user.advisorId); const operationId=advisor?.operationId||`op_legacy_${advisor?.campaignId||''}`; return items.filter(item=>isAlertActive(item)&&!!advisor&&(item.operationId?item.operationId===operationId:item.campaignId===advisor.campaignId)).map(({ supervisorResponses,managementDetail,evidenceUrl,feedbackPerformed,managedAt,elapsedMinutes,...safe })=>safe); }
+    if (user.role === 'ASESOR') return items.filter(item=>isAlertActive(item)&&Boolean(user.advisorId)&&item.advisorId===user.advisorId).map(({ supervisorResponses,managementDetail,evidenceUrl,feedbackPerformed,managedAt,elapsedMinutes,...safe })=>safe);
     return [];
   };
   const loadVisibleEvaluations = async () => { let rows=(db.prepare('SELECT payload_json FROM evaluations').all() as any[]).flatMap(r=>{try{return[JSON.parse(r.payload_json)]}catch{return[]}}); if(googleStorage.enabled)try{const primary=await googleStorage.loadEvaluations();rows=supabaseStorage.enabled?primary:uniqueEvaluations([...primary,...rows]);}catch{} return rows; };
@@ -1088,8 +1088,14 @@ async function startServer() {
   app.post('/api/quality-alerts', requireAuth, async (req, res) => {
     const user = (req as any).authUser as User; if (!qualityManagers.has(user.role)) return res.status(403).json({ error:'Solo Calidad o Administración puede publicar alertas.' });
     const body = req.body || {}, directory=await readRepository(); if (!body.title || !body.advisorId || !body.campaignId || !body.validUntil || !String(body.detail||'').trim()) return res.status(400).json({ error:'Completa los datos obligatorios.' });
-    const advisor=directory.advisors.find(a=>a.id===body.advisorId); if(!advisor||advisor.campaignId!==body.campaignId)return res.status(400).json({error:'El asesor y la campaña no coinciden.'}); const supervisorIds=[...new Set((Array.isArray(body.supervisorIds)?body.supervisorIds:[body.supervisorId||advisor.supervisorId]).filter(Boolean))];if(!supervisorIds.length||supervisorIds.some(id=>!directory.users.some(u=>u.id===id&&u.role==='SUPERVISOR'&&u.status==='ACTIVO')))return res.status(400).json({error:'Selecciona supervisores activos.'});
-    const operationId=advisor.operationId||`op_legacy_${advisor.campaignId}`; const now = new Date().toISOString(); const alert:any = { id:`alert_${randomBytes(8).toString('hex')}`,title:String(body.title).trim(),audioUrl:body.audioUrl || undefined,contactNumber:String(body.contactNumber || ''),detail:String(body.detail).trim(),advisorId:body.advisorId,supervisorId:supervisorIds[0],supervisorIds,supervisorResponses:[],campaignId:body.campaignId,operationId,validUntil:body.validUntil,criticality:['BAJA','MEDIA','ALTA','CRITICA'].includes(body.criticality)?body.criticality:'MEDIA',status:'NUEVA',publishedAt:now,createdBy:user.id,updatedAt:now };
+    const advisor=directory.advisors.find(a=>a.id===body.advisorId); if(!advisor||advisor.campaignId!==body.campaignId)return res.status(400).json({error:'El asesor y la campaña no coinciden.'});
+    const operationId=advisor.operationId||`op_legacy_${advisor.campaignId}`;
+    const isActiveSupervisor=(id:string)=>directory.users.some(u=>u.id===id&&u.role==='SUPERVISOR'&&u.status==='ACTIVO');
+    const requestedSupervisorIds=(Array.isArray(body.supervisorIds)?body.supervisorIds:[body.supervisorId||advisor.supervisorId]).filter(Boolean).map(String);
+    let supervisorIds=[...new Set(requestedSupervisorIds.filter(isActiveSupervisor))];
+    if(!supervisorIds.length)supervisorIds=[...new Set((directory.operationSupervisors||[]).filter(item=>item.operationId===operationId&&item.active&&isActiveSupervisor(item.supervisorId)).map(item=>item.supervisorId))];
+    if(!supervisorIds.length)return res.status(400).json({error:'La operación no tiene supervisores activos. Asígnala antes de publicar la alerta.'});
+    const now = new Date().toISOString(); const alert:any = { id:`alert_${randomBytes(8).toString('hex')}`,title:String(body.title).trim(),audioUrl:body.audioUrl || undefined,contactNumber:String(body.contactNumber || ''),detail:String(body.detail).trim(),advisorId:body.advisorId,supervisorId:supervisorIds[0],supervisorIds,supervisorResponses:[],campaignId:body.campaignId,operationId,validUntil:body.validUntil,criticality:['BAJA','MEDIA','ALTA','CRITICA'].includes(body.criticality)?body.criticality:'MEDIA',status:'NUEVA',publishedAt:now,createdBy:user.id,updatedAt:now };
     const operation=directory.operations?.find(item=>item.id===operationId);alert.companyId=operation?.companyId;
     if(!scopedRecord(user,alert))return res.status(404).json({error:'Asesor no encontrado en tu alcance.'});
     try {
@@ -1101,7 +1107,7 @@ async function startServer() {
         if (advisor && supervisor?.email) await emailService.sendSupervisorNotification({ recipient: supervisor.email, subject: `Calidad y Mejora Continua: Nueva Alerta | ${advisor.name} - ${campaign?.name || 'Sin campaña'}`, title: 'Nueva alerta de calidad', description: `${alert.title}. Criticidad: ${alert.criticality}.`, advisorName: advisor.name, campaignName: campaign?.name || 'Sin campaña', actionLabel: 'Ver alerta', path: `/?section=quality_alerts&alertId=${encodeURIComponent(alert.id)}` });
       } catch (mailError) { console.error('[email] La alerta se guardó, pero no se notificó al supervisor.', mailError instanceof Error ? mailError.message : ''); }
       res.status(201).json({ alert });
-    } catch { res.status(502).json({ error:'No fue posible guardar la alerta.' }); }
+    } catch (error) { console.error('[quality-alerts] No fue posible guardar la alerta.',error instanceof Error?error.message:''); res.status(502).json({ error:'No fue posible guardar la alerta. Intenta nuevamente.' }); }
   });
   app.patch('/api/quality-alerts/:id', requireAuth, async (req, res) => {
     const user = (req as any).authUser as User; let items = await loadAlerts();
