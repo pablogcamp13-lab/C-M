@@ -146,7 +146,7 @@ export const QualityEvaluationModal: React.FC<{
           (await filesApi.upload(audio.file)).url || audio.url;
       } catch (error: any) {
         setAudioError(
-          error.message || "No fue posible guardar el audio en Google Drive.",
+          error.message || "No fue posible guardar el audio en Supabase.",
         );
         savingRef.current = false;
         setIsSaving(false);

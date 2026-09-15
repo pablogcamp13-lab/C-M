@@ -66,8 +66,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Drive preview URLs are HTML pages, not audio streams. Resolve uploaded Drive files
-  // through the authenticated API and play a local blob, so credentials stay in headers.
+  // Resolve private stored files through the authenticated API. Legacy Drive preview
+  // URLs remain supported so historical evaluations can still be played.
   useEffect(() => {
     const driveId = audioUrl?.match(/\/d\/([^/?]+)/)?.[1] || audioUrl?.match(/[?&]id=([^&]+)/)?.[1];
     const source = audioUrl?.startsWith('/api/files/') ? audioUrl : driveId ? `/api/files/${driveId}/content` : audioUrl;
@@ -287,7 +287,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             }
           }}
           onEnded={() => setIsPlaying(false)}
-          onError={() => { setIsPlaying(false); setPlaybackError(audioUrl?.startsWith('blob:') ? 'Esta grabación temporal venció al recargar. Cárgala nuevamente para guardarla en Drive.' : 'El navegador no pudo reproducir este audio.'); }}
+          onError={() => { setIsPlaying(false); setPlaybackError(audioUrl?.startsWith('blob:') ? 'Esta grabación temporal venció al recargar. Cárgala nuevamente para guardarla en Supabase.' : 'El navegador no pudo reproducir este audio.'); }}
         />
       )}
 

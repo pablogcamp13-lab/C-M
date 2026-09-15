@@ -4,6 +4,7 @@ import { registerOperationsModule } from "./server/operationsModule";
 import path from "path";
 import { googleStorage as googleDriveStorage } from "./server/googleStorage";
 import { supabaseStorage } from "./server/supabaseStorage";
+import { supabaseFileStorage } from "./server/supabaseFileStorage";
 import { normalizeAccessUser, scopedRepository } from './server/authorization';
 import { emailService } from "./server/emailService";
 import { mkdirSync } from "node:fs";
@@ -21,13 +22,14 @@ import { calculateEvaluationSummary, getItemCompliance } from './src/utils/calcu
 // production with an empty local repository.
 const legacySheetsAllowed = process.env.ALLOW_GOOGLE_SHEETS_FALLBACK !== 'false';
 const structuredStorage: any = supabaseStorage.enabled ? supabaseStorage : legacySheetsAllowed && googleDriveStorage.sheetsEnabled ? googleDriveStorage : null;
-// Compatibility facade: structured methods resolve to Supabase (or an explicit
-// legacy fallback), while file methods always remain on private Google Drive.
+// Compatibility facade for structured data. New binary files use private
+// Supabase Storage; Drive remains read-only compatibility for historical IDs.
 const googleStorage: any = new Proxy(googleDriveStorage as any, { get(target, property) {
   if (property === 'enabled') return Boolean(structuredStorage);
   const owner = structuredStorage && property in structuredStorage ? structuredStorage : target;
   const value = owner[property]; return typeof value === 'function' ? value.bind(owner) : value;
 } });
+const fileStorageFor = (id: string) => supabaseFileStorage.owns(id) ? supabaseFileStorage : googleDriveStorage;
 
 const PORT = Number(process.env.PORT || 3001);
 const isProduction = process.env.NODE_ENV === 'production' || /dist[\\/]server\.cjs$/.test(process.argv[1] || '');
@@ -856,7 +858,7 @@ async function startServer() {
     const user = (req as any).authUser as User; const evaluation = await loadEvaluationById(req.params.id);
     if (!evaluation || !canReadEvaluation(user,evaluation) || (user.role === 'ASESOR' && normalizedValidationStatus(evaluation) !== 'VALIDATED')) return res.status(404).json({ error:'Audio no encontrado.' });
     const fileId = String(evaluation.audioUrl || '').match(/\/api\/files\/([^/]+)\/content/)?.[1]; if (!fileId) return res.status(404).json({ error:'Audio no encontrado.' });
-    try { const file=await googleStorage.fileMetadata(fileId),stream=await googleStorage.downloadFile(fileId);res.set({'Content-Type':file.mimeType||'audio/mpeg','Content-Disposition':`inline; filename="${String(file.name||'audio.mp3').replace(/[\\\r\n"]/g,'_')}"`,'Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff'});stream.on('error',()=>res.destroy());stream.pipe(res); } catch { if(!res.headersSent)res.status(404).json({error:'Audio no encontrado.'}); }
+    try { const storage=fileStorageFor(fileId),file=await storage.fileMetadata(fileId),stream=await storage.downloadFile(fileId);res.set({'Content-Type':file.mimeType||'audio/mpeg','Content-Disposition':`inline; filename="${String(file.name||'audio.mp3').replace(/[\\\r\n"]/g,'_')}"`,'Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff'});stream.on('error',()=>res.destroy());stream.pipe(res); } catch { if(!res.headersSent)res.status(404).json({error:'Audio no encontrado.'}); }
   });
   app.get('/api/feedbacks', requireAuth, async (req, res) => {
     const user = (req as any).authUser as User;
@@ -1006,19 +1008,16 @@ async function startServer() {
     if (data.length > 35 * 1024 * 1024) return res.status(413).json({ error: 'El archivo supera el límite de 35 MB.' });
     if (!/^(audio\/|image\/)/.test(inferredMimeType)) return res.status(415).json({ error: 'Solo se permiten archivos de audio o imágenes compatibles.' });
     try {
-      const file = await googleStorage.uploadFile({ name: String(name), mimeType: inferredMimeType, data });
+      const file = await supabaseFileStorage.uploadFile({ name: String(name), mimeType: inferredMimeType, data });
       res.status(201).json({ file: { id: file.id, name: file.name, mimeType: file.mimeType, size: file.size, url: `/api/files/${file.id}/content` } });
     } catch (error: any) {
-      const status = Number(error?.response?.status || error?.code || 0);
-      const detail = [error?.message, error?.response?.data?.error, error?.response?.data?.error_description, ...(error?.response?.data?.error?.errors || []).map((item: any) => item?.reason)].filter(Boolean).map(String).join(' ').toLowerCase();
-      console.error('[google-storage] No fue posible subir archivo a Drive.', `status=${status || 'unknown'}`, error instanceof Error ? error.message : '');
-      if (/no está configurado|not configured/.test(detail)) return res.status(503).json({ code: 'GOOGLE_DRIVE_NOT_CONFIGURED', error: 'Google Drive no está configurado completamente en Railway.' });
-      if (/invalid_grant|token has been expired|token has been revoked/.test(detail)) return res.status(503).json({ code: 'GOOGLE_AUTH_EXPIRED', error: 'La autorización de Google Drive venció o fue revocada. Debe renovarse GOOGLE_REFRESH_TOKEN en Railway.' });
-      if (/insufficient.*scope|insufficient authentication scopes/.test(detail)) return res.status(503).json({ code: 'GOOGLE_DRIVE_SCOPE_MISSING', error: 'La autorización de Google no incluye permiso para subir archivos a Drive.' });
-      if (status === 404 || /file not found/.test(detail)) return res.status(503).json({ code: 'GOOGLE_DRIVE_FOLDER_NOT_FOUND', error: 'La carpeta configurada de Google Drive no existe o no está compartida con la cuenta autorizada.' });
-      if (status === 429 || /rate.?limit|quota exceeded/.test(detail)) return res.status(503).json({ code: 'GOOGLE_DRIVE_QUOTA', error: 'Google Drive alcanzó temporalmente su límite de solicitudes. Espera un minuto y vuelve a intentar.' });
-      if (status === 403 || /permission|forbidden/.test(detail)) return res.status(503).json({ code: 'GOOGLE_DRIVE_PERMISSION', error: 'La cuenta autorizada no tiene permiso para guardar archivos en la carpeta configurada de Google Drive.' });
-      return res.status(502).json({ code: 'GOOGLE_DRIVE_UPLOAD_FAILED', error: 'Google Drive rechazó el archivo. Revisa los registros de Railway para conocer el motivo exacto.' });
+      const status = Number(error?.statusCode || error?.status || error?.code || 0);
+      const detail = String(error?.message || '').toLowerCase();
+      console.error('[supabase-storage] No fue posible subir el archivo.', `status=${status || 'unknown'}`, error instanceof Error ? error.message : '');
+      if (/no está configurado|not configured/.test(detail)) return res.status(503).json({ code: 'SUPABASE_STORAGE_NOT_CONFIGURED', error: 'Supabase Storage no está configurado en el servidor.' });
+      if (status === 413 || /maximum allowed size|payload too large|exceeded.*size/.test(detail)) return res.status(413).json({ code: 'SUPABASE_FILE_TOO_LARGE', error: 'El archivo supera el límite de 35 MB.' });
+      if (status === 401 || status === 403 || /unauthorized|permission|row-level security/.test(detail)) return res.status(503).json({ code: 'SUPABASE_STORAGE_PERMISSION', error: 'Supabase Storage rechazó la carga por configuración de permisos.' });
+      return res.status(502).json({ code: 'SUPABASE_UPLOAD_FAILED', error: 'No fue posible guardar el archivo en Supabase. Intenta nuevamente.' });
     }
   });
   app.get('/api/files/:id/content', requireAuth, async (req, res) => {
@@ -1034,8 +1033,9 @@ async function startServer() {
         || feedbacks.some(item=>{const evaluation=evaluations.find(e=>e.id===item.evaluation_id);return evaluation&&canRead(evaluation)&&String(item.advisor_evidence_url||'').includes(pathPart);})
         || alerts.some(item=>scopedRecord(user,item)&&(qualityManagers.has(user.role)||(user.role==='SUPERVISOR'&&item.supervisorIds?.includes(user.id))||(user.role==='ASESOR'&&item.advisorId===user.advisorId))&&String(item.audioUrl||'').includes(pathPart));
       if (!allowed) return res.status(404).json({ error:'Archivo no encontrado.' });
-      const file = await googleStorage.fileMetadata(req.params.id);
-      const stream = await googleStorage.downloadFile(req.params.id);
+      const storage = fileStorageFor(req.params.id);
+      const file = await storage.fileMetadata(req.params.id);
+      const stream = await storage.downloadFile(req.params.id);
       res.set({
         'Content-Type': file.mimeType || 'application/octet-stream',
         'Content-Disposition': `inline; filename="${String(file.name || 'archivo').replace(/[\\\r\n"]/g, '_')}"`,
@@ -1044,12 +1044,12 @@ async function startServer() {
       stream.on('error', () => res.destroy());
       stream.pipe(res);
     } catch (error) {
-      console.error('[google-storage] No fue posible descargar archivo de Drive.', error instanceof Error ? error.message : '');
+      console.error('[file-storage] No fue posible descargar el archivo.', error instanceof Error ? error.message : '');
       if (!res.headersSent) res.status(404).json({ error: 'Archivo no encontrado.' });
     }
   });
   app.get('/api/files/:id', requireAuth, async (_req, res) => res.status(404).json({error:'Usa el endpoint autorizado del registro asociado.'}));
-  app.delete('/api/files/:id', requireAuth, async (req, res) => { const user=(req as any).authUser as User;if(user.role!=='ADMINISTRADOR'||!isGlobalActor(user))return res.status(403).json({error:'Acceso denegado.'});try { await googleStorage.deleteFile(req.params.id); res.status(204).end(); } catch { res.status(404).json({ error: 'Archivo no encontrado.' }); } });
+  app.delete('/api/files/:id', requireAuth, async (req, res) => { const user=(req as any).authUser as User;if(user.role!=='ADMINISTRADOR'||!isGlobalActor(user))return res.status(403).json({error:'Acceso denegado.'});try { await fileStorageFor(req.params.id).deleteFile(req.params.id); res.status(204).end(); } catch { res.status(404).json({ error: 'Archivo no encontrado.' }); } });
 
   const qualityManagers = new Set(['ADMINISTRADOR', 'CONSULTOR']);
   const alertRows = () => (db.prepare('SELECT data_json FROM quality_alerts ORDER BY updated_at DESC').all() as any[]).map(row => JSON.parse(row.data_json));
@@ -1121,7 +1121,7 @@ async function startServer() {
     try { persistAlert(alert); if (googleStorage.enabled) await googleStorage.saveQualityAlert(alert); res.json({ alert }); } catch { res.status(502).json({ error:'No fue posible actualizar la alerta.' }); }
   });
   app.delete('/api/quality-alerts/:id',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(!qualityManagers.has(user.role))return res.status(403).json({error:'Acceso denegado.'});const current=(await loadAlerts()).find(i=>i.id===req.params.id);if(!current||!scopedRecord(user,current))return res.status(404).json({error:'Alerta no encontrada.'});db.prepare('DELETE FROM quality_alerts WHERE id=?').run(current.id);if(googleStorage.enabled)await googleStorage.deleteQualityAlert(current.id);res.json({ok:true});});
-  app.get('/api/quality-alerts/:id/audio',requireAuth,async(req,res)=>{const user=(req as any).authUser as User,directory=await readRepository(),alert=(await loadAlerts()).find(i=>i.id===req.params.id);if(!alert||!visibleAlerts([alert],user,directory).length||!alert.audioUrl)return res.status(404).json({error:'Audio no encontrado.'});const fileId=String(alert.audioUrl).match(/\/api\/files\/([^/]+)\/content/)?.[1];if(!fileId)return res.status(404).json({error:'Audio no encontrado.'});try{const file=await googleStorage.fileMetadata(fileId),stream=await googleStorage.downloadFile(fileId);res.set({'Content-Type':file.mimeType||'audio/mpeg','Content-Disposition':`inline; filename="${String(file.name||'audio.mp3').replace(/[\\\r\n"]/g,'_')}"`,'Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff'});stream.pipe(res);}catch{res.status(404).json({error:'Audio no encontrado.'});}});
+  app.get('/api/quality-alerts/:id/audio',requireAuth,async(req,res)=>{const user=(req as any).authUser as User,directory=await readRepository(),alert=(await loadAlerts()).find(i=>i.id===req.params.id);if(!alert||!visibleAlerts([alert],user,directory).length||!alert.audioUrl)return res.status(404).json({error:'Audio no encontrado.'});const fileId=String(alert.audioUrl).match(/\/api\/files\/([^/]+)\/content/)?.[1];if(!fileId)return res.status(404).json({error:'Audio no encontrado.'});try{const storage=fileStorageFor(fileId),file=await storage.fileMetadata(fileId),stream=await storage.downloadFile(fileId);res.set({'Content-Type':file.mimeType||'audio/mpeg','Content-Disposition':`inline; filename="${String(file.name||'audio.mp3').replace(/[\\\r\n"]/g,'_')}"`,'Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff'});stream.pipe(res);}catch{res.status(404).json({error:'Audio no encontrado.'});}});
 
   const loadCalibrations=async()=>{let rows=calibrationRows();try{const remote=googleStorage.enabled?await googleStorage.loadCalibrations():[];if(remote.length){rows=remote;remote.forEach(persistCalibration);}}catch{}const now=Date.now();for(const item of rows){if(['PROGRAMADA','EN_VIVO'].includes(item.status)&&item.dueAt&&new Date(item.dueAt).getTime()<=now){const participants=(item.participants||[]).map((p:any)=>p.response?p:{...p,status:'VENCIDA',expiredAt:new Date().toISOString()});const expired={...item,status:'FINALIZADA',participants,expiredAt:new Date().toISOString(),updatedAt:new Date().toISOString(),audit:[...(item.audit||[]),{action:'VENCIDA',userId:'SYSTEM',at:new Date().toISOString()}]};await saveCalibration(expired);Object.assign(item,expired);}}return rows;};
   const saveCalibration=async(item:any)=>{persistCalibration(item);if(googleStorage.enabled)await googleStorage.saveCalibration(item);};
@@ -1243,7 +1243,7 @@ async function startServer() {
   });
 
   // Readiness verifica el repositorio principal sin exponer secretos.
-  const health=async(_req:express.Request,res:express.Response)=>{let database:any={configured:supabaseStorage.enabled,ok:!supabaseStorage.enabled};try{if(supabaseStorage.enabled)database={configured:true,...await supabaseStorage.health()};}catch{database={configured:true,ok:false};}const required=process.env.REQUIRE_SUPABASE==='true';return res.status(required&&!database.ok?503:200).json({status:database.ok||!required?'ok':'degraded',database,drive:{configured:googleDriveStorage.driveEnabled},sheetsFallback:{enabled:legacySheetsAllowed,configured:googleDriveStorage.sheetsEnabled}});};
+  const health=async(_req:express.Request,res:express.Response)=>{let database:any={configured:supabaseStorage.enabled,ok:!supabaseStorage.enabled};try{if(supabaseStorage.enabled)database={configured:true,...await supabaseStorage.health()};}catch{database={configured:true,ok:false};}const media=await supabaseFileStorage.health();const required=process.env.REQUIRE_SUPABASE==='true';const healthy=database.ok&&(!required||media.ok);return res.status(required&&!healthy?503:200).json({status:healthy||!required?'ok':'degraded',database,media,legacyDrive:{configured:googleDriveStorage.driveEnabled},sheetsFallback:{enabled:legacySheetsAllowed,configured:googleDriveStorage.sheetsEnabled}});};
   app.get('/health', health);
   app.get('/api/health', health);
 
