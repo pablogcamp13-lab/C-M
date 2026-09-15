@@ -422,6 +422,12 @@ async function requireAuth(req: express.Request, res: express.Response, next: ex
       }
     } catch (error) { console.error('[google-storage] No fue posible restaurar la sesión.', error instanceof Error ? error.message : ''); }
   }
+  if (session && session.role === 'ASESOR' && !session.advisor_id && googleStorage.enabled) {
+    try {
+      await syncAuthUsersFromGoogle(true);
+      session = db.prepare('SELECT s.*, u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?').get(token);
+    } catch (error) { console.error('[structured-storage] No fue posible reparar el vínculo del asesor.', error instanceof Error ? error.message : ''); }
+  }
   if (!session) return res.status(401).json({ error: 'Sesión no válida o expirada.' });
   (req as any).authUser = publicUser(session); (req as any).token = token; next();
 }
@@ -620,7 +626,8 @@ async function startServer() {
       const operationIds=new Set(advisors.map(item=>item.operationId||`op_legacy_${item.campaignId}`)), operations=(source.operations||[]).filter(item=>operationIds.has(item.id)), companyIds=new Set(operations.map(item=>item.companyId));
       return res.json({ repository: { advisors, campaigns: source.campaigns.filter(item => campaignIds.has(item.id)), companies:(source.companies||[]).filter(item=>companyIds.has(item.id)), operations, teams: source.teams.filter(item => teamIds.has(item.id)), users: source.users.filter(item => item.id === user.id || item.advisorId && advisors.some(advisor => advisor.id === item.advisorId)) } });
     }
-    if (user.role !== 'ASESOR' || !user.advisorId) return res.json({ repository: source });
+    if (user.role !== 'ASESOR') return res.json({ repository: source });
+    if (!user.advisorId) return res.json({ repository: { advisors: [], campaigns: [], companies: [], operations: [], teams: [], users: source.users.filter(item => item.id === user.id) } });
     const advisor = source.advisors.filter(item => item.id === user.advisorId);
     const advisorCampaignIds = new Set(advisor.map(item => item.campaignId));
     const advisorTeamIds = new Set(advisor.map(item => item.teamId).filter(Boolean));
@@ -926,7 +933,7 @@ async function startServer() {
       if (user.role === 'MONITOR') return { ...state, evaluations: (state.evaluations || []).filter((item: any) => item.evaluatorId === user.id), actionPlans: [], advisorInterventions: [], operationalMeasurements: [], importHistory: [] };
       if (user.accessScope && user.accessScope !== 'GLOBAL' && !['ASESOR','SUPERVISOR'].includes(user.role)) { const mine=(items:any[]|undefined)=>(items||[]).filter(item=>scopedRecord(user,item));return{...state,evaluations:mine(state.evaluations),actionPlans:mine(state.actionPlans),advisorInterventions:mine(state.advisorInterventions),operationalMeasurements:mine(state.operationalMeasurements),importHistory:[]}; }
       if (!['ASESOR','SUPERVISOR'].includes(user.role)) return state;
-      const advisorIds = user.role === 'ASESOR' && user.advisorId ? new Set([user.advisorId]) : new Set(directory.advisors.filter(item => item.supervisorId === user.id || (user.teamId && item.teamId === user.teamId)).map(item => item.id));
+      const advisorIds = user.role === 'ASESOR' ? new Set(user.advisorId ? [user.advisorId] : []) : new Set(directory.advisors.filter(item => item.supervisorId === user.id || (user.teamId && item.teamId === user.teamId)).map(item => item.id));
       const mine = (items: any[] | undefined) => (items || []).filter(item => advisorIds.has(item.advisorId));
       const visibleEvaluations = mine(state.evaluations).filter((item: any) => normalizedValidationStatus(item) === 'VALIDATED');
       return { ...state, evaluations: visibleEvaluations, actionPlans: mine(state.actionPlans), advisorInterventions: mine(state.advisorInterventions), operationalMeasurements: mine(state.operationalMeasurements), importHistory: [] };

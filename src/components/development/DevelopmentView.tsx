@@ -231,7 +231,7 @@ export const DevelopmentView: React.FC = () => {
     void load();
   }, []);
   const myAssignments = assignments.filter(
-    (a) => !currentUser.advisorId || a.advisorId === currentUser.advisorId,
+    (a) => Boolean(currentUser.advisorId) && a.advisorId === currentUser.advisorId,
   );
   const counts = (s: string) =>
     myAssignments.filter((a) => a.status === s).length;

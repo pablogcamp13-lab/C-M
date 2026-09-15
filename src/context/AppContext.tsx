@@ -369,9 +369,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     
     // Role-based restrictions: Advisor only sees their own
-    if (currentUser.role === 'ASESOR' && currentUser.advisorId) {
-      if (ev.advisorId !== currentUser.advisorId) return false;
-    }
+    if (currentUser.role === 'ASESOR' && (!currentUser.advisorId || ev.advisorId !== currentUser.advisorId)) return false;
 
     // Role-based restrictions (Supervisor only sees their own team)
     if (currentUser.role === 'SUPERVISOR') {
@@ -402,9 +400,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (filters.supervisorId && adv.supervisorId !== filters.supervisorId) return false;
     if (filters.advisorId && adv.id !== filters.advisorId) return false;
     
-    if (currentUser.role === 'ASESOR' && currentUser.advisorId) {
-      if (adv.id !== currentUser.advisorId) return false;
-    }
+    if (currentUser.role === 'ASESOR' && (!currentUser.advisorId || adv.id !== currentUser.advisorId)) return false;
 
     if (currentUser.role === 'SUPERVISOR') {
       if (adv.supervisorId !== currentUser.id && (!currentUser.teamId || adv.teamId !== currentUser.teamId)) return false;
@@ -436,9 +432,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (filters.companyId && operation?.companyId !== filters.companyId) return false;
     if (filters.supervisorId && advisor.supervisorId !== filters.supervisorId) return false;
 
-    if (currentUser.role === 'ASESOR' && currentUser.advisorId) {
-      if (advisor.id !== currentUser.advisorId) return false;
-    }
+    if (currentUser.role === 'ASESOR' && (!currentUser.advisorId || advisor.id !== currentUser.advisorId)) return false;
 
     if (currentUser.role === 'SUPERVISOR') {
       if (advisor.supervisorId !== currentUser.id && (!currentUser.teamId || advisor.teamId !== currentUser.teamId)) return false;

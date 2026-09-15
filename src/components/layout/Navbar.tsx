@@ -43,7 +43,7 @@ export const Navbar: React.FC<{ onOpenNewEvaluation: () => void }> = ({ onOpenNe
   const canCreateEvaluation = ['ADMINISTRADOR', 'CONSULTOR', 'MONITOR'].includes(currentUser.role);
   const canValidate = ['ADMINISTRADOR', 'CONSULTOR'].includes(currentUser.role);
   const company = companies.find(item => item.id === filters.companyId)?.name || 'Vista global';
-  const openAlerts = useMemo(() => alerts.filter(alert => alert.status !== 'CERRADA'), [alerts]);
+  const openAlerts = useMemo(() => alerts.filter(alert => alert.status !== 'CERRADA' && (currentUser.role !== 'ASESOR' || Boolean(currentUser.advisorId) && alert.advisorId === currentUser.advisorId)), [alerts, currentUser.advisorId, currentUser.role]);
   const pendingValidations = canValidate ? evaluations.filter(evaluation => evaluation.validationStatus === 'AUTOMATIC_PENDING' || evaluation.validationStatus === 'PENDIENTE_AUTOMATICO').length : 0;
   const scopedAdvisorIds = useMemo(() => new Set(advisors.filter(advisor => currentUser.role === 'ASESOR' ? advisor.id === currentUser.advisorId : currentUser.role === 'SUPERVISOR' ? advisor.supervisorId === currentUser.id : true).map(advisor => advisor.id)), [advisors, currentUser.advisorId, currentUser.id, currentUser.role]);
   const overduePlans = actionPlans.filter(plan => plan.status === 'VENCIDO' && scopedAdvisorIds.has(plan.advisorId)).length;

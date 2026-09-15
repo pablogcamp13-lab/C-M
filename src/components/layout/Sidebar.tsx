@@ -7,13 +7,13 @@ import { navigationForRole } from './navigation';
 const AUTO_HIDE_DELAY = 5_000;
 
 export const Sidebar: React.FC = () => {
-  const { currentSection, setCurrentSection, currentUser, evaluations, actionPlans } = useApp();
+  const { currentSection, setCurrentSection, currentUser, filteredEvaluations, actionPlans } = useApp();
   const [autoHidden, setAutoHidden] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches);
   const [edgeOpen, setEdgeOpen] = useState(false);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigation = navigationForRole(currentUser.role);
   const groups = Array.from(new Set(navigation.map(item => item.group)));
-  const badgeFor = (section: string) => section === 'evaluations' ? evaluations.length : section === 'action_plans' ? actionPlans.filter(plan => plan.status === 'EN_CURSO' || plan.status === 'PENDIENTE').length : undefined;
+  const badgeFor = (section: string) => section === 'evaluations' ? filteredEvaluations.length : section === 'action_plans' ? actionPlans.filter(plan => (currentUser.role !== 'ASESOR' || Boolean(currentUser.advisorId) && plan.advisorId === currentUser.advisorId) && (plan.status === 'EN_CURSO' || plan.status === 'PENDIENTE')).length : undefined;
 
   const scheduleHide = useCallback(() => {
     if (hideTimer.current) clearTimeout(hideTimer.current);

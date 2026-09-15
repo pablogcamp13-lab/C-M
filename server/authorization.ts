@@ -21,7 +21,7 @@ export const normalizeAccessUser = (row: any): User => ({
   avatar: row.avatar || undefined,
   createdAt: row.created_at || row.createdAt,
   mustChangePassword: Boolean(row.must_change_password ?? row.mustChangePassword),
-  accessScope: (row.role === 'MONITOR' ? 'GLOBAL' : row.access_scope || row.accessScope || defaultScope(row.role)) as AccessScope,
+  accessScope: (row.role === 'ASESOR' ? 'SELF' : row.role === 'MONITOR' ? 'GLOBAL' : row.access_scope || row.accessScope || defaultScope(row.role)) as AccessScope,
   companyIds: jsonIds(row.company_ids_json ?? row.companyIds),
   operationIds: jsonIds(row.operation_ids_json ?? row.operationIds)
 });
@@ -32,9 +32,11 @@ export const defaultScope = (role: UserRole): AccessScope => role === 'ASESOR'
     ? 'TEAM'
     : 'GLOBAL';
 
-const effectiveScope = (user: User): AccessScope => user.role === 'MONITOR'
-  ? 'GLOBAL'
-  : user.accessScope || defaultScope(user.role);
+const effectiveScope = (user: User): AccessScope => user.role === 'ASESOR'
+  ? 'SELF'
+  : user.role === 'MONITOR'
+    ? 'GLOBAL'
+    : user.accessScope || defaultScope(user.role);
 
 export const hasRole = (user: User, roles: UserRole[]) => roles.includes(user.role);
 

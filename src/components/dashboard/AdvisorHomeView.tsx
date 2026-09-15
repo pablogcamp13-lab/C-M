@@ -14,15 +14,17 @@ const isoWeek=(dateValue:string)=>{const date=new Date(`${dateValue}T12:00:00`),
 export const AdvisorHomeView:React.FC<{onSelectEvaluation:(evaluation:Evaluation)=>void}>=({onSelectEvaluation})=>{
   const {currentUser,evaluations}=useApp(); const [feedbacks,setFeedbacks]=useState<Feedback[]>([]); const [alerts,setAlerts]=useState<any[]>([]);
   useEffect(()=>{let active=true;const load=()=>Promise.all([fetch('/api/feedbacks',{headers:auth()}).then(r=>r.ok?r.json():{feedbacks:[]}),fetch('/api/quality-alerts',{headers:auth()}).then(r=>r.ok?r.json():{alerts:[]})]).then(([f,a])=>{if(active){setFeedbacks(f.feedbacks||[]);setAlerts(a.alerts||[]);}});void load();const refresh=()=>void load();window.addEventListener('focus',refresh);window.addEventListener('cm:data-changed',refresh);return()=>{active=false;window.removeEventListener('focus',refresh);window.removeEventListener('cm:data-changed',refresh);};},[currentUser.id]);
-  const own=useMemo(()=>evaluations.filter(e=>!e.validationStatus||['VALIDATED','VALIDADO','AJUSTADO_VALIDADO'].includes(e.validationStatus)).sort((a,b)=>`${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`)),[evaluations]);
-  const average=accumulatedScore(own),last=own[0],pending=feedbacks.filter(f=>f.status==='PENDIENTE').length,lastFeedback=[...feedbacks].sort((a,b)=>b.created_at.localeCompare(a.created_at))[0];
-  const feedbackFor=(id:string)=>feedbacks.find(f=>f.evaluation_id===id);
+  const own=useMemo(()=>evaluations.filter(e=>Boolean(currentUser.advisorId)&&e.advisorId===currentUser.advisorId&&(!e.validationStatus||['VALIDATED','VALIDADO','AJUSTADO_VALIDADO'].includes(e.validationStatus))).sort((a,b)=>`${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`)),[currentUser.advisorId,evaluations]);
+  const ownFeedbacks=feedbacks.filter(f=>Boolean(currentUser.advisorId)&&own.some(e=>e.id===f.evaluation_id));
+  const ownAlerts=alerts.filter(a=>Boolean(currentUser.advisorId)&&a.advisorId===currentUser.advisorId);
+  const average=accumulatedScore(own),last=own[0],pending=ownFeedbacks.filter(f=>f.status==='PENDIENTE').length,lastFeedback=[...ownFeedbacks].sort((a,b)=>b.created_at.localeCompare(a.created_at))[0];
+  const feedbackFor=(id:string)=>ownFeedbacks.find(f=>f.evaluation_id===id);
   const metrics=[
     {label:'Nota acumulada',value:average===null?'—':`${average}%`,icon:<TrendingUp/>},
     {label:'Última evaluación',value:last?.date||'—',icon:<CalendarDays/>},
     {label:'Cantidad de evaluaciones',value:own.length,icon:<ClipboardCheck/>},
     {label:'Estado del feedback',value:pending?`${pending} pendiente${pending===1?'':'s'}`:(feedbackLabel[lastFeedback?.status]||'Sin feedback'),icon:<MessageSquare/>},
-    {label:'Alertas activas',value:alerts.length,icon:<AlertTriangle/>},
+    {label:'Alertas activas',value:ownAlerts.length,icon:<AlertTriangle/>},
   ];
   return <main className="cm-workspace min-h-full px-5 py-6 lg:px-8"><div className="mx-auto max-w-7xl space-y-5"><header className="cm-page-heading"><p className="cm-eyebrow">MI CALIDAD</p><h1 className="text-2xl font-bold">Hola, {currentUser.name.split(' ')[0]}</h1><p className="text-sm text-[var(--cm-text-secondary)]">Consulta tus evaluaciones, feedback y compromisos.</p></header>
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{metrics.map(metric=><article key={metric.label} className="cm-card p-4"><span className="text-[var(--cm-primary)]">{metric.icon}</span><p className="mt-3 text-xs text-[var(--cm-text-secondary)]">{metric.label}</p><b className="mt-1 block text-xl">{metric.value}</b></article>)}</section>

@@ -19,6 +19,17 @@ const uuid = (value: string) => {
 };
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 const driveId = (audioUrl: unknown) => String(audioUrl || '').match(/\/api\/files\/([^/]+)\/content/)?.[1] || null;
+const personLookup = (rows:any[]) => new Map(rows.flatMap(row => [row.id, row.source_advisor_id].filter(Boolean).map(id => [String(id), row])));
+const advisorLink = (row:any, people:Map<string,any>) => {
+  if (row.role !== 'ASESOR') return row.source_advisor_id || undefined;
+  const id = String(row.id || '');
+  const candidates = [row.source_advisor_id, row.person_id, id.replace(/^usr_adv_/, ''), id.replace(/^usr_/, '')].filter(Boolean).map(String);
+  for (const candidate of candidates) {
+    const person = people.get(candidate);
+    if (person) return person.source_advisor_id || person.id;
+  }
+  return row.source_advisor_id || undefined;
+};
 
 class SupabaseStorage {
   private pool?: any;
@@ -36,8 +47,9 @@ class SupabaseStorage {
       this.db().query('SELECT * FROM users ORDER BY name'),this.db().query('SELECT * FROM campaign_definitions ORDER BY name'),this.db().query('SELECT * FROM teams ORDER BY name'),this.db().query('SELECT * FROM people ORDER BY display_name'),this.db().query('SELECT * FROM companies ORDER BY name'),this.db().query('SELECT * FROM operations ORDER BY name'),this.db().query('SELECT * FROM operation_supervisors ORDER BY start_at'),this.db().query('SELECT * FROM assignments ORDER BY start_at'),this.db().query('SELECT * FROM staffing_movements ORDER BY created_at')]);
     const operationRows=operations.rows.map((row:any)=>({id:row.id,companyId:row.company_id,campaignId:row.source_campaign_id,name:row.name,normalizedName:row.normalized_name,status:row.status,legacy:Boolean(row.legacy),createdAt:row.created_at?.toISOString?.()||row.created_at,updatedAt:row.updated_at?.toISOString?.()||row.updated_at,closedAt:row.closed_at?.toISOString?.()||row.closed_at||undefined,version:Number(row.version||1),metadata:json(row.metadata_json,{})} as Operation));
     const assignmentByPerson=new Map(assignments.rows.filter((row:any)=>row.active).map((row:any)=>[row.person_id,row]));
+    const peopleById=personLookup(people.rows);
     return {
-      users:users.rows.map((row:any)=>({id:row.id,name:row.name,email:row.email,username:row.username||undefined,role:row.role,status:row.status,teamId:row.source_team_id||undefined,advisorId:row.source_advisor_id||undefined,avatar:row.avatar||undefined,createdAt:row.created_at?.toISOString?.()||row.created_at,mustChangePassword:Boolean(row.must_change_password),accessScope:row.role==='MONITOR'?'GLOBAL':row.access_scope,companyIds:json(row.company_ids_json,[]),operationIds:json(row.operation_ids_json,[])} as User)),
+      users:users.rows.map((row:any)=>({id:row.id,name:row.name,email:row.email,username:row.username||undefined,role:row.role,status:row.status,teamId:row.source_team_id||undefined,advisorId:advisorLink(row,peopleById),avatar:row.avatar||undefined,createdAt:row.created_at?.toISOString?.()||row.created_at,mustChangePassword:Boolean(row.must_change_password),accessScope:row.role==='ASESOR'?'SELF':row.role==='MONITOR'?'GLOBAL':row.access_scope,companyIds:json(row.company_ids_json,[]),operationIds:json(row.operation_ids_json,[])} as User)),
       campaigns:campaigns.rows.map((row:any)=>({id:row.id,name:row.name,client:row.client||'',status:row.status,products:json(row.products_json,[]),description:row.description||undefined,backgroundImage:row.background_image||undefined,qualityGuidelines:json(row.quality_guidelines_json,[]),qualityCriterionWeights:json(row.quality_criterion_weights_json,null)||undefined,qualityCriticalErrors:json(row.quality_critical_errors_json,[])} as Campaign)),
       teams:teams.rows.map((row:any)=>({id:row.id,campaignId:row.source_campaign_id,supervisorId:row.supervisor_id,name:row.name} as Team)),
       advisors:people.rows.map((row:any)=>{const profile=json<any>(row.profile_json,{}),assignment=assignmentByPerson.get(row.id) as any;return{...profile,id:row.source_advisor_id||row.id,dni:row.dni||profile.dni||'',employeeCode:row.employee_code||profile.employeeCode||'',name:row.display_name,campaignId:profile.campaignId||operationRows.find(item=>item.id===assignment?.operation_id)?.campaignId||'',operationId:assignment?.operation_id||profile.operationId,teamId:assignment?.team_id||profile.teamId,supervisorId:assignment?.supervisor_id||profile.supervisorId,status:row.status||profile.status||'ACTIVO',active:row.active!==false};}),
@@ -72,10 +84,10 @@ class SupabaseStorage {
     if(!this.enabled)return null;
     const row=(await this.db().query('SELECT * FROM users WHERE lower(email)=lower($1) LIMIT 1',[email])).rows[0];
     if(!row)return null;
-    return {id:row.id,name:row.name,email:row.email,username:row.username||undefined,role:row.role,status:row.status,teamId:row.source_team_id||undefined,advisorId:row.source_advisor_id||undefined,avatar:row.avatar||undefined,createdAt:row.created_at?.toISOString?.()||row.created_at,mustChangePassword:Boolean(row.must_change_password),accessScope:row.access_scope,companyIds:json(row.company_ids_json,[]),operationIds:json(row.operation_ids_json,[])} as User;
+    return {id:row.id,name:row.name,email:row.email,username:row.username||undefined,role:row.role,status:row.status,teamId:row.source_team_id||undefined,advisorId:row.source_advisor_id||undefined,avatar:row.avatar||undefined,createdAt:row.created_at?.toISOString?.()||row.created_at,mustChangePassword:Boolean(row.must_change_password),accessScope:row.role==='ASESOR'?'SELF':row.role==='MONITOR'?'GLOBAL':row.access_scope,companyIds:json(row.company_ids_json,[]),operationIds:json(row.operation_ids_json,[])} as User;
   }
 
-  async loadUsersForAuthentication():Promise<AuthUserRecord[]>{const rows=(await this.db().query(`SELECT u.*,p.dni advisor_dni FROM users u LEFT JOIN people p ON p.id=u.person_id OR p.source_advisor_id=u.source_advisor_id`)).rows;return rows.map((row:any)=>({id:row.id,name:row.name,email:row.email,username:row.username||undefined,role:row.role,status:row.status,teamId:row.source_team_id||undefined,advisorId:row.source_advisor_id||undefined,advisorDni:row.advisor_dni||undefined,avatar:row.avatar||undefined,createdAt:row.created_at?.toISOString?.()||row.created_at,passwordHash:row.legacy_password_hash||'',mustChangePassword:Boolean(row.must_change_password),accessScope:row.role==='MONITOR'?'GLOBAL':row.access_scope,companyIds:json(row.company_ids_json,[]),operationIds:json(row.operation_ids_json,[])}));}
+  async loadUsersForAuthentication():Promise<AuthUserRecord[]>{const [users,people]=await Promise.all([this.db().query('SELECT * FROM users'),this.db().query('SELECT id,source_advisor_id,dni FROM people')]),peopleById=personLookup(people.rows);return users.rows.map((row:any)=>{const advisorId=advisorLink(row,peopleById),person=advisorId?peopleById.get(advisorId):undefined;return{id:row.id,name:row.name,email:row.email,username:row.username||undefined,role:row.role,status:row.status,teamId:row.source_team_id||undefined,advisorId,advisorDni:person?.dni||undefined,avatar:row.avatar||undefined,createdAt:row.created_at?.toISOString?.()||row.created_at,passwordHash:row.legacy_password_hash||'',mustChangePassword:Boolean(row.must_change_password),accessScope:row.role==='ASESOR'?'SELF':row.role==='MONITOR'?'GLOBAL':row.access_scope,companyIds:json(row.company_ids_json,[]),operationIds:json(row.operation_ids_json,[])};});}
   async updateUserPasswordHash(id:string,passwordHash:string,mustChangePassword=false){await this.db().query('UPDATE users SET legacy_password_hash=$2,must_change_password=$3 WHERE id=$1',[id,passwordHash,mustChangePassword]);}
   async loadSession(token:string){return (await this.db().query('SELECT user_id,created_at FROM auth_sessions WHERE token_hash=$1 AND expires_at>now()',[tokenHash(token)])).rows[0]||null;}
   async saveSession(token:string,userId:string,createdAt:string){await this.db().query(`INSERT INTO auth_sessions(token_hash,user_id,created_at,expires_at) VALUES($1,$2,$3,$4) ON CONFLICT(token_hash) DO UPDATE SET user_id=EXCLUDED.user_id,expires_at=EXCLUDED.expires_at`,[tokenHash(token),userId,createdAt,new Date(Date.now()+12*60*60*1000).toISOString()]);}
