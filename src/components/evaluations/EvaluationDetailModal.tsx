@@ -231,7 +231,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
                 </span>
               </div>
               <AudioPlayer
-                audioUrl={isAgent ? `/api/evaluations/${evaluation.id}/audio` : evaluation.audioUrl}
+                audioUrl={`/api/evaluations/${evaluation.id}/audio`}
                 audioFileName={evaluation.audioFileName || `${evaluation.recordingCode}.mp3`}
                 audioDurationSeconds={evaluation.audioDurationSeconds || 380}
                 readOnly={true}

@@ -29,7 +29,26 @@ const googleStorage: any = new Proxy(googleDriveStorage as any, { get(target, pr
   const owner = structuredStorage && property in structuredStorage ? structuredStorage : target;
   const value = owner[property]; return typeof value === 'function' ? value.bind(owner) : value;
 } });
-const fileStorageFor = (id: string) => supabaseFileStorage.owns(id) ? supabaseFileStorage : googleDriveStorage;
+const legacyDriveFileStorage = {
+  async fileMetadata(id: string) {
+    try { return await googleDriveStorage.fileMetadata(id); }
+    catch { return { id, name: 'audio-historico.mp3', mimeType: 'audio/mpeg' }; }
+  },
+  async downloadFile(id: string) {
+    try { return await googleDriveStorage.downloadFile(id); }
+    catch {
+      const response = await fetch(`https://drive.usercontent.google.com/download?id=${encodeURIComponent(id)}&export=download&confirm=t`, { redirect: 'follow' });
+      const mimeType = String(response.headers.get('content-type') || '').toLowerCase();
+      if (!response.ok || mimeType.includes('text/html')) throw new Error('Audio histórico no disponible.');
+      const data = Buffer.from(await response.arrayBuffer());
+      if (!data.length || data.length > 35 * 1024 * 1024) throw new Error('Audio histórico inválido.');
+      const { Readable } = await import('node:stream');
+      return Readable.from(data);
+    }
+  },
+  async deleteFile(id: string) { return googleDriveStorage.deleteFile(id); }
+};
+const fileStorageFor = (id: string) => supabaseFileStorage.owns(id) ? supabaseFileStorage : legacyDriveFileStorage;
 
 const PORT = Number(process.env.PORT || 3001);
 const isProduction = process.env.NODE_ENV === 'production' || /dist[\\/]server\.cjs$/.test(process.argv[1] || '');
