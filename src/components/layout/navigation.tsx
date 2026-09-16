@@ -29,6 +29,7 @@ const monitor: NavigationItem[] = [
   { label: 'Resultados', section: 'monitor_results', icon: <BarChart3 />, group: 'ANÁLISIS' },
   { label: 'Cápsulas', section: 'development', icon: <GraduationCap />, group: 'GESTIÓN' },
   { label: 'Mis avances', section: 'monitor_progress', icon: <LineChart />, group: 'GESTIÓN' },
+  { label: 'Usuarios', section: 'users', icon: <UsersRound />, group: 'SISTEMA' },
 ];
 
 export const navigationForRole = (role: UserRole) => role === 'MONITOR' ? monitor : all.filter(item => !item.roles || item.roles.includes(role));

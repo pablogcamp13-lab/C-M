@@ -29,6 +29,7 @@ const InterventionsCatalog=lazy(()=>import('./components/interventions/Intervent
 const ImpactAnalysisView=lazy(()=>import('./components/impact/ImpactAnalysisView').then(module=>({default:module.ImpactAnalysisView})));
 const ReportsExportView=lazy(()=>import('./components/reports/ReportsExportView').then(module=>({default:module.ReportsExportView})));
 const AdminSettingsView=lazy(()=>import('./components/admin/AdminSettingsView').then(module=>({default:module.AdminSettingsView})));
+const UsersReadOnlyView=lazy(()=>import('./components/users/UsersReadOnlyView').then(module=>({default:module.UsersReadOnlyView})));
 const FeedbackView=lazy(()=>import('./components/feedback/FeedbackView').then(module=>({default:module.FeedbackView})));
 const DevelopmentView=lazy(()=>import('./components/development/DevelopmentView').then(module=>({default:module.DevelopmentView})));
 const MonitorProgressView=lazy(()=>import('./components/monitor/MonitorViews').then(module=>({default:module.MonitorProgressView})));
@@ -162,6 +163,10 @@ const MainLayout: React.FC = () => {
 
           {currentSection === 'admin' && (
             <AdminSettingsView />
+          )}
+
+          {currentSection === 'users' && currentUser.role === 'MONITOR' && (
+            <UsersReadOnlyView />
           )}
 
           </Suspense></main>

@@ -495,6 +495,7 @@ export type NavigationSection =
   | 'impact' 
   | 'reports' 
   | 'admin'
+  | 'users'
   | 'development'
   | 'monitor_results'
   | 'monitor_progress';

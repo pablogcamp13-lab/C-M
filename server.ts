@@ -620,7 +620,7 @@ async function startServer() {
       const advisors = source.advisors.filter(item => item.active !== false && item.status === 'ACTIVO');
       const campaignIds = new Set(advisors.map(item => item.campaignId));
       const operationIds=new Set(advisors.map(item=>item.operationId||`op_legacy_${item.campaignId}`)), operations=(source.operations||[]).filter(item=>operationIds.has(item.id)), companyIds=new Set(operations.map(item=>item.companyId));
-      return res.json({ repository: { advisors, campaigns: source.campaigns.filter(item => item.status === 'ACTIVA' && campaignIds.has(item.id)), companies:(source.companies||[]).filter(item=>companyIds.has(item.id)), operations, teams: source.teams.filter(item => campaignIds.has(item.campaignId)), users: source.users.filter(item => item.id === user.id || item.role === 'SUPERVISOR') } });
+      return res.json({ repository: { advisors, campaigns: source.campaigns.filter(item => item.status === 'ACTIVA' && campaignIds.has(item.id)), companies:(source.companies||[]).filter(item=>companyIds.has(item.id)), operations, teams: source.teams.filter(item => campaignIds.has(item.campaignId)), users: source.users } });
     }
     if (user.role === 'SUPERVISOR') {
       const advisors = source.advisors.filter(item => item.supervisorId === user.id || (user.teamId && item.teamId === user.teamId));
