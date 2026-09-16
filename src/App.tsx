@@ -2,6 +2,7 @@ import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Navbar } from './components/layout/Navbar';
 import { Sidebar } from './components/layout/Sidebar';
+import { navigationForRole } from './components/layout/navigation';
 import { ToastProvider } from './components/ui';
 import { Evaluation, Advisor, Campaign, Company, Operation } from './types';
 import { LoginScreen } from './components/auth/LoginScreen';
@@ -38,7 +39,7 @@ const MonitorResultsView=lazy(()=>import('./components/monitor/MonitorViews').th
 const MainLayout: React.FC = () => {
   const { currentSection, setCurrentSection, evaluations, advisors, campaigns, companies, operations, currentUser, authenticatedUserId, refreshRepository } = useApp();
   useEffect(() => {
-    const allowed = ['evaluations', 'feedback', 'monitor_results', 'development', 'monitor_progress'];
+    const allowed = navigationForRole(currentUser.role).map(item => item.section);
     if (currentUser.role === 'MONITOR' && !allowed.includes(currentSection)) setCurrentSection('monitor_progress');
   }, [currentSection, currentUser.role, setCurrentSection]);
 
