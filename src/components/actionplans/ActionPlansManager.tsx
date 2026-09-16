@@ -43,6 +43,8 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [isNewModalOpen, setIsNewModalOpen] = useState<boolean>(!!initialEvaluationForPlan);
   const [selectedPlanForEdit, setSelectedPlanForEdit] = useState<ActionPlan | null>(null);
+  const [requestState, setRequestState] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
 
   // New Plan form state
   const [advisorId, setAdvisorId] = useState<string>(initialEvaluationForPlan?.advisorId || advisors[0]?.id || '');
@@ -68,29 +70,29 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
     return true;
   });
 
-  const handleCreatePlan = (e: React.FormEvent) => {
+  const handleCreatePlan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!advisorId || !objective.trim() || !action.trim()) return;
-
-    addActionPlan({
-      advisorId,
-      evaluationId: initialEvaluationForPlan?.id,
-      criterionId,
-      objective: objective.trim(),
-      action: action.trim(),
-      targetDate,
-      followUpDate,
-      responsibleId,
-      status: 'PENDIENTE',
-      notes
-    });
-
-    setIsNewModalOpen(false);
-    if (onClearInitialEvaluation) onClearInitialEvaluation();
+    setSaving(true); setRequestState(null);
+    try {
+      await addActionPlan({ advisorId, evaluationId: initialEvaluationForPlan?.id, criterionId, objective: objective.trim(), action: action.trim(), targetDate, followUpDate, responsibleId, status: 'PENDIENTE', notes });
+      setIsNewModalOpen(false); setRequestState({ type: 'success', text: 'Plan de acción guardado correctamente.' });
+      if (onClearInitialEvaluation) onClearInitialEvaluation();
+    } catch (error) { setRequestState({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible guardar el plan.' }); }
+    finally { setSaving(false); }
   };
 
-  const handleUpdateStatus = (planId: string, status: ActionPlanStatus) => {
-    updateActionPlan(planId, { status });
+  const handleUpdateStatus = async (planId: string, status: ActionPlanStatus) => {
+    setRequestState(null);
+    try { await updateActionPlan(planId, { status }); setRequestState({ type: 'success', text: 'Estado actualizado.' }); }
+    catch (error) { setRequestState({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible actualizar el plan.' }); }
+  };
+
+  const handleDelete = async (planId: string) => {
+    if (!window.confirm('¿Eliminar este plan de acción?')) return;
+    setRequestState(null);
+    try { await deleteActionPlan(planId); setRequestState({ type: 'success', text: 'Plan eliminado.' }); }
+    catch (error) { setRequestState({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible eliminar el plan.' }); }
   };
 
   const statusColumns: { id: ActionPlanStatus; label: string; bg: string; dot: string }[] = [
@@ -151,6 +153,8 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
             </button>}
           </div>
         </div>
+
+        {requestState && <div role="status" className={`rounded-lg border px-3 py-2 text-xs font-semibold ${requestState.type === 'error' ? 'border-red-300 bg-red-50 text-red-700' : 'border-emerald-300 bg-emerald-50 text-emerald-700'}`}>{requestState.text}</div>}
 
         {/* View Content */}
         {viewMode === 'KANBAN' ? (
@@ -233,13 +237,13 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                               </button>
                             )}
 
-                            <button
-                              onClick={() => deleteActionPlan(plan.id)}
+                            {!isAdvisor && <button
+                              onClick={() => void handleDelete(plan.id)}
                               className="text-[10px] text-slate-400 hover:text-red-600 p-1 rounded transition-colors"
                               title="Eliminar"
                             >
                               <Trash2 className="w-3 h-3" />
-                            </button>
+                            </button>}
                           </div>
 
                         </div>
@@ -298,12 +302,12 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                         <StatusBadge status={plan.status} size="sm" />
                       </td>
                       <td className="py-3 px-4 text-right">
-                        <button
-                          onClick={() => deleteActionPlan(plan.id)}
+                        {!isAdvisor && <button
+                          onClick={() => void handleDelete(plan.id)}
                           className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
-                        </button>
+                        </button>}
                       </td>
                     </tr>
                   );
@@ -427,9 +431,10 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                 </button>
                 <button
                   type="submit"
+                  disabled={saving}
                   className="px-4 py-2 bg-[#FF6B00] hover:bg-[#e05e00] text-white text-xs font-semibold rounded-lg shadow-xs"
                 >
-                  Guardar Plan
+                  {saving ? 'Guardando…' : 'Guardar Plan'}
                 </button>
               </div>
             </form>

@@ -29,7 +29,7 @@ import {
 } from '../data/initialData';
 import { INITIAL_INTERVENTIONS } from '../data/interventionsData';
 import { calculateEvaluationSummary, parseTimeToMinutes, formatMinutesToHHMM } from '../utils/calculations';
-import { adminCampaignsApi, adminUsersApi, authApi, evaluationsApi, organizationApi, platformStateApi, sharedRepositoryApi } from '../api/sharedRepository';
+import { actionPlansApi, adminCampaignsApi, adminUsersApi, authApi, evaluationsApi, organizationApi, platformStateApi, sharedRepositoryApi } from '../api/sharedRepository';
 import type { SharedRepository } from '../api/sharedRepository';
 import { QUALITY_WEIGHTS } from '../data/qualityPueData';
 
@@ -111,9 +111,9 @@ interface AppContextType {
   updateOperationalMeasurement: (id: string, data: Partial<OperationalMeasurement>) => void;
   deleteOperationalMeasurement: (id: string) => void;
 
-  addActionPlan: (plan: Omit<ActionPlan, 'id' | 'createdDate'>) => ActionPlan;
-  updateActionPlan: (id: string, data: Partial<ActionPlan>) => void;
-  deleteActionPlan: (id: string) => void;
+  addActionPlan: (plan: Omit<ActionPlan, 'id' | 'createdDate'>) => Promise<ActionPlan>;
+  updateActionPlan: (id: string, data: Partial<ActionPlan>) => Promise<ActionPlan>;
+  deleteActionPlan: (id: string) => Promise<void>;
 
   addIntervention: (intervention: Omit<Intervention, 'id'>) => Intervention;
   updateIntervention: (id: string, data: Partial<Intervention>) => void;
@@ -712,21 +712,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setOperationalMeasurements(prev => prev.filter(m => m.id !== id));
   };
 
-  const addActionPlan = (planData: Omit<ActionPlan, 'id' | 'createdDate'>): ActionPlan => {
-    const newPlan: ActionPlan = {
-      ...planData,
-      id: `act_${Date.now()}`,
-      createdDate: new Date().toISOString().split('T')[0]
-    };
-    setActionPlans(prev => [newPlan, ...prev]);
-    return newPlan;
+  const addActionPlan = async (planData: Omit<ActionPlan, 'id' | 'createdDate'>): Promise<ActionPlan> => {
+    const { plan } = await actionPlansApi.create(planData);
+    setActionPlans(prev => [plan, ...prev.filter(item => item.id !== plan.id)]);
+    return plan;
   };
 
-  const updateActionPlan = (id: string, data: Partial<ActionPlan>) => {
-    setActionPlans(prev => prev.map(p => p.id === id ? { ...p, ...data } : p));
+  const updateActionPlan = async (id: string, data: Partial<ActionPlan>): Promise<ActionPlan> => {
+    const { plan } = await actionPlansApi.update(id, data);
+    setActionPlans(prev => prev.map(item => item.id === id ? plan : item));
+    return plan;
   };
 
-  const deleteActionPlan = (id: string) => {
+  const deleteActionPlan = async (id: string): Promise<void> => {
+    await actionPlansApi.remove(id);
     setActionPlans(prev => prev.filter(p => p.id !== id));
   };
 

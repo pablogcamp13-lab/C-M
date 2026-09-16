@@ -28,6 +28,7 @@ import {
   Check,
   KeyRound,
   Copy,
+  X,
 } from "lucide-react";
 
 export const AdminSettingsView: React.FC = () => {
@@ -98,6 +99,10 @@ export const AdminSettingsView: React.FC = () => {
   const [isCreatingUser, setIsCreatingUser] = useState(false);
   const [userFormError, setUserFormError] = useState("");
   const [createdUserResult, setCreatedUserResult] = useState<User | null>(null);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editUserForm, setEditUserForm] = useState({ name: "", email: "", username: "", status: "ACTIVO" as User["status"] });
+  const [editUserError, setEditUserError] = useState("");
+  const [isSavingUser, setIsSavingUser] = useState(false);
 
   // Campaign form state
   const [isCampaignModalOpen, setIsCampaignModalOpen] =
@@ -231,28 +236,34 @@ export const AdminSettingsView: React.FC = () => {
       `Sesión cambiada a: ${user.name} (${user.role}). Ahora ves la plataforma desde su perspectiva.`,
     );
   };
-  const handleEditUser = async (user: User) => {
-    const name = window.prompt("Nombre del usuario", user.name);
-    if (name === null) return;
-    const email = window.prompt("Correo electrónico", user.email);
-    if (email === null) return;
+  const handleEditUser = (user: User) => {
+    setEditingUser(user);
+    setEditUserForm({ name: user.name, email: user.email, username: user.username || "", status: user.status });
+    setEditUserError("");
+  };
+  const handleSaveEditedUser = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingUser) return;
+    if (!editUserForm.name.trim() || !editUserForm.email.trim()) {
+      setEditUserError("Nombre y correo son obligatorios.");
+      return;
+    }
+    setIsSavingUser(true);
+    setEditUserError("");
     try {
-      const result = await adminUsersApi.update(user.id, {
-        name,
-        email,
-        status: user.status,
-        role: user.role,
-        advisorId: user.advisorId,
-        teamId: user.teamId,
+      const result = await adminUsersApi.update(editingUser.id, {
+        name: editUserForm.name.trim(),
+        email: editUserForm.email.trim().toLowerCase(),
+        username: editUserForm.username.trim().toLowerCase() || undefined,
+        status: editUserForm.status,
       });
-      updateUser(user.id, result.user);
-      showNotification("Usuario actualizado.");
+      updateUser(editingUser.id, result.user);
+      setEditingUser(null);
+      showNotification(`Usuario "${result.user.name}" actualizado correctamente.`);
     } catch (error) {
-      alert(
-        error instanceof Error
-          ? error.message
-          : "No fue posible actualizar el usuario.",
-      );
+      setEditUserError(error instanceof Error ? error.message : "No fue posible actualizar el usuario.");
+    } finally {
+      setIsSavingUser(false);
     }
   };
   const handleResetPassword = async (user: User) => {
@@ -614,7 +625,7 @@ export const AdminSettingsView: React.FC = () => {
                           {/* Acciones */}
                           <td className="py-3 px-4 text-right space-x-1">
                             <button
-                              onClick={() => void handleEditUser(user)}
+                              onClick={() => handleEditUser(user)}
                               className="text-[10px] px-2 py-1 text-[#031E3C] hover:bg-sky-50 rounded"
                               title="Editar usuario"
                             >
@@ -878,6 +889,32 @@ export const AdminSettingsView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* ========================================================================= */}
+      {/* MODAL EDITAR USUARIO                                                      */}
+      {/* ========================================================================= */}
+      {editingUser && createPortal(
+        <div className="fixed inset-0 z-[210] flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm" role="presentation">
+          <section role="dialog" aria-modal="true" aria-labelledby="edit-user-title" className="cm-modal w-full max-w-md p-6 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 id="edit-user-title" className="flex items-center gap-2 text-base font-bold text-[#031E3C]"><UserCheck className="h-5 w-5 text-cyan-500" />Editar usuario</h3>
+                <p className="mt-1 text-xs text-[#667085]">Actualiza los datos de acceso. Rol: <strong>{editingUser.role}</strong>.</p>
+              </div>
+              <button type="button" onClick={() => setEditingUser(null)} aria-label="Cerrar edición" className="rounded-lg p-1.5 text-[#667085] hover:bg-[#F7F8FA]"><X className="h-4 w-4" /></button>
+            </div>
+            <form onSubmit={handleSaveEditedUser} className="space-y-3.5 text-xs">
+              <div><label htmlFor="edit-user-name" className="mb-1 block font-semibold text-[#031E3C]">Nombre completo *</label><input id="edit-user-name" autoFocus required value={editUserForm.name} onChange={event=>setEditUserForm(current=>({...current,name:event.target.value}))} className="w-full rounded-lg border border-[#E5E8EC] bg-white p-2.5 focus:outline-none focus:ring-2 focus:ring-cyan-400" /></div>
+              <div><label htmlFor="edit-user-email" className="mb-1 block font-semibold text-[#031E3C]">Correo electrónico *</label><input id="edit-user-email" type="email" required value={editUserForm.email} onChange={event=>setEditUserForm(current=>({...current,email:event.target.value}))} className="w-full rounded-lg border border-[#E5E8EC] bg-white p-2.5 focus:outline-none focus:ring-2 focus:ring-cyan-400" /></div>
+              <div><label htmlFor="edit-user-username" className="mb-1 block font-semibold text-[#031E3C]">Usuario</label><input id="edit-user-username" value={editUserForm.username} onChange={event=>setEditUserForm(current=>({...current,username:event.target.value}))} className="w-full rounded-lg border border-[#E5E8EC] bg-white p-2.5 focus:outline-none focus:ring-2 focus:ring-cyan-400" /></div>
+              <div><label htmlFor="edit-user-status" className="mb-1 block font-semibold text-[#031E3C]">Estado</label><select id="edit-user-status" value={editUserForm.status} onChange={event=>setEditUserForm(current=>({...current,status:event.target.value as User["status"]}))} className="w-full rounded-lg border border-[#E5E8EC] bg-[#F7F8FA] p-2.5 font-semibold"><option value="ACTIVO">ACTIVO</option><option value="INACTIVO">INACTIVO</option></select></div>
+              {editUserError && <div role="alert" className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2.5 font-semibold text-rose-800">{editUserError}</div>}
+              <div className="flex justify-end gap-2 border-t border-[#E5E8EC] pt-4"><button type="button" onClick={() => setEditingUser(null)} disabled={isSavingUser} className="rounded-lg px-4 py-2 font-semibold text-[#667085] hover:bg-[#F7F8FA]">Cancelar</button><button type="submit" disabled={isSavingUser} className="rounded-lg bg-cyan-500 px-4 py-2 font-bold text-[#031E3C] shadow-sm hover:bg-cyan-400 disabled:cursor-wait disabled:opacity-60">{isSavingUser ? "Guardando..." : "Guardar cambios"}</button></div>
+            </form>
+          </section>
+        </div>,
+        document.body,
+      )}
 
       {/* ========================================================================= */}
       {/* MODAL CREAR USUARIO                                                       */}

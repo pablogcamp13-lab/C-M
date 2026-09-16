@@ -332,7 +332,7 @@ export interface QualityAlert {
   managedAt?: string;
   closedAt?: string;
   elapsedMinutes?: number;
-  supervisorResponses?: Array<{ supervisorId: string; feedbackPerformed?: boolean; managementDetail?: string; evidenceUrl?: string; status: 'PENDIENTE_GESTION' | 'GESTIONADA'; managedAt?: string; elapsedMinutes?: number; updatedAt: string }>;
+  supervisorResponses?: Array<{ supervisorId: string; feedbackPerformed?: boolean; managementDetail?: string; evidenceUrl?: string; status: 'PENDIENTE_GESTION' | 'GESTIONADA' | 'CERRADA'; managedAt?: string; elapsedMinutes?: number; updatedAt: string }>;
   createdBy: string;
   updatedAt: string;
 }

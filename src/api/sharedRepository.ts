@@ -1,5 +1,5 @@
 import type { Advisor, Campaign, Company, Operation, Team, User } from '../types';
-import type { Calibration, Evaluation, QualityAlert } from '../types';
+import type { ActionPlan, Calibration, Evaluation, QualityAlert } from '../types';
 
 const TOKEN_KEY = 'CONTACT_CENTER_AUTH_TOKEN';
 
@@ -136,6 +136,12 @@ export const calibrationsApi = {
 export const platformStateApi = {
   async load(): Promise<any | null> { const result = await json<{ state: any | null }>(await fetch('/api/platform-state', { headers: headers() })); return result.state; },
   async save(state: any) { return json(await fetch('/api/platform-state', { method: 'PUT', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(state) })); }
+};
+
+export const actionPlansApi = {
+  async create(data: Omit<ActionPlan,'id'|'createdDate'>) { return json<{plan:ActionPlan}>(await fetch('/api/action-plans',{method:'POST',headers:{'Content-Type':'application/json',...headers()},body:JSON.stringify(data)})); },
+  async update(id:string,data:Partial<ActionPlan>) { return json<{plan:ActionPlan}>(await fetch(`/api/action-plans/${encodeURIComponent(id)}`,{method:'PATCH',headers:{'Content-Type':'application/json',...headers()},body:JSON.stringify(data)})); },
+  async remove(id:string) { return json<{ok:true}>(await fetch(`/api/action-plans/${encodeURIComponent(id)}`,{method:'DELETE',headers:headers()})); }
 };
 
 export const staffingApi = {
