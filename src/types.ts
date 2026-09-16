@@ -314,6 +314,10 @@ export interface QualityAlert {
   id: string;
   title: string;
   audioUrl?: string;
+  audioFileName?: string;
+  audioFileSize?: number;
+  audioDurationSeconds?: number;
+  audioMimeType?: string;
   contactNumber: string;
   detail: string;
   advisorId: string;
