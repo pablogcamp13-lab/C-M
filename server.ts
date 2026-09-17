@@ -508,6 +508,14 @@ async function syncRepositorySnapshot(){const current=repository();if(googleStor
 async function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
   let session = token && db.prepare('SELECT s.*, u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?').get(token);
+  // Keep long-lived sessions aligned with user/advisor links edited by Admin.
+  // Otherwise an advisor can remain scoped to the previous person indefinitely.
+  if (session && googleStorage.enabled && Date.now() - lastGoogleAuthSync >= 60_000) {
+    try {
+      await syncAuthUsersFromGoogle();
+      session = db.prepare('SELECT s.*, u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?').get(token);
+    } catch (error) { console.error('[structured-storage] No fue posible actualizar el alcance de la sesión.', error instanceof Error ? error.message : ''); }
+  }
   if (!session && token && googleStorage.enabled) {
     try {
       const remoteSession = await googleStorage.loadSession(token);
@@ -576,7 +584,7 @@ async function startServer() {
   app.post('/api/auth/login', async (req, res) => {
     const { identity, password } = req.body || {};
     if (!identity || !password) return res.status(400).json({ error: 'Usuario y contraseña son obligatorios.' });
-    try { await syncAuthUsersFromGoogle(); }
+    try { await syncAuthUsersFromGoogle(true); }
     catch (error) { console.error('[google-storage] No fue posible sincronizar cuentas para el acceso.', error instanceof Error ? error.message : ''); }
     const identityText = String(identity).trim(); const passwordText = String(password);
     const findUser = () => {

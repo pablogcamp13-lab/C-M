@@ -310,6 +310,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const user = await authApi.login(identity, password);
     rosterHydrated.current = false;
     platformStateHydrated.current = false;
+    setFilters(initialFilters);
+    setCurrentSection('home');
+    setEvaluations([]);
     setCurrentUser(user); setAuthenticatedUserId(user.id); setIsAuthenticated(true);
   };
   const changePassword = async (password: string) => {
@@ -324,6 +327,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     platformStateHydrated.current = false;
     setIsAuthenticated(false);
     setAuthenticatedUserId(null);
+    setFilters(initialFilters);
+    setCurrentSection('home');
+    setEvaluations([]);
   };
   const refreshRepository = async () => {
     const persisted=await sharedRepositoryApi.load();

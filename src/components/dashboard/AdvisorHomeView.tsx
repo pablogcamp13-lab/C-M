@@ -3,7 +3,7 @@ import { AlertTriangle, CalendarDays, ClipboardCheck, Eye, MessageSquare, Trendi
 import { useApp } from '../../context/AppContext';
 import type { Evaluation } from '../../types';
 
-type Feedback={evaluation_id:string;status:string;created_at:string};
+type Feedback={evaluation_id:string;advisor_id:string;status:string;created_at:string};
 const auth=()=>({Authorization:`Bearer ${sessionStorage.getItem('CONTACT_CENTER_AUTH_TOKEN')||''}`});
 const feedbackLabel:Record<string,string>={PENDIENTE:'Pendiente',VALIDADO_ASESOR:'Validado por asesor',OBSERVADO_ASESOR:'Observado por asesor',CERRADO_SUPERVISOR:'Cerrado'};
 const evaluationScore=(evaluation:Evaluation)=>evaluation.technicalScore??evaluation.scoreTotal??0;
@@ -15,7 +15,7 @@ export const AdvisorHomeView:React.FC<{onSelectEvaluation:(evaluation:Evaluation
   const {currentUser,evaluations}=useApp(); const [feedbacks,setFeedbacks]=useState<Feedback[]>([]); const [alerts,setAlerts]=useState<any[]>([]);
   useEffect(()=>{let active=true;const load=()=>Promise.all([fetch('/api/feedbacks',{headers:auth()}).then(r=>r.ok?r.json():{feedbacks:[]}),fetch('/api/quality-alerts',{headers:auth()}).then(r=>r.ok?r.json():{alerts:[]})]).then(([f,a])=>{if(active){setFeedbacks(f.feedbacks||[]);setAlerts(a.alerts||[]);}});void load();const refresh=()=>void load();window.addEventListener('focus',refresh);window.addEventListener('cm:data-changed',refresh);return()=>{active=false;window.removeEventListener('focus',refresh);window.removeEventListener('cm:data-changed',refresh);};},[currentUser.id]);
   const own=useMemo(()=>evaluations.filter(e=>Boolean(currentUser.advisorId)&&e.advisorId===currentUser.advisorId&&(!e.validationStatus||['VALIDATED','VALIDADO','AJUSTADO_VALIDADO'].includes(e.validationStatus))).sort((a,b)=>`${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`)),[currentUser.advisorId,evaluations]);
-  const ownFeedbacks=feedbacks.filter(f=>Boolean(currentUser.advisorId)&&own.some(e=>e.id===f.evaluation_id));
+  const ownFeedbacks=feedbacks.filter(f=>Boolean(currentUser.advisorId)&&f.advisor_id===currentUser.advisorId);
   const ownAlerts=alerts.filter(a=>Boolean(currentUser.advisorId)&&a.advisorId===currentUser.advisorId);
   const average=accumulatedScore(own),last=own[0],pending=ownFeedbacks.filter(f=>f.status==='PENDIENTE').length,lastFeedback=[...ownFeedbacks].sort((a,b)=>b.created_at.localeCompare(a.created_at))[0];
   const feedbackFor=(id:string)=>ownFeedbacks.find(f=>f.evaluation_id===id);
