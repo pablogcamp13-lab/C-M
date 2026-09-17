@@ -64,14 +64,16 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   const evaluator = users.find(u => u.id === evaluation.evaluatorId);
   const supervisor = users.find(u => u.id === evaluation.supervisorId);
   const isAgent = currentUser.role === 'ASESOR';
-  const canEdit = currentUser.role === 'ADMINISTRADOR';
+  const isPendingSpeech = evaluation.origin==='SPEECH_ANALYTICS'&&(evaluation.validationStatus==='AUTOMATIC_PENDING'||evaluation.validationStatus==='PENDIENTE_AUTOMATICO');
+  const monitorCanValidate = currentUser.role==='MONITOR'&&isPendingSpeech&&evaluation.evaluatorId===currentUser.id;
+  const canEdit = currentUser.role === 'ADMINISTRADOR'||monitorCanValidate;
   const changeItem=(id:string,changes:Partial<EvaluationItem>)=>setDraftItems(items=>items.map(item=>item.id===id?{...item,...changes}:item));
   const saveEdit=async()=>{
     if(!evaluation||savingEdit)return;
     if(!draftItems.some(item=>item.compliance==='CUMPLE'||item.compliance==='NO_CUMPLE')){setEditError('Responde al menos un criterio evaluable antes de guardar.');return;}
     setSavingEdit(true);setEditError('');
     try{
-      const saved=await updateEvaluation(evaluation.id,{...draftMeta,type:draftMeta.type as Evaluation['type'],saleResult:draftMeta.saleResult as Evaluation['saleResult'],items:draftItems});
+      const saved=await updateEvaluation(evaluation.id,{...draftMeta,type:draftMeta.type as Evaluation['type'],saleResult:draftMeta.saleResult as Evaluation['saleResult'],items:draftItems,...(monitorCanValidate?{validationStatus:'VALIDATED' as const}:{})});
       onUpdated?.(saved);setIsEditing(false);
     }catch(error){setEditError(error instanceof Error?error.message:'No fue posible actualizar la evaluación.');}
     finally{setSavingEdit(false);}
@@ -117,13 +119,14 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {canEdit&&!isEditing&&<button onClick={()=>setIsEditing(true)} className="cm-button-secondary px-3 py-2 text-xs"><Pencil className="h-4 w-4"/>Editar evaluación</button>}
+            {canEdit&&!isEditing&&<button onClick={()=>setIsEditing(true)} className="cm-button-secondary px-3 py-2 text-xs"><Pencil className="h-4 w-4"/>{monitorCanValidate?'Revisar evaluación':'Editar evaluación'}</button>}
             <button onClick={onClose} className="p-1.5 text-[var(--cm-text-muted)] hover:text-[var(--cm-text)] hover:bg-[var(--cm-border)] rounded-lg transition-colors cursor-pointer" aria-label="Cerrar"><X className="w-5 h-5" /></button>
           </div>
         </div>
 
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5 bg-[var(--cm-bg-secondary)] text-[var(--cm-text)]">
+          {evaluation.importAlert&&<div role="alert" className="rounded-xl border border-amber-400/45 bg-amber-400/10 px-4 py-3 text-xs text-amber-200"><b className="block">Asesor pendiente de relación</b><span>{evaluation.importAlert}</span></div>}
           {isEditing&&<div className="cm-card rounded-xl p-4 sm:p-5 space-y-4">
             <div><h4 className="text-sm font-bold">Editar datos de la evaluación</h4><p className="mt-1 text-xs text-[var(--cm-text-secondary)]">Se conserva el ID, el asesor, la campaña, el audio, el feedback y todo el histórico relacionado.</p></div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -222,7 +225,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
           </div>
 
           {/* Grabación de Audio (si existe) */}
-          {(evaluation.audioUrl || evaluation.audioFileName || evaluation.recordingCode) && (
+          {evaluation.audioUrl && (
             <div className="bg-[var(--cm-surface-elevated)] text-[var(--cm-text)] rounded-xl p-4 shadow-sm border border-[var(--cm-border)] space-y-2">
               <div className="flex items-center gap-2 border-b border-[var(--cm-border)] pb-2">
                 <FileAudio className="w-4 h-4 text-[var(--cm-primary)]" />
@@ -236,6 +239,13 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
                 audioDurationSeconds={evaluation.audioDurationSeconds || 380}
                 readOnly={true}
               />
+            </div>
+          )}
+
+          {!evaluation.audioUrl && evaluation.origin === 'SPEECH_ANALYTICS' && evaluation.audioFileName && (
+            <div className="cm-card flex items-center gap-3 p-4 text-xs text-[var(--cm-text-secondary)]">
+              <FileAudio className="h-4 w-4 shrink-0 text-[var(--cm-primary)]" />
+              <span>Audio referenciado por Speech Analytics: <strong className="text-[var(--cm-text)]">{evaluation.audioFileName}</strong>. El archivo de audio aún no fue adjuntado.</span>
             </div>
           )}
 
@@ -368,7 +378,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
             {isEditing?'Cancelar edición':'Cerrar'}
           </button>
 
-          {isEditing?<button disabled={savingEdit} onClick={()=>void saveEdit()} className="cm-button-primary px-4 py-2 text-xs disabled:opacity-50"><Save className="h-4 w-4"/>{savingEdit?'Guardando…':'Guardar cambios'}</button>:onOpenNewActionPlan && (
+          {isEditing?<button disabled={savingEdit} onClick={()=>void saveEdit()} className="cm-button-primary px-4 py-2 text-xs disabled:opacity-50"><Save className="h-4 w-4"/>{savingEdit?'Guardando…':monitorCanValidate?'Guardar y validar':'Guardar cambios'}</button>:onOpenNewActionPlan && (
             <button
               onClick={() => {
                 onOpenNewActionPlan(evaluation);

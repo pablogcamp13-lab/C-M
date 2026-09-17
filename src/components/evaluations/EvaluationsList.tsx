@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp } from '../../context/AppContext';
 import { Evaluation } from '../../types';
+import { speechImportApi } from '../../api/sharedRepository';
+import { SpeechAnalyticsImportModal } from './SpeechAnalyticsImportModal';
 import { FiltersBar } from '../common/FiltersBar';
 import { ThreeScore } from '../common/ThreeScore';
 import { StatusBadge } from '../common/StatusBadge';
@@ -11,7 +13,9 @@ import {
   ArrowUpDown, 
   Phone, 
   Calendar,
-  AlertCircle
+  AlertCircle,
+  FileUp,
+  Link2
 } from 'lucide-react';
 
 interface EvaluationsListProps {
@@ -22,7 +26,7 @@ interface EvaluationsListProps {
 export const EvaluationsList: React.FC<EvaluationsListProps> = ({ 
   onSelectEvaluation, onOpenNewEvaluation
 }) => {
-  const { filteredEvaluations, advisors, users, currentUser, deleteEvaluation } = useApp();
+  const { filteredEvaluations, advisors, users, currentUser, deleteEvaluation, refreshEvaluations } = useApp();
   const [sortField, setSortField] = useState<'date' | 'score' | 'advisor'>('date');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -32,13 +36,20 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'QUALITY' | 'D3C'>('ALL');
   const [resultFilter, setResultFilter] = useState<'ALL' | 'VENTA' | 'NO_VENTA'>('ALL');
   const [stateFilter, setStateFilter] = useState<'ALL' | 'PENDIENTE' | 'FINALIZADA'>('ALL');
+  const [importOpen, setImportOpen] = useState(false);
+  const [linkTarget, setLinkTarget] = useState<Evaluation | null>(null);
+  const [linkAdvisorId, setLinkAdvisorId] = useState('');
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkError, setLinkError] = useState('');
   const isAdvisor = currentUser.role === 'ASESOR';
   const isReadOnly = ['ASESOR', 'SUPERVISOR'].includes(currentUser.role);
   const canDelete = ['ADMINISTRADOR', 'CONSULTOR'].includes(currentUser.role);
+  const canImport = ['ADMINISTRADOR', 'CONSULTOR', 'MONITOR'].includes(currentUser.role);
+  const linkCandidates = linkTarget ? advisors.filter(advisor => advisor.status === 'ACTIVO' && advisor.active !== false && advisor.operationId === linkTarget.operationId) : [];
   const visibleEvaluations = filteredEvaluations.filter(ev => {
     if (typeFilter !== 'ALL' && ev.evaluationType !== typeFilter) return false;
     if (resultFilter !== 'ALL' && (ev.sale ? 'VENTA' : 'NO_VENTA') !== resultFilter) return false;
-    const state = (ev as any).reviewedAt ? 'FINALIZADA' : 'PENDIENTE';
+    const state = ev.validationStatus === 'AUTOMATIC_PENDING' || ev.validationStatus === 'PENDIENTE_AUTOMATICO' ? 'PENDIENTE' : 'FINALIZADA';
     return stateFilter === 'ALL' || state === stateFilter;
   });
 
@@ -85,7 +96,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
             <p className="text-xs text-[#667085] mt-0.5 font-medium">
               {visibleEvaluations.length} {visibleEvaluations.length === 1 ? 'registro encontrado' : 'registros encontrados'}
             </p>
-          </div><div className="flex flex-wrap items-center justify-end gap-2"><select value={typeFilter} onChange={event => setTypeFilter(event.target.value as typeof typeFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todas</option><option value="QUALITY">Calidad</option><option value="D3C">Mejora Continua</option></select><select value={resultFilter} onChange={event => setResultFilter(event.target.value as typeof resultFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todo resultado</option><option value="VENTA">Venta</option><option value="NO_VENTA">No venta</option></select><select value={stateFilter} onChange={event => setStateFilter(event.target.value as typeof stateFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todo estado</option><option value="PENDIENTE">Pendiente de revisión</option><option value="FINALIZADA">Finalizada</option></select>{!isReadOnly && <button onClick={onOpenNewEvaluation} className="inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-[#1FD6FF] to-[#2E7BFF] px-3 py-2 text-xs font-bold text-[#031326]"><Phone className="h-4 w-4" />Nueva evaluación</button>}</div>
+          </div><div className="flex flex-wrap items-center justify-end gap-2"><select value={typeFilter} onChange={event => setTypeFilter(event.target.value as typeof typeFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todas</option><option value="QUALITY">Calidad</option><option value="D3C">Mejora Continua</option></select><select value={resultFilter} onChange={event => setResultFilter(event.target.value as typeof resultFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todo resultado</option><option value="VENTA">Venta</option><option value="NO_VENTA">No venta</option></select><select value={stateFilter} onChange={event => setStateFilter(event.target.value as typeof stateFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todo estado</option><option value="PENDIENTE">Pendiente de revisión</option><option value="FINALIZADA">Finalizada</option></select>{canImport&&<button onClick={()=>setImportOpen(true)} className="cm-button-secondary px-3 py-2 text-xs font-bold"><FileUp className="h-4 w-4"/>IMPORTAR</button>}{!isReadOnly && <button onClick={onOpenNewEvaluation} className="inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-[#1FD6FF] to-[#2E7BFF] px-3 py-2 text-xs font-bold text-[#031326]"><Phone className="h-4 w-4" />Nueva evaluación</button>}</div>
         </div>
 
         {/* Evaluations Table */}
@@ -164,8 +175,9 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                         {/* 1. Asesor (Name + Subtitle: Supervisor · ID llamada) */}
                         <td className="py-3 px-4">
                           <div className="font-semibold text-[#031E3C] text-xs">
-                            {advisor?.name || 'Asesor'}
+                            {advisor?.name || ev.sourceAdvisorName || 'Asesor por relacionar'}
                           </div>
+                          {ev.advisorResolutionStatus==='PENDING'&&<div className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-amber-700"><AlertCircle className="h-3 w-3"/>Asesor no se encuentra en rotación</div>}
                           <div className="text-[11px] text-[#667085] flex items-center gap-1.5 mt-0.5">
                             <span>{supervisor?.name || 'Supervisor'}</span>
                             <span className="text-slate-300">·</span>
@@ -228,6 +240,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                             >
                               <Eye className="w-4 h-4" />
                             </button>
+                            {ev.advisorResolutionStatus==='PENDING'&&canImport&&<button onClick={()=>{setLinkTarget(ev);setLinkAdvisorId('');setLinkError('');}} className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="Relacionar con asesor"><Link2 className="h-4 w-4"/></button>}
                             {canDelete && <button
                               onClick={() => { setDeleteError(null); setDeleteConfirmId(ev.id); }}
                               className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -333,6 +346,10 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
         </div>,
         document.body
       )}
+
+      {importOpen&&<SpeechAnalyticsImportModal onClose={()=>setImportOpen(false)} onImported={refreshEvaluations}/>}
+
+      {linkTarget&&createPortal(<div className="fixed inset-0 z-[330] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="link-advisor-title"><div className="cm-modal w-full max-w-lg p-5"><div className="flex items-start justify-between"><div><p className="cm-eyebrow">RESOLVER ALERTA</p><h3 id="link-advisor-title" className="text-base font-bold">Relacionar evaluación con asesor</h3><p className="mt-1 text-xs text-[var(--cm-text-secondary)]">{linkTarget.sourceAdvisorName||'Asesor no identificado'}{linkTarget.sourceAdvisorDni?` · DNI ${linkTarget.sourceAdvisorDni}`:''}</p></div><button onClick={()=>setLinkTarget(null)} disabled={linkBusy} className="cm-navbar__icon-button" aria-label="Cerrar">×</button></div><label className="mt-5 block text-xs font-bold">Asesor activo de la operación<select value={linkAdvisorId} onChange={event=>setLinkAdvisorId(event.target.value)} className="cm-select mt-2 w-full p-3"><option value="">Seleccionar asesor</option>{linkCandidates.map(advisor=><option key={advisor.id} value={advisor.id}>{advisor.name} · {advisor.dni}</option>)}</select></label>{!linkCandidates.length&&<p className="mt-3 rounded-lg border border-amber-400/35 bg-amber-400/10 p-3 text-xs text-amber-700">Administración debe crear o asignar al asesor a esta operación antes de relacionarlo.</p>}{linkError&&<p role="alert" className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-700">{linkError}</p>}<div className="mt-5 flex justify-end gap-2 border-t border-[var(--cm-border)] pt-4"><button onClick={()=>setLinkTarget(null)} disabled={linkBusy} className="cm-button-secondary px-3 py-2 text-xs">Cancelar</button><button disabled={linkBusy||!linkAdvisorId} onClick={async()=>{setLinkBusy(true);setLinkError('');try{await speechImportApi.linkAdvisor(linkTarget.id,linkAdvisorId);await refreshEvaluations();setLinkTarget(null);}catch(reason){setLinkError(reason instanceof Error?reason.message:'No fue posible relacionar al asesor.');}finally{setLinkBusy(false);}}} className="cm-button-primary px-3 py-2 text-xs disabled:opacity-50"><Link2 className="h-4 w-4"/>{linkBusy?'Relacionando…':'Confirmar relación'}</button></div></div></div>,document.body)}
 
     </div>
   );

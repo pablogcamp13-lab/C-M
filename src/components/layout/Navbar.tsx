@@ -41,7 +41,7 @@ export const Navbar: React.FC<{ onOpenNewEvaluation: () => void }> = ({ onOpenNe
   }, []);
 
   const canCreateEvaluation = ['ADMINISTRADOR', 'CONSULTOR', 'MONITOR'].includes(currentUser.role);
-  const canValidate = ['ADMINISTRADOR', 'CONSULTOR'].includes(currentUser.role);
+  const canValidate = ['ADMINISTRADOR', 'CONSULTOR', 'MONITOR'].includes(currentUser.role);
   const company = companies.find(item => item.id === filters.companyId)?.name || 'Vista global';
   const openAlerts = useMemo(() => alerts.filter(alert => alert.status !== 'CERRADA' && (currentUser.role !== 'ASESOR' || Boolean(currentUser.advisorId) && alert.advisorId === currentUser.advisorId)), [alerts, currentUser.advisorId, currentUser.role]);
   const pendingValidations = canValidate ? evaluations.filter(evaluation => evaluation.validationStatus === 'AUTOMATIC_PENDING' || evaluation.validationStatus === 'PENDIENTE_AUTOMATICO').length : 0;

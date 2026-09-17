@@ -9,13 +9,14 @@ import { normalizeAccessUser, scopedRepository } from './server/authorization';
 import { emailService } from "./server/emailService";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import type { Advisor, Campaign, Company, Operation, OperationAssignment, OperationSupervisor, StaffingMovement, Team, User } from "./src/types";
 // @ts-ignore node:sqlite está disponible en Node 22.5+; el proyecto conserva
 // @types/node 22 para el resto del código existente.
 import { DatabaseSync } from "node:sqlite";
 import * as XLSX from 'xlsx';
 import { calculateEvaluationSummary, getItemCompliance } from './src/utils/calculations';
+import { QUALITY_ATTRIBUTES } from './src/data/qualityPueData';
 
 // Keep the existing Sheets repository available during the Supabase cutover.
 // An explicit "false" disables it; an unset variable must never leave
@@ -179,6 +180,83 @@ const recalculateEditedEvaluation = (evaluation: any, campaigns: Campaign[]) => 
   };
 };
 
+const speechHash = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 24);
+const normalizeSpeechText = (value: unknown) => String(value ?? '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const speechValue = (row: Record<string, unknown>, ...names: string[]) => {
+  const values = new Map(Object.entries(row).map(([key, value]) => [normalizeSpeechText(key), value]));
+  for (const name of names) {
+    const value = values.get(normalizeSpeechText(name));
+    if (value !== undefined && value !== null && String(value).trim() !== '') return value;
+  }
+  return '';
+};
+const speechText = (value: unknown) => String(value ?? '').trim();
+const speechCompliance = (value: unknown) => {
+  const normalized = normalizeSpeechText(value);
+  if (!normalized || normalized === 'na' || normalized === 'n a' || normalized.includes('no aplica')) return 'NO_APLICA';
+  if (normalized.startsWith('si') || normalized.startsWith('cumple')) return 'CUMPLE';
+  if (normalized.startsWith('no') || normalized.startsWith('incumple')) return 'NO_CUMPLE';
+  return 'NO_APLICA';
+};
+const speechDateTime = (value: unknown) => {
+  let date: Date | null = value instanceof Date ? value : null;
+  if (!date && typeof value === 'number') {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed) date = new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d, parsed.H || 0, parsed.M || 0, Math.floor(parsed.S || 0)));
+  }
+  if (!date && value) {
+    const raw = speechText(value);
+    const local = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
+    date = local ? new Date(Number(local[3]), Number(local[2]) - 1, Number(local[1]), Number(local[4] || 0), Number(local[5] || 0)) : new Date(raw);
+  }
+  if (!date || Number.isNaN(date.getTime())) date = new Date();
+  const localIso = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString();
+  return { date: localIso.slice(0, 10), time: localIso.slice(11, 16) };
+};
+const speechCriterionMap = [
+  ['conexion_verificacion', 'q_1_1'],
+  ['sondeo', 'q_1_2'],
+  ['oferta_condiciones', 'q_2_1'],
+  ['manejo_objeciones_cierre', 'q_3_1'],
+  ['consentimiento_validaciones', 'q_3_2'],
+  ['cumplimiento_transversal', 'q_4_1']
+] as const;
+const speechPreviewRow = (row: Record<string, unknown>, rowNumber: number) => {
+  const externalId = speechText(speechValue(row, 'ID')) || `FILA-${rowNumber}`;
+  const fileName = speechText(speechValue(row, 'Archivo'));
+  const dni = fileName.match(/(?<!\d)(\d{8})(?!\d)/)?.[1] || '';
+  const sourceAdvisorName = speechText(speechValue(row, 'nombre_asesor', 'Asesor'));
+  const dateTime = speechDateTime(speechValue(row, 'Fecha'));
+  const dimensions: Record<string, string> = { C1:'CONECTAR', C2:'CLARIFICAR', C3:'CONVERTIR', C4:'CONECTAR_C4' };
+  const items = speechCriterionMap.map(([sourceField, criterionId]) => {
+    const attribute = QUALITY_ATTRIBUTES.find(item => item.id === criterionId)!;
+    const compliance = speechCompliance(speechValue(row, sourceField, `${sourceField}_justif`));
+    const finding = speechText(speechValue(row, `${sourceField} — por qué`, `${sourceField} por que`, `${sourceField}_justif — por qué`, `${sourceField}_justif por que`));
+    const critical = 'critical' in attribute && Boolean(attribute.critical);
+    const classification = critical ? (/cumplimiento/i.test(attribute.focus) ? 'CRITICO_COMPLIANCE' : /usuario/i.test(attribute.focus) ? 'CRITICO_USUARIO_FINAL' : 'CRITICO_NEGOCIO') : 'NO_CRITICO';
+    return { id:`item_${criterionId}`, criterionId, dimension:dimensions[attribute.criterion], compliance, percentage:compliance==='CUMPLE'?100:0, level:compliance==='CUMPLE'?4:compliance==='NO_CUMPLE'?1:0, finding, evidence:'', recommendedAction:'', attributeWeight:attribute.weight, qualityGuideline:{...attribute,critical,active:true}, category:attribute.criterion, attribute:attribute.name, errorType:compliance==='NO_CUMPLE'?(critical?'Incumplimiento crítico':'Incumplimiento de atributo'):'', classification };
+  });
+  const speechScoreValue = Number(speechValue(row, 'nota_final'));
+  const speechScore = Number.isFinite(speechScoreValue) ? speechScoreValue : null;
+  const approved = speechText(speechValue(row, 'aprobado'));
+  const criticalValue = speechText(speechValue(row, 'error_critico'));
+  const criticalDetected = speechCompliance(criticalValue) === 'CUMPLE';
+  const criticalType = speechText(speechValue(row, 'tipo_error_critico'));
+  const description = [
+    approved && `Resultado Speech Analytics: ${approved}`,
+    speechText(speechValue(row, 'aprobado — por qué', 'aprobado por que')) && `Justificación del resultado: ${speechText(speechValue(row, 'aprobado — por qué', 'aprobado por que'))}`,
+    speechText(speechValue(row, 'fortalezas')) && `Fortalezas: ${speechText(speechValue(row, 'fortalezas'))}`,
+    speechScore !== null && `Nota informada por Speech Analytics: ${speechScore}`,
+    speechText(speechValue(row, 'nota_final — por qué', 'nota_final por que')) && `Justificación de la nota: ${speechText(speechValue(row, 'nota_final — por qué', 'nota_final por que'))}`,
+    criticalValue && `Error crítico: ${criticalValue}`,
+    criticalType && `Tipo de error crítico: ${criticalType}`,
+    speechText(speechValue(row, 'error_critico — por qué', 'error_critico por que', 'error_critico_justif', 'error_critico_justif — por qué')) && `Detalle del error crítico: ${speechText(speechValue(row, 'error_critico — por qué', 'error_critico por que', 'error_critico_justif', 'error_critico_justif — por qué'))}`,
+    speechText(speechValue(row, 'oportunidades_mejora')) && `Oportunidades de mejora: ${speechText(speechValue(row, 'oportunidades_mejora'))}`
+  ].filter(Boolean).join('\n\n');
+  const saleLabel = normalizeSpeechText(speechValue(row, 'venta_evaluable'));
+  return { rowNumber, externalId, fileName, sourceAdvisorName, sourceAdvisorDni:dni, ...dateTime, durationSeconds:Math.max(0, Math.round(Number(speechValue(row, 'Duración (min)')) * 60) || 0), speechScore, speechApproved:approved, criticalDetected, criticalType, description, items, sale:saleLabel.includes('vendida'), saleResult:saleLabel.includes('vendida')?'VENTA_CONCRETADA':'NO_VENTA' };
+};
+
 async function cleanupEvaluationDuplicates() {
   const rows = db.prepare('SELECT id,payload_json FROM evaluations ORDER BY created_at DESC').all() as any[];
   const seen = new Set<string>(); const duplicateIds: string[] = [];
@@ -238,7 +316,7 @@ function repository(): SharedRepository {
   const operationAssignments=db.prepare('SELECT * FROM operation_assignments ORDER BY start_date').all().map((r:any)=>({id:r.id,advisorId:r.advisor_id,operationId:r.operation_id,teamId:r.team_id||undefined,supervisorId:r.supervisor_id||undefined,role:r.role,operationalStatus:r.operational_status,startDate:r.start_date,endDate:r.end_date||undefined,active:Boolean(r.active),source:r.source,actorId:r.actor_id||undefined,observation:r.observation||undefined}));
   const staffingMovements=db.prepare('SELECT * FROM staffing_movements ORDER BY COALESCE(effective_at,occurred_at) DESC').all().map((r:any)=>({id:r.id,advisorId:r.advisor_id,assignmentId:r.assignment_id||undefined,type:r.type,effectiveAt:r.effective_at||String(r.occurred_at).slice(0,10),createdAt:r.created_at||r.occurred_at,occurredAt:r.created_at||r.occurred_at,origin:r.origin?JSON.parse(r.origin):undefined,destination:r.destination?JSON.parse(r.destination):undefined,actorId:r.actor_id||undefined,observation:r.observation||undefined,reversedMovementId:r.reversed_movement_id||undefined}));
   const teams = db.prepare('SELECT * FROM teams ORDER BY name').all().map((r: any) => ({ id: r.id, campaignId: r.campaign_id, operationId:`op_legacy_${r.campaign_id}`, supervisorId: r.supervisor_id, name: r.name }));
-  const advisors = db.prepare('SELECT data_json FROM advisors ORDER BY name').all().map((r: any) => { const advisor=JSON.parse(r.data_json);return {...advisor,operationId:advisor.operationId||`op_legacy_${advisor.campaignId}`}; });
+  const advisors = db.prepare('SELECT data_json FROM advisors ORDER BY name').all().map((r: any) => JSON.parse(r.data_json)).filter((advisor:any)=>!advisor.speechImportPlaceholder).map((advisor:any) => ({...advisor,operationId:advisor.operationId||`op_legacy_${advisor.campaignId}`}));
   return { users, campaigns, teams, advisors, companies, operations, operationSupervisors, operationAssignments, staffingMovements };
 }
 
@@ -829,14 +907,89 @@ async function startServer() {
     }
   });
   const adminEvaluationRows = async () => { let rows=(db.prepare('SELECT payload_json FROM evaluations ORDER BY evaluated_at DESC').all() as any[]).flatMap(row=>{try{return[JSON.parse(row.payload_json)]}catch{return[]}});if(googleStorage.enabled)try{const primary=await googleStorage.loadEvaluations();rows=supabaseStorage.enabled?primary:uniqueEvaluations([...primary,...rows]);}catch{}return rows; };
+  app.post('/api/evaluations/import-speech/preview', requireAuth, parseRawFile, async (req,res) => {
+    const user=(req as any).authUser as User;
+    if(!['ADMINISTRADOR','CONSULTOR','MONITOR'].includes(user.role))return res.status(403).json({error:'Tu perfil no puede importar evaluaciones.'});
+    const operationId=String(req.header('x-operation-id')||'').trim();
+    const directory=await readRepository(),operation=directory.operations?.find(item=>item.id===operationId),campaign=directory.campaigns.find(item=>item.id===operation?.campaignId);
+    if(!operation||operation.status!=='ACTIVA'||!campaign||!isMigracionesBitel(campaign))return res.status(400).json({error:'Selecciona una operación activa de Migraciones Bitel.'});
+    if(!scopedRecord(user,{operationId,companyId:operation.companyId,campaignId:operation.campaignId}))return res.status(404).json({error:'La operación no está disponible en tu alcance.'});
+    try{
+      const workbook=XLSX.read(req.body,{type:'buffer',cellDates:true});
+      const sheet=workbook.Sheets['Resultados']||workbook.Sheets[workbook.SheetNames.find(name=>normalizeSpeechText(name)==='resultados')||''];
+      if(!sheet)return res.status(400).json({error:'El archivo no contiene la hoja Resultados.'});
+      const sourceRows=XLSX.utils.sheet_to_json<Record<string,unknown>>(sheet,{defval:'',raw:true});
+      if(!sourceRows.length)return res.status(400).json({error:'La hoja Resultados no contiene registros.'});
+      if(sourceRows.length>2000)return res.status(400).json({error:'El archivo supera el máximo de 2,000 evaluaciones por importación.'});
+      const existingIds=new Set((await adminEvaluationRows()).map((item:any)=>item.id));
+      const roster=directory.advisors.filter(advisor=>advisor.status==='ACTIVO'&&advisor.active!==false&&advisor.operationId===operationId);
+      const byDni=new Map<string,Advisor>(roster.filter(advisor=>advisor.dni).map(advisor=>[String(advisor.dni).replace(/\D/g,''),advisor] as [string,Advisor]));
+      const byName=new Map<string,Advisor[]>();for(const advisor of roster){const key=normalizeSpeechText(advisor.name);byName.set(key,[...(byName.get(key)||[]),advisor]);}
+      const rows=sourceRows.map((source,rowIndex)=>{const parsed=speechPreviewRow(source,rowIndex+2),nameMatches=byName.get(normalizeSpeechText(parsed.sourceAdvisorName))||[],advisor=byDni.get(parsed.sourceAdvisorDni)||(!parsed.sourceAdvisorDni&&nameMatches.length===1?nameMatches[0]:undefined),evaluationId=`eval_speech_${speechHash(`${operationId}|${parsed.externalId}`)}`,duplicate=existingIds.has(evaluationId);return{...parsed,evaluationId,matchedAdvisorId:advisor?.id||'',matchedAdvisorName:advisor?.name||'',status:duplicate?'DUPLICATE':advisor?'READY':'WARNING',warning:duplicate?'La evaluación ya fue importada.':advisor?'':'El asesor no se encuentra en rotación.'};});
+      const summary={total:rows.length,ready:rows.filter(row=>row.status==='READY').length,warnings:rows.filter(row=>row.status==='WARNING').length,duplicates:rows.filter(row=>row.status==='DUPLICATE').length};
+      return res.json({fileName:decodeURIComponent(req.header('x-file-name')||'speech-analytics.xlsx'),operation:{id:operation.id,name:operation.name},summary,rows});
+    }catch(error){console.error('[speech-import] No fue posible analizar el archivo.',error);return res.status(400).json({error:'No fue posible leer el archivo. Verifica que sea un XLSX válido de Speech Analytics.'});}
+  });
+  app.post('/api/evaluations/import-speech', requireAuth, async (req,res) => {
+    const user=(req as any).authUser as User;
+    if(!['ADMINISTRADOR','CONSULTOR','MONITOR'].includes(user.role))return res.status(403).json({error:'Tu perfil no puede importar evaluaciones.'});
+    const operationId=String(req.body?.operationId||''),rows=Array.isArray(req.body?.rows)?req.body.rows:[];
+    if(!rows.length||rows.length>2000)return res.status(400).json({error:'No hay evaluaciones válidas para importar.'});
+    const directory=await readRepository(),operation=directory.operations?.find(item=>item.id===operationId),campaign=directory.campaigns.find(item=>item.id===operation?.campaignId);
+    if(!operation||operation.status!=='ACTIVA'||!campaign||!isMigracionesBitel(campaign))return res.status(400).json({error:'La operación seleccionada ya no está disponible.'});
+    if(!scopedRecord(user,{operationId,companyId:operation.companyId,campaignId:operation.campaignId}))return res.status(404).json({error:'La operación no está disponible en tu alcance.'});
+    const roster=directory.advisors.filter(advisor=>advisor.status==='ACTIVO'&&advisor.active!==false&&advisor.operationId===operationId);
+    const byDni=new Map<string,Advisor>(roster.filter(advisor=>advisor.dni).map(advisor=>[String(advisor.dni).replace(/\D/g,''),advisor] as [string,Advisor]));
+    const byName=new Map<string,Advisor[]>();for(const advisor of roster){const key=normalizeSpeechText(advisor.name);byName.set(key,[...(byName.get(key)||[]),advisor]);}
+    const existingIds=new Set((await adminEvaluationRows()).map((item:any)=>item.id));
+    const created:any[]=[],pendingPeople:any[]=[];let duplicates=0,linked=0,pending=0;
+    const dimensions:Record<string,string>={C1:'CONECTAR',C2:'CLARIFICAR',C3:'CONVERTIR',C4:'CONECTAR_C4'};
+    for(const source of rows){
+      const externalId=speechText(source.externalId),evaluationId=`eval_speech_${speechHash(`${operationId}|${externalId}`)}`;
+      if(!externalId||existingIds.has(evaluationId)){duplicates++;continue;}
+      const sourceDni=speechText(source.sourceAdvisorDni).replace(/\D/g,''),nameMatches=byName.get(normalizeSpeechText(source.sourceAdvisorName))||[],advisor=byDni.get(sourceDni)||(!sourceDni&&nameMatches.length===1?nameMatches[0]:undefined);
+      const pendingPersonId=`speech_pending_${speechHash(`${operationId}|${sourceDni||normalizeSpeechText(source.sourceAdvisorName)||source.fileName||externalId}`)}`;
+      const advisorId=advisor?.id||pendingPersonId;
+      if(!advisor&&!pendingPeople.some(person=>person.id===pendingPersonId))pendingPeople.push({id:pendingPersonId,dni:`PENDING-${speechHash(pendingPersonId).slice(0,12)}`,employeeCode:'',name:speechText(source.sourceAdvisorName)||`Asesor por relacionar ${externalId}`,campaignId:campaign.id,operationId,teamId:'',supervisorId:'',status:'INACTIVO',active:false,speechImportPlaceholder:true,sourceAdvisorDni:sourceDni,sourceAdvisorName:speechText(source.sourceAdvisorName)});
+      const items=QUALITY_ATTRIBUTES.map(attribute=>{const imported=(source.items||[]).find((item:any)=>item.criterionId===attribute.id)||{},compliance=['CUMPLE','NO_CUMPLE','NO_APLICA'].includes(imported.compliance)?imported.compliance:'NO_APLICA',critical='critical' in attribute&&Boolean(attribute.critical),classification=critical?(/cumplimiento/i.test(attribute.focus)?'CRITICO_COMPLIANCE':/usuario/i.test(attribute.focus)?'CRITICO_USUARIO_FINAL':'CRITICO_NEGOCIO'):'NO_CRITICO';return{id:`item_${attribute.id}`,criterionId:attribute.id,dimension:dimensions[attribute.criterion],compliance,percentage:compliance==='CUMPLE'?100:0,level:compliance==='CUMPLE'?4:compliance==='NO_CUMPLE'?1:0,finding:speechText(imported.finding),evidence:'',recommendedAction:'',attributeWeight:attribute.weight,qualityGuideline:{...attribute,critical,active:true},category:attribute.criterion,attribute:attribute.name,errorType:compliance==='NO_CUMPLE'?(critical?'Incumplimiento crítico':'Incumplimiento de atributo'):'',classification};});
+      const criticalDetected=Boolean(source.criticalDetected),criticalName=speechText(source.criticalType)||'Error crítico detectado por Speech Analytics',now=new Date().toISOString(),gaps=items.filter(item=>item.compliance==='NO_CUMPLE');
+      let evaluation:any={id:evaluationId,advisorId,evaluatorId:user.id,evaluatorName:user.name,campaignId:campaign.id,operationId,companyId:operation.companyId,assignmentId:advisor?(directory.operationAssignments||[]).find(item=>item.advisorId===advisor.id&&item.operationId===operationId&&item.active)?.id:undefined,teamId:advisor?.teamId||'',supervisorId:advisor?.supervisorId||'',supervisorAtEvaluation:advisor?.supervisorId||'',product:campaign.products?.[0]||'Migraciones',date:/^\d{4}-\d{2}-\d{2}$/.test(String(source.date))?source.date:new Date().toISOString().slice(0,10),time:/^\d{2}:\d{2}$/.test(String(source.time))?source.time:'00:00',callId:externalId,recordingCode:speechText(source.fileName),type:'DIAGNOSTICO_INICIAL',evaluationType:'QUALITY',qualityStatus:'DRAFT',validationStatus:'AUTOMATIC_PENDING',origin:'SPEECH_ANALYTICS',qualityCriticalErrorIds:criticalDetected?[`speech_${speechHash(criticalName)}`]:[],qualityCriticalErrorSnapshot:criticalDetected?[{id:`speech_${speechHash(criticalName)}`,name:criticalName,description:'Detectado por Speech Analytics.',active:true}]:[],sale:Boolean(source.sale),saleResult:source.sale?'VENTA_CONCRETADA':'NO_VENTA',comments:speechText(source.description),audioFileName:speechText(source.fileName),audioDurationSeconds:Math.max(0,Number(source.durationSeconds)||0),audioMimeType:'audio/mpeg',scoreConnect:null,scoreClarify:null,scoreConvert:null,scoreTotal:null,technicalScore:null,primaryGap:gaps[0]?.attribute||'Sin brechas identificadas',secondaryGap:gaps[1]?.attribute||'',strongestPillar:'',recommendation:gaps.length?'Revisar los atributos marcados como No cumple.':'Mantener el estándar alcanzado.',items,createdAt:now,sourceExternalId:externalId,sourceFileName:speechText(req.body?.fileName),sourceRowNumber:Number(source.rowNumber)||undefined,sourceAdvisorName:speechText(source.sourceAdvisorName),sourceAdvisorDni:sourceDni,advisorResolutionStatus:advisor?'RESOLVED':'PENDING',importAlert:advisor?undefined:'El asesor no se encuentra en rotación. Solicita a Administración crear o regularizar al asesor y luego relaciónalo.',speechScore:Number.isFinite(Number(source.speechScore))?Number(source.speechScore):null,speechApproved:speechText(source.speechApproved)};
+      evaluation=correctMigracionesQualityEvaluation(evaluation,directory.campaigns);created.push(evaluation);existingIds.add(evaluationId);if(advisor)linked++;else pending++;
+    }
+    if(!created.length)return res.json({summary:{created:0,linked:0,pending:0,duplicates}});
+    try{
+      if(supabaseStorage.enabled)await supabaseStorage.saveSpeechEvaluationBatch(created,pendingPeople);
+      else if(googleStorage.enabled)for(const evaluation of created)await googleStorage.saveEvaluation(evaluation);
+      db.exec('BEGIN IMMEDIATE');
+      try{
+        const insertPerson=db.prepare(`INSERT OR IGNORE INTO advisors(id,dni,employee_code,name,campaign_id,team_id,supervisor_id,data_json) VALUES(?,?,?,?,?,?,?,?)`),insertEvaluation=db.prepare(`INSERT OR IGNORE INTO evaluations(id,advisor_id,evaluator_id,evaluation_type,evaluated_at,payload_json,created_at) VALUES(?,?,?,?,?,?,?)`);
+        for(const person of pendingPeople)insertPerson.run(person.id,person.dni,person.employeeCode,person.name,person.campaignId,null,null,JSON.stringify(person));
+        for(const evaluation of created)insertEvaluation.run(evaluation.id,evaluation.advisorId,evaluation.evaluatorId,evaluation.evaluationType,`${evaluation.date}T${evaluation.time}:00`,JSON.stringify(evaluation),evaluation.createdAt);
+        db.exec('COMMIT');
+      }catch(error){db.exec('ROLLBACK');throw error;}
+      if(lastCompletePlatformState)lastCompletePlatformState={...lastCompletePlatformState,evaluations:uniqueEvaluations([...created,...(lastCompletePlatformState.evaluations||[])])};
+      return res.status(201).json({summary:{created:created.length,linked,pending,duplicates}});
+    }catch(error:any){console.error('[speech-import] No fue posible guardar la importación.',error);return res.status(502).json({error:error.message||'No fue posible guardar la importación.'});}
+  });
+  app.patch('/api/evaluations/:id/link-advisor',requireAuth,async(req,res)=>{
+    const user=(req as any).authUser as User,current=await loadEvaluationById(req.params.id);
+    if(!['ADMINISTRADOR','CONSULTOR','MONITOR'].includes(user.role)||!current||current.origin!=='SPEECH_ANALYTICS'||current.advisorResolutionStatus!=='PENDING')return res.status(404).json({error:'Evaluación pendiente no encontrada.'});
+    if(user.role==='MONITOR'&&current.evaluatorId!==user.id)return res.status(403).json({error:'Sólo puedes relacionar evaluaciones importadas por ti.'});
+    const directory=await readRepository(),advisor=directory.advisors.find(item=>item.id===String(req.body?.advisorId)&&item.status==='ACTIVO'&&item.active!==false&&item.operationId===current.operationId);
+    if(!advisor)return res.status(400).json({error:'Selecciona un asesor activo de la misma operación.'});
+    const now=new Date().toISOString(),assignment=(directory.operationAssignments||[]).find(item=>item.advisorId===advisor.id&&item.operationId===current.operationId&&item.active),next={...current,advisorId:advisor.id,teamId:advisor.teamId||'',supervisorId:advisor.supervisorId||'',supervisorAtEvaluation:advisor.supervisorId||'',assignmentId:assignment?.id,advisorResolutionStatus:'RESOLVED',importAlert:undefined,linkedAdvisorAt:now,linkedAdvisorBy:user.id};
+    try{if(googleStorage.enabled)await googleStorage.saveEvaluation(next);db.prepare('UPDATE evaluations SET advisor_id=?,payload_json=? WHERE id=?').run(advisor.id,JSON.stringify(next),next.id);if(lastCompletePlatformState)lastCompletePlatformState={...lastCompletePlatformState,evaluations:(lastCompletePlatformState.evaluations||[]).map((item:any)=>item.id===next.id?next:item)};return res.json({evaluation:next});}catch(error:any){return res.status(502).json({error:error.message||'No fue posible relacionar al asesor.'});}
+  });
   const adminFilteredEvaluations = async (query:any,user:User) => { const directory=await readRepository(),campaignId=String(query.campaignId||''),supervisorId=String(query.supervisorId||''),advisorName=String(query.advisorName||'').trim().toLocaleLowerCase(),feedbackStatus=String(query.feedbackStatus||''),validationStatus=String(query.validationStatus||'');let feedbacks=(db.prepare('SELECT * FROM feedbacks').all() as any[]);if(googleStorage.enabled)try{feedbacks=await googleStorage.loadFeedbacks();}catch{}const feedbackByEvaluation=new Map(feedbacks.map(item=>[item.evaluation_id,item]));const rows=(await adminEvaluationRows()).filter(item=>{const advisor=directory.advisors.find(a=>a.id===item.advisorId),fb=feedbackByEvaluation.get(item.id),fbState=fb&&['VALIDADO_ASESOR','CERRADO_SUPERVISOR'].includes(fb.status)?'FIRMADO':'PENDIENTE';return scopedRecord(user,item)&&(!campaignId||item.campaignId===campaignId)&&(!supervisorId||item.supervisorId===supervisorId||advisor?.supervisorId===supervisorId)&&(!advisorName||advisor?.name.toLocaleLowerCase().includes(advisorName))&&(!feedbackStatus||fbState===feedbackStatus)&&(!validationStatus||normalizedValidationStatus(item)===validationStatus);});const visibleIds=new Set(rows.map((item:any)=>item.id));feedbacks=feedbacks.filter((item:any)=>visibleIds.has(item.evaluation_id));return{rows,feedbacks,directory,feedbackByEvaluation}; };
   app.get('/api/admin/dashboard',requireAuth,async(req,res)=>{const user=(req as any).authUser as User;if(!adminRoles.has(user.role))return res.status(403).json({error:'Acceso restringido a Calidad y Administración.'});const {rows,feedbacks,directory}=await adminFilteredEvaluations(req.query,user);const valid=rows.filter(item=>normalizedValidationStatus(item)==='VALIDATED'),average=(items:any[])=>items.length?Math.round(items.reduce((sum,item)=>sum+Number(item.technicalScore??item.scoreTotal??0),0)/items.length):null;const by=(key:(item:any)=>string)=>Object.entries(valid.reduce((out:any,item)=>{const id=key(item);(out[id]??=[]).push(item);return out;},{})).map(([id,items]:any)=>({id,name:directory.campaigns.find(c=>c.id===id)?.name||directory.users.find(u=>u.id===id)?.name||'Sin asignar',average:average(items),count:items.length}));const signed=feedbacks.filter(item=>['VALIDADO_ASESOR','CERRADO_SUPERVISOR'].includes(item.status)).length;res.json({metrics:{feedbackDone:signed,feedbackPending:Math.max(0,feedbacks.length-signed),automaticPending:rows.filter(item=>normalizedValidationStatus(item)==='AUTOMATIC_PENDING').length},byCampaign:by(item=>item.campaignId),bySupervisor:by(item=>item.supervisorId),evaluations:rows.map(item=>({...item,feedbackStatus:(()=>{const fb=feedbacks.find(f=>f.evaluation_id===item.id);return fb&&['VALIDADO_ASESOR','CERRADO_SUPERVISOR'].includes(fb.status)?'FIRMADO':'PENDIENTE';})()}))});});
   app.patch('/api/admin/evaluations/:id', requireAuth, async (req,res) => {
     const user=(req as any).authUser as User;
-    if(user.role!=='ADMINISTRADOR') return res.status(403).json({error:'Sólo el usuario Administrador puede editar evaluaciones finalizadas.'});
     const current=await loadEvaluationById(req.params.id);
     if(!current || !scopedRecord(user,current)) return res.status(404).json({error:'Evaluación no encontrada.'});
+    const monitorImported=user.role==='MONITOR'&&current.origin==='SPEECH_ANALYTICS'&&normalizedValidationStatus(current)==='AUTOMATIC_PENDING'&&current.evaluatorId===user.id;
+    if(user.role!=='ADMINISTRADOR'&&!monitorImported) return res.status(403).json({error:'No tienes permiso para editar esta evaluación.'});
     const body=req.body||{},now=new Date().toISOString();
+    if((body.validate||body.validationStatus==='VALIDATED')&&current.advisorResolutionStatus==='PENDING')return res.status(400).json({error:'Relaciona primero la evaluación con un asesor activo.'});
     const editableFields=['date','time','callId','recordingCode','type','product','sale','saleResult','noSaleReason','comments','items','qualityCriticalErrorIds','qualityCriticalErrorSnapshot'];
     const changes=Object.fromEntries(editableFields.filter(key=>body[key]!==undefined).map(key=>[key,body[key]]));
     const contentEdit=editableFields.some(key=>body[key]!==undefined);

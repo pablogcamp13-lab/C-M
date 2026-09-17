@@ -58,6 +58,7 @@ interface AppContextType {
   changePassword: (password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshRepository: () => Promise<SharedRepository>;
+  refreshEvaluations: () => Promise<Evaluation[]>;
   setCurrentUser: (user: User) => void;
   setUserRole: (role: UserRole) => void;
 
@@ -331,6 +332,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setUsers(persisted.users);setCampaigns(persisted.campaigns);setCompanies(persisted.companies||[]);setOperations(persisted.operations||[]);setTeams(persisted.teams);setAdvisors(persisted.advisors);
     return persisted;
   };
+  const refreshEvaluations = async () => {
+    const state = await platformStateApi.load();
+    const next = Array.isArray(state?.evaluations) ? uniqueEvaluations(state.evaluations) : [];
+    setEvaluations(next);
+    return next;
+  };
 
   const setUserRole = (role: UserRole) => {
     const matching = users.find(u => u.role === role) || {
@@ -601,7 +608,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateEvaluation = async (id: string, evalData: Partial<Evaluation>) => {
-    if (currentUser.role !== 'ADMINISTRADOR') throw new Error('Sólo el usuario Administrador puede editar evaluaciones finalizadas.');
+    const current=evaluations.find(evaluation=>evaluation.id===id);
+    const canValidateImported=currentUser.role==='MONITOR'&&current?.origin==='SPEECH_ANALYTICS'&&(current.validationStatus==='AUTOMATIC_PENDING'||current.validationStatus==='PENDIENTE_AUTOMATICO')&&current.evaluatorId===currentUser.id;
+    if (currentUser.role !== 'ADMINISTRADOR'&&!canValidateImported) throw new Error('No tienes permiso para editar esta evaluación.');
     const saved = (await evaluationsApi.update(id, evalData)).evaluation;
     setEvaluations(prev => prev.map(e => e.id === id ? saved : e));
     window.dispatchEvent(new Event('cm:data-changed'));
@@ -1113,6 +1122,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       changePassword,
         logout,
         refreshRepository,
+        refreshEvaluations,
         setCurrentUser,
         setUserRole,
         users,

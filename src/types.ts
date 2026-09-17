@@ -252,6 +252,17 @@ export interface Evaluation {
   qualityStatus?: 'DRAFT' | 'FINALIZED';
   validationStatus?: 'AUTOMATIC_PENDING' | 'VALIDATED' | 'PENDIENTE_AUTOMATICO' | 'VALIDADO' | 'AJUSTADO_VALIDADO';
   origin?: 'MANUAL' | 'SPEECH_ANALYTICS';
+  sourceExternalId?: string;
+  sourceFileName?: string;
+  sourceRowNumber?: number;
+  sourceAdvisorName?: string;
+  sourceAdvisorDni?: string;
+  advisorResolutionStatus?: 'PENDING' | 'RESOLVED';
+  importAlert?: string;
+  speechScore?: number | null;
+  speechApproved?: string;
+  linkedAdvisorAt?: string;
+  linkedAdvisorBy?: string;
   agentCommitment?: string;
   agentCommitmentDate?: string;
   agentCommitmentUpdatedAt?: string;
