@@ -522,7 +522,14 @@ async function saveRepository(input: SharedRepository) {
   structuredRepositoryCache={value:persisted,expiresAt:Date.now()+15_000};
   return persisted;
 }
-async function syncRepositorySnapshot(){const current=repository();if(googleStorage.enabled)await googleStorage.saveRepository(current,passwordHashes());structuredRepositoryCache={value:current,expiresAt:Date.now()+15_000};return current;}
+async function syncRepositorySnapshot(){
+  const current=repository();
+  const hashes=passwordHashes();
+  if(supabaseStorage.enabled)await supabaseStorage.saveRepository(current,hashes);
+  else if(googleStorage.enabled)await googleStorage.saveRepository(current,hashes);
+  structuredRepositoryCache={value:current,expiresAt:Date.now()+15_000};
+  return current;
+}
 
 async function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');

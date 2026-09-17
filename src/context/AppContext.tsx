@@ -1007,6 +1007,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         effectiveAt: payload.cutoffDate,
         rows: [...advisorsToUpdate, ...advisorsToAdd].map(advisor => ({ advisor }))
       });
+      if (result.saved !== true) {
+        throw new Error('El servidor no confirmó la persistencia de la dotación. No se mostrará como guardada.');
+      }
       if (result.verification?.verified !== validRows.length) {
         throw new Error(`La importación sólo verificó ${result.verification?.verified || 0} de ${validRows.length} personas y fue revertida.`);
       }

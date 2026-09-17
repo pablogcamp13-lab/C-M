@@ -319,8 +319,11 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
           </div>
 
           <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+            type="button"
+            onClick={() => { if (!isImporting) onClose(); }}
+            disabled={isImporting}
+            aria-label={isImporting ? 'Guardando dotación' : 'Cerrar importación'}
+            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
           >
             <X className="w-5 h-5" />
           </button>
@@ -572,6 +575,18 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
           {/* ==================================================== */}
           {step === 2 && validationResult && (
             <div className="space-y-4">
+              {parseError && (
+                <div className="flex items-start gap-2.5 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800" role="alert">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+                  <div><span className="block font-bold">No se pudo guardar la dotación</span><span>{parseError}</span></div>
+                </div>
+              )}
+              {isImporting && (
+                <div className="flex items-center gap-2.5 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs font-semibold text-blue-900" role="status" aria-live="polite">
+                  <RefreshCw className="h-4 w-4 animate-spin text-blue-700" />
+                  <span>Guardando y verificando {validationResult.readyRows + validationResult.warningRows} asesores en la base de datos. No cierres esta ventana.</span>
+                </div>
+              )}
               
               {/* Validation Summary Metrics Bar */}
               <div className="bg-white border border-[#E5E8EC] rounded-xl p-4 shadow-2xs">
@@ -865,7 +880,7 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
           {/* PASO 3: CONFIRMACIÓN / RESULTADO FINAL               */}
           {/* ==================================================== */}
           {step === 3 && importSummary && (
-            <div className="space-y-6 max-w-2xl mx-auto text-center py-4">
+            <div className="space-y-6 max-w-2xl mx-auto text-center py-4" role="status" aria-live="polite">
               
               <div className="w-16 h-16 mx-auto rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shadow-inner">
                 <CheckCircle2 className="w-8 h-8" />
@@ -873,10 +888,10 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
 
               <div>
                 <h4 className="text-xl font-bold text-[#031E3C] font-heading">
-                  ¡Importación Completada con Éxito!
+                  Dotación guardada correctamente
                 </h4>
                 <p className="text-xs text-[#667085] mt-1">
-                  Se procesó la dotación de <strong className="text-[#031E3C]">{validationResult?.usesSheetCampaigns ? validationResult.detectedCampaigns.length : 1} campaña(s)</strong> para el periodo <strong className="text-[#031E3C]">{periodName}</strong>.
+                  La base de datos confirmó la carga de <strong className="text-[#031E3C]">{importSummary.newCount + importSummary.updateCount} asesores</strong> para el periodo <strong className="text-[#031E3C]">{periodName}</strong>.
                 </p>
               </div>
 
@@ -896,25 +911,25 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
 
                 <div className="bg-purple-50 border border-purple-200 rounded-xl p-3.5">
                   <span className="text-[10px] font-bold text-purple-700 uppercase tracking-wider block">
-                    Duplicados omitidos
+                    Actualizados
                   </span>
                   <span className="text-2xl font-black text-purple-900 mt-1 block">
-                    {importSummary.duplicateCount}
+                    {importSummary.updateCount}
                   </span>
                   <span className="text-[10px] text-purple-700 mt-0.5 block">
-                    Sin sobrescribir datos
+                    Perfiles existentes
                   </span>
                 </div>
 
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5">
                   <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">
-                    Mediciones SPH
+                    Duplicados omitidos
                   </span>
                   <span className="text-2xl font-black text-emerald-900 mt-1 block">
-                    {importSummary.measurementsCount}
+                    {importSummary.duplicateCount}
                   </span>
                   <span className="text-[10px] text-emerald-700 mt-0.5 block">
-                    Registradas en histórico
+                    Sin sobrescribir datos
                   </span>
                 </div>
 
@@ -930,6 +945,12 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                   </span>
                 </div>
               </div>
+
+              {importSummary.measurementsCount > 0 && (
+                <p className="text-[11px] text-[#667085]">
+                  También se registraron {importSummary.measurementsCount} mediciones SPH en el histórico.
+                </p>
+              )}
 
               {/* User credentials automatic note */}
               {importSummary.newCount > 0 && (
@@ -980,7 +1001,8 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
               <button
                 type="button"
                 onClick={() => setStep(1)}
-                className="flex items-center gap-1.5 text-xs font-semibold text-[#031E3C] hover:text-[#FF6B00] transition-colors cursor-pointer"
+                disabled={isImporting}
+                className="flex items-center gap-1.5 text-xs font-semibold text-[#031E3C] hover:text-[#FF6B00] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
                 <span>Cambiar Archivo / Parámetros</span>
@@ -992,8 +1014,9 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
             {step < 3 && (
               <button
                 type="button"
-                onClick={onClose}
-                className="px-4 py-2 border border-[#E5E8EC] hover:bg-white text-slate-600 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                onClick={() => { if (!isImporting) onClose(); }}
+                disabled={isImporting}
+                className="px-4 py-2 border border-[#E5E8EC] hover:bg-white text-slate-600 text-xs font-semibold rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Cancelar
               </button>
@@ -1005,17 +1028,17 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
               </button>
             )}
 
-            {step === 2 && validationResult && (
+          {step === 2 && validationResult && (
               <button
                 type="button"
                 onClick={handleExecuteImport}
                 disabled={isImporting || validationResult.readyRows + validationResult.warningRows === 0}
                 className="flex items-center gap-1.5 px-5 py-2 bg-[#031E3C] hover:bg-[#0B2B50] disabled:bg-slate-300 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
               >
-                <span>{isImporting ? 'Guardando dotación...' : `Confirmar Importación (${validationResult.readyRows + validationResult.warningRows} asesores)`}</span>
+                <span>{isImporting ? 'Guardando y verificando...' : `Confirmar Importación (${validationResult.readyRows + validationResult.warningRows} asesores)`}</span>
                 <ArrowRight className="w-3.5 h-3.5 text-[#FF6B00]" />
               </button>
-            )}
+          )}
 
             {step === 3 && (
               <button

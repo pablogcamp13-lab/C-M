@@ -215,7 +215,14 @@ export function registerOperationsModule({app,db,requireAuth,repository,sync}:De
       if(verified!==prepared.length)throw new Error(`La verificación sólo confirmó ${verified} de ${prepared.length} personas.`);
       await sync();
       db.exec('COMMIT');
-      return res.json({summary,verification:{expected:prepared.length,verified},repository:repository()});
+      return res.json({
+        saved:true,
+        message:`Dotación guardada y verificada: ${verified} de ${prepared.length} personas.`,
+        persistedAt:new Date().toISOString(),
+        summary,
+        verification:{expected:prepared.length,verified},
+        repository:repository()
+      });
     }catch(error){
       db.exec('ROLLBACK');
       return res.status(409).json({error:error instanceof Error?error.message:'La importación fue revertida; no se aplicaron cambios.'});
