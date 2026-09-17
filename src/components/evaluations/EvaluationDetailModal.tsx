@@ -80,7 +80,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   };
   const saveCommitment=async()=>{setSavingCommitment(true);setCommitmentError('');try{const token=sessionStorage.getItem('CONTACT_CENTER_AUTH_TOKEN');const response=await fetch(`/api/evaluations/${evaluation.id}/commitment`,{method:'PATCH',headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify({commitment,commitmentDate})});const data=await response.json();if(!response.ok)throw new Error(data.error);setAgentDetail((value:any)=>({...value,commitment:data.commitment}));}catch(error:any){setCommitmentError(error.message||'No fue posible guardar el compromiso.');}finally{setSavingCommitment(false);}};
   const isQuality = evaluation.evaluationType === 'QUALITY' || evaluation.items.some(item => QUALITY_ATTRIBUTES.some(attribute => attribute.id === item.criterionId));
-  const advisorName = advisor?.name || 'Asesor no disponible';
+  const advisorName = advisor?.name || evaluation.sourceAdvisorName || 'Asesor por relacionar';
   const qualityScores = isQuality ? ['C1', 'C2', 'C3', 'C4'].map(criterion => {
     const attributes = QUALITY_ATTRIBUTES.filter(attribute => attribute.criterion === criterion);
     const answered = attributes.filter(attribute => {
@@ -111,6 +111,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
                   {isQuality ? 'Ficha de Evaluación de Calidad' : 'Ficha de Evaluación Metodología 3C'}
                 </h3>
                 <span className="cm-badge text-[var(--cm-primary)]">{isQuality ? 'CALIDAD' : 'MEJORA CONTINUA'}</span>
+                {evaluation.origin==='SPEECH_ANALYTICS'&&<span className="cm-badge cm-badge--info" title="Speech Analytics">SA</span>}
               </div>
               <p className="text-xs text-[var(--cm-text-secondary)] mt-0.5">
                 {advisorName} · {evaluation.callId} · {evaluation.date}

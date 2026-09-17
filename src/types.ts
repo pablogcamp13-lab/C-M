@@ -252,6 +252,12 @@ export interface Evaluation {
   qualityStatus?: 'DRAFT' | 'FINALIZED';
   validationStatus?: 'AUTOMATIC_PENDING' | 'VALIDATED' | 'PENDIENTE_AUTOMATICO' | 'VALIDADO' | 'AJUSTADO_VALIDADO';
   origin?: 'MANUAL' | 'SPEECH_ANALYTICS';
+  sourceTag?: 'SA';
+  sourceBatchId?: string;
+  sourceBatchDate?: string;
+  sourceCampaignName?: string;
+  sourceCompanyName?: string;
+  sourceOperationName?: string;
   sourceExternalId?: string;
   sourceFileName?: string;
   sourceRowNumber?: number;

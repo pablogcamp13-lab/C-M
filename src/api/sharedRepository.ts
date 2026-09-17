@@ -100,22 +100,22 @@ export const evaluationsApi = {
 
 export interface SpeechImportPreview {
   fileName: string;
-  operation: { id: string; name: string };
+  campaign: { key: string; name: string };
   summary: { total: number; ready: number; warnings: number; duplicates: number };
   rows: Array<Record<string, any>>;
 }
 
 export const speechImportApi = {
-  async preview(file: File, operationId: string) {
+  async preview(file: File, campaignName: string) {
     return json<SpeechImportPreview>(await fetch('/api/evaluations/import-speech/preview', {
       method: 'POST',
-      headers: { 'Content-Type': file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'X-File-Name': encodeURIComponent(file.name), 'X-Operation-Id': operationId, ...headers() },
+      headers: { 'Content-Type': file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'X-File-Name': encodeURIComponent(file.name), 'X-Campaign-Name': encodeURIComponent(campaignName), ...headers() },
       body: file
     }));
   },
   async commit(preview: SpeechImportPreview) {
     return json<{ summary: { created: number; linked: number; pending: number; duplicates: number } }>(await fetch('/api/evaluations/import-speech', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify({ operationId: preview.operation.id, fileName: preview.fileName, rows: preview.rows })
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify({ campaignName: preview.campaign.name, fileName: preview.fileName, rows: preview.rows })
     }));
   },
   async linkAdvisor(evaluationId: string, advisorId: string) {
