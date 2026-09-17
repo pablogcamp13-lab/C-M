@@ -24,7 +24,6 @@ import {
   UserCheck,
   Search,
   Building,
-  Database,
   Check,
   KeyRound,
   Copy,
@@ -35,7 +34,6 @@ export const AdminSettingsView: React.FC = () => {
   const {
     config,
     updateConfig,
-    clearAllData,
     campaigns,
     companies,
     users,
@@ -83,7 +81,6 @@ export const AdminSettingsView: React.FC = () => {
   );
 
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
-  const [clearConfirmOpen, setClearConfirmOpen] = useState<boolean>(false);
 
   // User form modal & state
   const [isUserModalOpen, setIsUserModalOpen] = useState<boolean>(false);
@@ -91,7 +88,6 @@ export const AdminSettingsView: React.FC = () => {
   const [userEmail, setUserEmail] = useState<string>("");
   const [userRole, setUserRole] = useState<UserRole>("ASESOR");
   const [userStatus, setUserStatus] = useState<"ACTIVO" | "INACTIVO">("ACTIVO");
-  const [userAdvisorId, setUserAdvisorId] = useState<string>("");
   const [userTeamId, setUserTeamId] = useState<string>("");
   const [userAccessScope, setUserAccessScope] = useState<User['accessScope']>('SELF');
   const [userCompanyIds, setUserCompanyIds] = useState<string[]>([]);
@@ -162,7 +158,6 @@ export const AdminSettingsView: React.FC = () => {
     setUserEmail("");
     setUserRole("ASESOR");
     setUserStatus("ACTIVO");
-    setUserAdvisorId(advisorsWithoutUser[0]?.id || "");
     setUserTeamId(teams[0]?.id || "");
     setUserAccessScope('SELF');
     setUserCompanyIds([]);
@@ -179,11 +174,6 @@ export const AdminSettingsView: React.FC = () => {
       setUserFormError("No se guardó el usuario. Completa el nombre y el correo electrónico.");
       return;
     }
-    if (userRole === "ASESOR" && !userAdvisorId) {
-      setUserFormError("No se guardó el usuario. No hay un asesor disponible para vincular.");
-      return;
-    }
-
     setIsCreatingUser(true);
     setUserFormError("");
     try {
@@ -192,7 +182,6 @@ export const AdminSettingsView: React.FC = () => {
         email: userEmail.trim(),
         role: userRole,
         status: userStatus,
-        advisorId: userRole === "ASESOR" ? userAdvisorId : undefined,
         teamId: userRole === "SUPERVISOR" ? userTeamId : undefined,
         accessScope: userRole === 'ASESOR' ? 'SELF' : userRole === 'SUPERVISOR' ? 'TEAM' : userRole === 'MONITOR' ? 'GLOBAL' : userAccessScope,
         companyIds: userAccessScope === 'COMPANY' ? userCompanyIds : [],
@@ -325,17 +314,6 @@ export const AdminSettingsView: React.FC = () => {
     showNotification("Nueva campaña creada exitosamente.");
   };
 
-  // When selecting an advisor in user form, auto-fill name and email
-  const handleAdvisorSelectForUser = (advId: string) => {
-    setUserAdvisorId(advId);
-    const adv = advisors.find((a) => a.id === advId);
-    if (adv && !userName) {
-      setUserName(adv.name);
-      const clean = adv.name.toLowerCase().replace(/[^a-z0-9]/g, ".");
-      setUserEmail(`${clean}@asesores3c.com`);
-    }
-  };
-
   const filteredUsersList = users.filter((u) => {
     if (!userSearchQuery.trim()) return true;
     const q = userSearchQuery.toLowerCase();
@@ -373,15 +351,6 @@ export const AdminSettingsView: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setClearConfirmOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors cursor-pointer"
-            >
-              <Database className="w-3.5 h-3.5" />
-              <span>Limpiar Datos (Poner Propios)</span>
-            </button>
-          </div>
         </div>
 
         {/* Global Notification Banner */}
@@ -963,7 +932,6 @@ export const AdminSettingsView: React.FC = () => {
                     onChange={(e) => {
                       const role = e.target.value as UserRole;
                       setUserRole(role);
-                      if (role === "ASESOR") setUserAdvisorId(advisorsWithoutUser[0]?.id || "");
                     }}
                     className="w-full bg-[#F7F8FA] border border-[#E5E8EC] rounded-lg p-2 font-bold text-[#031E3C]"
                   >
@@ -989,34 +957,6 @@ export const AdminSettingsView: React.FC = () => {
                     <option value="GERENCIA">GERENCIA (Métricas y KPIs)</option>
                   </select>
                 </div>
-
-                {/* Si es ASESOR: selector para vincular asesor */}
-                {userRole === "ASESOR" && (
-                  <div className="bg-emerald-50/70 border border-emerald-200 p-3 rounded-lg space-y-2">
-                    <label className="block font-bold text-emerald-900">
-                      Vincular con Asesor del Directorio *
-                    </label>
-                    {advisorsWithoutUser.length === 0 ? (
-                      <p className="text-[11px] text-amber-800">
-                        No hay asesores sin cuenta. Cada asesor de la dotación ya tiene un usuario vinculado.
-                      </p>
-                    ) : (
-                      <select
-                        value={userAdvisorId}
-                        onChange={(e) =>
-                          handleAdvisorSelectForUser(e.target.value)
-                        }
-                        className="w-full bg-white border border-emerald-300 rounded-md p-1.5 font-semibold text-emerald-900"
-                      >
-                        {advisorsWithoutUser.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.name} ({a.employeeCode || a.dni})
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-                )}
 
                 {['ADMINISTRADOR','CONSULTOR','FORMADOR','GERENCIA'].includes(userRole) && <div className="rounded-lg border border-cyan-200 bg-cyan-50/60 p-3 space-y-2">
                   <label className="block font-bold text-[#031E3C]">Alcance de acceso *</label>
@@ -1199,49 +1139,6 @@ export const AdminSettingsView: React.FC = () => {
           document.body,
         )}
 
-      {/* ========================================================================= */}
-      {/* MODAL LIMPIAR TODOS LOS DATOS                                             */}
-      {/* ========================================================================= */}
-      {clearConfirmOpen && (
-        <div className="fixed inset-0 z-50 bg-[#031E3C]/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="cm-modal max-w-md w-full p-6 border border-rose-400/50">
-            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-3">
-              <Database className="w-6 h-6" />
-            </div>
-            <h3 className="font-bold text-base text-[#031E3C] mb-1">
-              ¿Limpiar y dejar la plataforma en blanco?
-            </h3>
-            <p className="text-xs text-[#667085] mb-4 leading-relaxed">
-              Esta acción eliminará todas las evaluaciones, intervenciones,
-              asesores y mediciones previas para que puedas ingresar tus propios
-              datos limpios desde cero.
-            </p>
-
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setClearConfirmOpen(false)}
-                className="px-4 py-2 text-xs font-semibold text-[#667085] hover:bg-[#F7F8FA] rounded-lg"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  clearAllData();
-                  setClearConfirmOpen(false);
-                  showNotification(
-                    "Base de datos limpiada. La plataforma está lista para tus datos.",
-                  );
-                }}
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-xs"
-              >
-                Sí, Limpiar Todo
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

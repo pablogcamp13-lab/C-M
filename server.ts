@@ -686,7 +686,6 @@ async function startServer() {
     const accessScope=role==='ASESOR'?'SELF':role==='SUPERVISOR'?'TEAM':role==='MONITOR'?'GLOBAL':requestedAccessScope;
     const companyIds=Array.isArray(body.companyIds)?body.companyIds.map(String):[],operationIds=Array.isArray(body.operationIds)?body.operationIds.map(String):[];
     const advisorId=role==='ASESOR'?String(body.advisorId||'').trim():'';
-    if(role==='ASESOR'&&!advisorId)return res.status(422).json({error:'Selecciona un asesor para vincular la cuenta.'});
     if(advisorId&&!db.prepare('SELECT 1 FROM advisors WHERE id=?').get(advisorId))return res.status(422).json({error:'El asesor seleccionado ya no existe en la dotación.'});
     const linkedUser=advisorId?db.prepare('SELECT id,name FROM users WHERE advisor_id=? AND id<>?').get(advisorId,id) as any:null;
     if(linkedUser)return res.status(409).json({error:`El asesor ya tiene una cuenta vinculada a ${linkedUser.name}.`});
