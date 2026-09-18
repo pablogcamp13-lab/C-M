@@ -29,7 +29,7 @@ interface EvaluationsListProps {
 export const EvaluationsList: React.FC<EvaluationsListProps> = ({ 
   onSelectEvaluation, onOpenNewEvaluation
 }) => {
-  const { evaluations, filteredEvaluations, advisors, users, currentUser, deleteEvaluation, refreshEvaluations } = useApp();
+  const { evaluations, filteredEvaluations, advisors, campaigns, users, currentUser, deleteEvaluation, refreshEvaluations } = useApp();
   const [sortField, setSortField] = useState<'date' | 'score' | 'advisor'>('date');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -88,7 +88,16 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
     <div className="cm-workspace cm-evaluations flex-1 flex flex-col min-h-0 overflow-y-auto">
       
       {/* Global Filter Bar with Progressive Disclosure */}
-      <FiltersBar />
+      <FiltersBar
+        visibleCount={visibleEvaluations.length}
+        extraFilterCount={Number(typeFilter !== 'ALL') + Number(resultFilter !== 'ALL') + Number(stateFilter !== 'ALL')}
+        onResetExtraFilters={() => { setTypeFilter('ALL'); setResultFilter('ALL'); setStateFilter('ALL'); }}
+        extraFilters={<div className="space-y-3">
+          <label className="block text-xs font-semibold">Tipo<select value={typeFilter} onChange={event => setTypeFilter(event.target.value as typeof typeFilter)} className="cm-select mt-1.5 w-full px-3 py-2"><option value="ALL">Todas</option><option value="QUALITY">Calidad</option><option value="D3C">Mejora Continua</option></select></label>
+          <label className="block text-xs font-semibold">Resultado<select value={resultFilter} onChange={event => setResultFilter(event.target.value as typeof resultFilter)} className="cm-select mt-1.5 w-full px-3 py-2"><option value="ALL">Todo resultado</option><option value="VENTA">Venta</option><option value="NO_VENTA">No venta</option></select></label>
+          <label className="block text-xs font-semibold">Estado<select value={stateFilter} onChange={event => setStateFilter(event.target.value as typeof stateFilter)} className="cm-select mt-1.5 w-full px-3 py-2"><option value="ALL">Todo estado</option><option value="PENDIENTE">Pendiente de revisión</option><option value="FINALIZADA">Finalizada</option></select></label>
+        </div>}
+      />
 
       <div className="max-w-7xl mx-auto w-full p-4 sm:p-6 space-y-4">
         {selectedBatchDate && <button type="button" onClick={() => setSelectedBatchDate(null)} className="cm-button-secondary px-3 py-2 text-xs font-bold"><ArrowLeft className="h-4 w-4"/>Volver a evaluaciones manuales</button>}
@@ -102,10 +111,10 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
             <p className="text-xs text-[#667085] mt-0.5 font-medium">
               {visibleEvaluations.length} {visibleEvaluations.length === 1 ? 'registro encontrado' : 'registros encontrados'}
             </p>
-          </div><div className="flex flex-wrap items-center justify-end gap-2"><select value={typeFilter} onChange={event => setTypeFilter(event.target.value as typeof typeFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todas</option><option value="QUALITY">Calidad</option><option value="D3C">Mejora Continua</option></select><select value={resultFilter} onChange={event => setResultFilter(event.target.value as typeof resultFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todo resultado</option><option value="VENTA">Venta</option><option value="NO_VENTA">No venta</option></select><select value={stateFilter} onChange={event => setStateFilter(event.target.value as typeof stateFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todo estado</option><option value="PENDIENTE">Pendiente de revisión</option><option value="FINALIZADA">Finalizada</option></select>{canImport&&<button onClick={()=>setImportOpen(true)} className="cm-button-secondary px-3 py-2 text-xs font-bold"><FileUp className="h-4 w-4"/>IMPORTAR</button>}{!isReadOnly && <button onClick={onOpenNewEvaluation} className="inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-[#1FD6FF] to-[#2E7BFF] px-3 py-2 text-xs font-bold text-[#031326]"><Phone className="h-4 w-4" />Nueva evaluación</button>}</div>
+          </div><div className="flex flex-wrap items-center justify-end gap-2">{canImport&&<button onClick={()=>setImportOpen(true)} className="cm-button-secondary px-3 py-2 text-xs font-bold"><FileUp className="h-4 w-4"/>IMPORTAR</button>}{!isReadOnly && <button onClick={onOpenNewEvaluation} className="inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-[#1FD6FF] to-[#2E7BFF] px-3 py-2 text-xs font-bold text-[#031326]"><Phone className="h-4 w-4" />Nueva evaluación</button>}</div>
         </div>
 
-        {selectedBatchDate ? <SpeechAnalyticsBatchSummary evaluations={batchEvaluations} onDeleteBatch={currentUser.role === 'ADMINISTRADOR' ? batch => { setDeleteBatchError(null); setDeleteBatchTarget({...batch,count:evaluations.filter(item => item.origin === 'SPEECH_ANALYTICS' && item.sourceBatchId === batch.id).length}); } : undefined}/> : <SpeechAnalyticsBatches evaluations={filteredEvaluations} onOpen={setSelectedBatchDate}/>}
+        {selectedBatchDate ? <SpeechAnalyticsBatchSummary evaluations={batchEvaluations} onDeleteBatch={currentUser.role === 'ADMINISTRADOR' ? batch => { setDeleteBatchError(null); setDeleteBatchTarget({...batch,count:evaluations.filter(item => item.origin === 'SPEECH_ANALYTICS' && item.sourceBatchId === batch.id).length}); } : undefined}/> : <SpeechAnalyticsBatches evaluations={filteredEvaluations} campaigns={campaigns} onOpen={setSelectedBatchDate}/>}
 
         {/* Evaluations Table */}
         <div className="bg-white border border-[#E5E8EC] rounded-xl overflow-hidden shadow-2xs">

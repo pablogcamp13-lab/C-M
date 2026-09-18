@@ -3,11 +3,11 @@ import { Check, Filter, RotateCcw, User } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Drawer } from './Drawer';
 
-interface MoreFiltersDrawerProps { isOpen: boolean; onClose: () => void; }
+interface MoreFiltersDrawerProps { isOpen: boolean; onClose: () => void; extraFilters?: React.ReactNode; onResetExtraFilters?: () => void; }
 interface FieldProps { label: string; children: React.ReactNode; icon?: boolean; }
 const Field: React.FC<FieldProps> = ({ label, children, icon }) => <div><label className="cm-filterbar__label mb-1.5 flex items-center gap-1.5 text-xs font-semibold">{icon && <User className="h-3.5 w-3.5" />}{label}</label>{children}</div>;
 
-export const MoreFiltersDrawer: React.FC<MoreFiltersDrawerProps> = ({ isOpen, onClose }) => {
+export const MoreFiltersDrawer: React.FC<MoreFiltersDrawerProps> = ({ isOpen, onClose, extraFilters, onResetExtraFilters }) => {
   const { filters, setFilters, resetFilters, campaigns, companies, operations, users, advisors } = useApp();
   if (!isOpen) return null;
   const supervisors = users.filter(user => user.role === 'SUPERVISOR');
@@ -15,8 +15,9 @@ export const MoreFiltersDrawer: React.FC<MoreFiltersDrawerProps> = ({ isOpen, on
   const visibleAdvisors = advisors.filter(advisor => (!filters.operationId || advisor.operationId === filters.operationId) && (!filters.campaignId || advisor.campaignId === filters.campaignId) && (!filters.supervisorId || advisor.supervisorId === filters.supervisorId));
   const selectClass = 'cm-select px-3 py-2 text-xs';
 
-  return <Drawer size="sm" icon={<Filter />} title="Filtros avanzados" subtitle="Segmentación detallada de evaluaciones" onClose={onClose} footer={<><button onClick={resetFilters} className="cm-button-secondary px-3 py-2 text-xs"><RotateCcw className="h-3.5 w-3.5" />Limpiar filtros</button><button onClick={onClose} className="cm-button-primary px-4 py-2 text-xs"><Check className="h-4 w-4" />Aplicar filtros</button></>}>
+  return <Drawer size="sm" icon={<Filter />} title="Filtros avanzados" subtitle="Segmentación detallada de evaluaciones" onClose={onClose} footer={<><button onClick={() => { resetFilters(); onResetExtraFilters?.(); }} className="cm-button-secondary px-3 py-2 text-xs"><RotateCcw className="h-3.5 w-3.5" />Limpiar filtros</button><button onClick={onClose} className="cm-button-primary px-4 py-2 text-xs"><Check className="h-4 w-4" />Aplicar filtros</button></>}>
       <div className="space-y-4">
+        {extraFilters && <div className="space-y-3 border-b border-[var(--cm-border)] pb-4"><h3 className="text-xs font-bold">Filtros del listado</h3>{extraFilters}</div>}
         <Field label="Empresa"><select value={filters.companyId||''} onChange={event => setFilters(previous => ({ ...previous, companyId:event.target.value, operationId:'', campaignId:'', advisorId:'' }))} className={selectClass}><option value="">Todas las empresas</option>{companies.filter(company=>company.status==='ACTIVA').map(company=><option key={company.id} value={company.id}>{company.name}</option>)}</select></Field>
         <Field label="Operación"><select value={filters.operationId||''} onChange={event => {const operation=operations.find(item=>item.id===event.target.value);setFilters(previous => ({ ...previous, operationId:event.target.value, campaignId:operation?.campaignId||'', advisorId:'' }));}} className={selectClass}><option value="">Todas las operaciones</option>{visibleOperations.map(operation=><option key={operation.id} value={operation.id}>{operation.name}</option>)}</select></Field>
         <Field label="Campaña"><select value={filters.campaignId} onChange={event => setFilters(previous => ({ ...previous, campaignId: event.target.value, advisorId: '' }))} className={selectClass}><option value="">Todas las campañas</option>{campaigns.map(campaign => <option key={campaign.id} value={campaign.id}>{campaign.name} ({campaign.client})</option>)}</select></Field>

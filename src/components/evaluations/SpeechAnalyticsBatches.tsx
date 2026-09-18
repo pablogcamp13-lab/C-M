@@ -1,11 +1,11 @@
 import React, { useMemo } from 'react';
 import { BarChart3, ChevronRight, FileSpreadsheet, Folder, Trash2, Users } from 'lucide-react';
-import type { Evaluation } from '../../types';
+import type { Campaign, Evaluation } from '../../types';
 
 export const batchDate = (item: Evaluation) => item.sourceBatchDate || item.createdAt?.slice(0, 10) || item.date;
 export const displayBatchDate = (value: string) => new Intl.DateTimeFormat('es-PE', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`));
 
-export const SpeechAnalyticsBatches: React.FC<{ evaluations: Evaluation[]; onOpen: (date: string) => void }> = ({ evaluations, onOpen }) => {
+export const SpeechAnalyticsBatches: React.FC<{ evaluations: Evaluation[]; campaigns: Campaign[]; onOpen: (date: string) => void }> = ({ evaluations, campaigns, onOpen }) => {
   const groups = useMemo(() => {
     const byDate = new Map<string, Evaluation[]>();
     evaluations.filter(item => item.origin === 'SPEECH_ANALYTICS').forEach(item => {
@@ -17,7 +17,10 @@ export const SpeechAnalyticsBatches: React.FC<{ evaluations: Evaluation[]; onOpe
   if (!groups.length) return null;
   return <section className="space-y-2" aria-label="Importaciones de Speech Analytics">
     <div className="flex items-center gap-2 px-1"><Folder className="h-4 w-4 text-cyan-500"/><h3 className="text-xs font-bold">Cargas de Speech Analytics</h3><span className="cm-badge">SA</span></div>
-    {groups.map(([date, items]) => <button key={date} type="button" onClick={() => onOpen(date)} className="flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--cm-border)] bg-[var(--cm-surface-elevated)] p-4 text-left hover:border-cyan-500 focus-visible:outline-2 focus-visible:outline-cyan-500"><span className="flex items-center gap-3"><Folder className="h-6 w-6 text-cyan-500"/><span><b className="block text-sm">{displayBatchDate(date)}</b><small className="text-[var(--cm-text-secondary)]">{items.length} evaluaciones · {new Set(items.map(item => item.sourceFileName).filter(Boolean)).size} archivos</small></span></span><ChevronRight className="h-4 w-4 text-cyan-500"/></button>)}
+    {groups.map(([date, items]) => {
+      const campaignNames = [...new Set(items.map(item => item.sourceCampaignName || campaigns.find(campaign => campaign.id === item.campaignId)?.name).filter((name): name is string => Boolean(name)))];
+      return <button key={date} type="button" onClick={() => onOpen(date)} className="flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--cm-border)] bg-[var(--cm-surface-elevated)] p-4 text-left hover:border-cyan-500 focus-visible:outline-2 focus-visible:outline-cyan-500"><span className="flex items-center gap-3"><Folder className="h-6 w-6 text-cyan-500"/><span><b className="block text-sm">{displayBatchDate(date)}</b><small className="block font-semibold text-cyan-400">{campaignNames.join(' · ') || 'Campaña sin identificar'}</small><small className="text-[var(--cm-text-secondary)]">{items.length} evaluaciones · {new Set(items.map(item => item.sourceFileName).filter(Boolean)).size} archivos</small></span></span><ChevronRight className="h-4 w-4 text-cyan-500"/></button>;
+    })}
   </section>;
 };
 
