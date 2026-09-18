@@ -84,6 +84,12 @@ try{
   const created=await api('/api/operations',{token:admin,method:'POST',body:{...body,dryRun:false}});assert.equal(created.response.status,201);assert.equal(created.data.assigned,1);
   const duplicate=await api('/api/operations',{token:admin,method:'POST',body:{...body,dryRun:false}});assert.equal(duplicate.response.status,400);
   const staffing=await api('/api/staffing',{token:admin});assert.equal(staffing.response.status,200);assert.equal(staffing.data.rows.find(row=>row.id==='adv_ops').operation_id,created.data.operationId);
+  const supervisorBefore=await api(`/api/operations/${created.data.operationId}/supervisors`,{token:admin});assert.ok(!supervisorBefore.data.supervisors.some(row=>row.id==='usr_admin'));
+  const editBody={firstName:'Asesor',lastName:'Operación',operationId:created.data.operationId,supervisorId:'usr_admin',effectiveAt:effectiveDate,reason:'Edición individual de asignación.'};
+  assert.equal((await api('/api/staffing/adv_ops/assignment',{token:admin,method:'PATCH',body:{...editBody,supervisorId:'usr_ops_agent'}})).response.status,400,'An advisor account cannot be selected as supervisor');
+  const edited=await api('/api/staffing/adv_ops/assignment',{token:admin,method:'PATCH',body:editBody});assert.equal(edited.response.status,200,JSON.stringify(edited.data));
+  const supervisorAfter=await api(`/api/operations/${created.data.operationId}/supervisors`,{token:admin});assert.ok(supervisorAfter.data.supervisors.some(row=>row.id==='usr_admin'),'Editing links the selected active supervisor');
+  const updatedStaffing=await api('/api/staffing',{token:admin});assert.equal(updatedStaffing.data.rows.find(row=>row.id==='adv_ops').supervisor_id,'usr_admin');
   const history=await api('/api/staffing/movements',{token:admin});assert.equal(history.response.status,200);assert.ok(history.data.rows.some(row=>row.destination.operationId===created.data.operationId));
   const agentLogin=await api('/api/auth/login',{method:'POST',body:{identity:'ops.agent',password:'Agent-test-2026'}});assert.equal(agentLogin.response.status,200);const denied=await api('/api/staffing',{token:agentLogin.data.token});assert.equal(denied.response.status,403);
   console.log('Operación y Dotación: creación, dry-run, movimiento, historial, unicidad y RBAC correctos.');
