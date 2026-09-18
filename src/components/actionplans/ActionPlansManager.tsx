@@ -5,6 +5,7 @@ import { ActionPlan, ActionPlanAdvisorMetric, ActionPlanStatus } from '../../typ
 import { CRITERIA_DEFINITIONS } from '../../data/criteriaData';
 import { FiltersBar } from '../common/FiltersBar';
 import { StatusBadge } from '../common/StatusBadge';
+import { ActionPlanProgressModal } from './ActionPlanProgressModal';
 import { 
   ListTodo, 
   Plus, 
@@ -45,6 +46,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [isNewModalOpen, setIsNewModalOpen] = useState<boolean>(!!initialEvaluationForPlan);
   const [selectedPlanForEdit, setSelectedPlanForEdit] = useState<ActionPlan | null>(null);
+  const [progressPlan, setProgressPlan] = useState<ActionPlan | null>(null);
   const [requestState, setRequestState] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -318,7 +320,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                           <p className="text-[11px] text-[#667085] bg-white p-2 rounded border border-[#E5E8EC]/80 italic">
                             "{plan.action}"
                           </p>
-                          <div className="flex gap-3"><button type="button" onClick={() => openMetricsEdit(plan)} className="text-[11px] font-semibold text-[#007EA8] hover:underline text-left">Ver SPH y seguimiento</button>{isAdmin && <button type="button" onClick={() => openAdminEdit(plan)} className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#FF6B00] hover:underline"><Pencil className="h-3 w-3" />Editar todo</button>}</div>
+                          <div className="flex flex-wrap gap-3"><button type="button" onClick={() => setProgressPlan(plan)} className="text-[11px] font-semibold text-[#007EA8] hover:underline text-left">Ver avance</button><button type="button" onClick={() => openMetricsEdit(plan)} className="text-[11px] font-semibold text-[#007EA8] hover:underline text-left">Ver SPH y seguimiento</button>{isAdmin && <button type="button" onClick={() => openAdminEdit(plan)} className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#FF6B00] hover:underline"><Pencil className="h-3 w-3" />Editar todo</button>}</div>
 
                           <div className="pt-2 border-t border-[#E5E8EC] flex items-center justify-between text-[10px] text-[#667085]">
                             <div className="flex items-center gap-1">
@@ -413,6 +415,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                         <StatusBadge status={plan.status} size="sm" />
                       </td>
                       <td className="py-3 px-4 text-right">
+                        <button type="button" onClick={() => setProgressPlan(plan)} className="mr-2 text-[#007EA8] hover:underline">Ver avance</button>
                         <button type="button" onClick={() => openMetricsEdit(plan)} className="mr-2 text-[#007EA8] hover:underline">SPH</button>
                         {isAdmin && <button type="button" onClick={() => openAdminEdit(plan)} className="mr-2 inline-flex items-center gap-1 text-[#FF6B00] hover:underline"><Pencil className="h-3 w-3" />Editar todo</button>}
                         {!isAdvisor && <button
@@ -571,6 +574,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
       </form></div></div>, document.body)}
 
       {selectedPlanForEdit && createPortal(<div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#031E3C]/60 p-4 backdrop-blur-xs"><div className="cm-modal max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5"><div className="flex justify-between items-center border-b border-[#E5E8EC] pb-3"><h3 className="font-bold text-[#031E3C]">SPH y observaciones · {planIds(selectedPlanForEdit).length} asesor(es)</h3><button onClick={() => setSelectedPlanForEdit(null)} aria-label="Cerrar"><X className="w-5 h-5" /></button></div><p className="text-xs text-[#667085] my-3">{selectedPlanForEdit.objective}</p><form onSubmit={handleSaveMetrics} className="space-y-3 text-xs">{editMetrics.length ? metricFields(editMetrics, setEditMetrics, isAdvisor) : <p className="text-[#667085]">Este plan anterior no tiene SPH registrado.</p>}{!isAdvisor && editMetrics.length > 0 && <div className="flex justify-end"><button disabled={saving} type="submit" className="rounded-lg bg-[#FF6B00] px-4 py-2 font-semibold text-white">{saving ? 'Guardando…' : 'Guardar seguimiento'}</button></div>}</form></div></div>, document.body)}
+      {progressPlan && <ActionPlanProgressModal plan={actionPlans.find(plan => plan.id === progressPlan.id) || progressPlan} advisors={advisors} onlyAdvisorId={isAdvisor ? currentUser.advisorId : undefined} onClose={() => setProgressPlan(null)} />}
 
     </div>
   );
