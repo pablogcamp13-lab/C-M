@@ -304,9 +304,18 @@ export interface Evaluation {
 
 export type ActionPlanStatus = 'PENDIENTE' | 'EN_CURSO' | 'COMPLETADO' | 'VENCIDO';
 
+export interface ActionPlanAdvisorMetric {
+  advisorId: string;
+  sphInitial: number | null;
+  sphUpdated: number | null;
+  observations: string;
+}
+
 export interface ActionPlan {
   id: string;
   advisorId: string;
+  advisorIds?: string[];
+  advisorMetrics?: ActionPlanAdvisorMetric[];
   evaluationId?: string;
   criterionId: string;
   dimension?: DimensionId;

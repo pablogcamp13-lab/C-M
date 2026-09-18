@@ -115,7 +115,7 @@ export const AdvisorProfileModal: React.FC<AdvisorProfileModalProps> = ({
     .filter(e => e.advisorId === advisor.id)
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  const advisorPlans = actionPlans.filter(p => p.advisorId === advisor.id);
+  const advisorPlans = actionPlans.filter(p => (p.advisorIds?.length ? p.advisorIds : [p.advisorId]).includes(advisor.id));
 
   // Latest evaluation
   const latestEval = advisorEvals[advisorEvals.length - 1];

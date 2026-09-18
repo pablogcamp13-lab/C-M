@@ -13,7 +13,7 @@ export const Sidebar: React.FC = () => {
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigation = navigationForRole(currentUser.role);
   const groups = Array.from(new Set(navigation.map(item => item.group)));
-  const badgeFor = (section: string) => section === 'evaluations' ? filteredEvaluations.length : section === 'action_plans' ? actionPlans.filter(plan => (currentUser.role !== 'ASESOR' || Boolean(currentUser.advisorId) && plan.advisorId === currentUser.advisorId) && (plan.status === 'EN_CURSO' || plan.status === 'PENDIENTE')).length : undefined;
+  const badgeFor = (section: string) => section === 'evaluations' ? filteredEvaluations.length : section === 'action_plans' ? actionPlans.filter(plan => (currentUser.role !== 'ASESOR' || Boolean(currentUser.advisorId) && (plan.advisorIds?.length ? plan.advisorIds : [plan.advisorId]).includes(currentUser.advisorId!)) && (plan.status === 'EN_CURSO' || plan.status === 'PENDIENTE')).length : undefined;
 
   const scheduleHide = useCallback(() => {
     if (hideTimer.current) clearTimeout(hideTimer.current);

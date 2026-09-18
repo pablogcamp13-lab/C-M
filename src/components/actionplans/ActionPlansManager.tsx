@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp } from '../../context/AppContext';
-import { ActionPlan, ActionPlanStatus } from '../../types';
+import { ActionPlan, ActionPlanAdvisorMetric, ActionPlanStatus } from '../../types';
 import { CRITERIA_DEFINITIONS } from '../../data/criteriaData';
 import { FiltersBar } from '../common/FiltersBar';
 import { StatusBadge } from '../common/StatusBadge';
@@ -47,7 +47,9 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
   const [saving, setSaving] = useState(false);
 
   // New Plan form state
-  const [advisorId, setAdvisorId] = useState<string>(initialEvaluationForPlan?.advisorId || advisors[0]?.id || '');
+  const [advisorMetrics, setAdvisorMetrics] = useState<ActionPlanAdvisorMetric[]>(initialEvaluationForPlan?.advisorId ? [{ advisorId: initialEvaluationForPlan.advisorId, sphInitial: null, sphUpdated: null, observations: '' }] : []);
+  const [advisorSearch, setAdvisorSearch] = useState('');
+  const [editMetrics, setEditMetrics] = useState<ActionPlanAdvisorMetric[]>([]);
   const [criterionId, setCriterionId] = useState<string>(
     initialEvaluationForPlan ? CRITERIA_DEFINITIONS.find(c => c.name.toLowerCase().includes(initialEvaluationForPlan.primaryGap.toLowerCase().substring(0, 5)))?.id || 'crit_1_1' : 'crit_1_1'
   );
@@ -64,18 +66,33 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
   });
   const [notes, setNotes] = useState<string>('');
 
+  const anchorAdvisor = advisors.find(a => a.id === advisorMetrics[0]?.advisorId);
+  const eligibleAdvisors = advisors.filter(a => a.status === 'ACTIVO' && (!anchorAdvisor || (a.campaignId === anchorAdvisor.campaignId && a.operationId === anchorAdvisor.operationId && a.supervisorId === anchorAdvisor.supervisorId)));
+  const planIds = (plan: ActionPlan) => plan.advisorIds?.length ? plan.advisorIds : [plan.advisorId];
+  const planLabel = (plan: ActionPlan) => planIds(plan).map(id => advisors.find(a => a.id === id)?.name || 'Asesor').join(', ');
+  const metricFields = (rows: ActionPlanAdvisorMetric[], setRows: React.Dispatch<React.SetStateAction<ActionPlanAdvisorMetric[]>>, readOnly = false) => rows.map((row, index) => (
+    <div key={row.advisorId} className="rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] p-3 space-y-2">
+      <div className="font-semibold text-[#031E3C]">{advisors.find(a => a.id === row.advisorId)?.name || 'Asesor'}</div>
+      <div className="grid grid-cols-2 gap-2">
+        <label>SPH inicial<input type="number" min="0" step="any" required={!readOnly} disabled={readOnly} value={row.sphInitial ?? ''} onChange={e => setRows(prev => prev.map((item, i) => i === index ? { ...item, sphInitial: e.target.value === '' ? null : Number(e.target.value) } : item))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-white px-3 py-2" /></label>
+        <label>SPH actualizado<input type="number" min="0" step="any" disabled={readOnly} value={row.sphUpdated ?? ''} onChange={e => setRows(prev => prev.map((item, i) => i === index ? { ...item, sphUpdated: e.target.value === '' ? null : Number(e.target.value) } : item))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-white px-3 py-2" /></label>
+      </div>
+      <label className="block">Observaciones<textarea rows={2} disabled={readOnly} value={row.observations} onChange={e => setRows(prev => prev.map((item, i) => i === index ? { ...item, observations: e.target.value } : item))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-white px-3 py-2" /></label>
+    </div>
+  ));
+
   const filteredPlans = actionPlans.filter(p => {
-    if (isAdvisor && p.advisorId !== currentUser.advisorId) return false;
+    if (isAdvisor && !planIds(p).includes(currentUser.advisorId || '')) return false;
     if (filterStatus && p.status !== filterStatus) return false;
     return true;
   });
 
   const handleCreatePlan = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!advisorId || !objective.trim() || !action.trim()) return;
+    if (!advisorMetrics.length || advisorMetrics.some(row => row.sphInitial === null || !Number.isFinite(row.sphInitial) || row.sphInitial < 0) || !objective.trim() || !action.trim()) { setRequestState({ type: 'error', text: 'Selecciona asesores y registra el SPH inicial de cada uno.' }); return; }
     setSaving(true); setRequestState(null);
     try {
-      await addActionPlan({ advisorId, evaluationId: initialEvaluationForPlan?.id, criterionId, objective: objective.trim(), action: action.trim(), targetDate, followUpDate, responsibleId, status: 'PENDIENTE', notes });
+      await addActionPlan({ advisorId: advisorMetrics[0].advisorId, advisorIds: advisorMetrics.map(row => row.advisorId), advisorMetrics, evaluationId: initialEvaluationForPlan?.id, criterionId, objective: objective.trim(), action: action.trim(), targetDate, followUpDate, responsibleId, status: 'PENDIENTE', notes });
       setIsNewModalOpen(false); setRequestState({ type: 'success', text: 'Plan de acción guardado correctamente.' });
       if (onClearInitialEvaluation) onClearInitialEvaluation();
     } catch (error) { setRequestState({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible guardar el plan.' }); }
@@ -86,6 +103,18 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
     setRequestState(null);
     try { await updateActionPlan(planId, { status }); setRequestState({ type: 'success', text: 'Estado actualizado.' }); }
     catch (error) { setRequestState({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible actualizar el plan.' }); }
+  };
+
+  const handleSaveMetrics = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPlanForEdit) return;
+    setSaving(true); setRequestState(null);
+    try {
+      await updateActionPlan(selectedPlanForEdit.id, { advisorMetrics: editMetrics });
+      setSelectedPlanForEdit(null);
+      setRequestState({ type: 'success', text: 'SPH y observaciones guardados.' });
+    } catch (error) { setRequestState({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible actualizar el plan.' }); }
+    finally { setSaving(false); }
   };
 
   const handleDelete = async (planId: string) => {
@@ -194,7 +223,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                         >
                           <div className="flex items-start justify-between gap-1">
                             <p className="font-bold text-xs text-[#031E3C]">
-                              {advisor?.name || 'Asesor'}
+                              {planIds(plan).length > 1 ? `${planIds(plan).length} asesores` : advisor?.name || 'Asesor'}
                             </p>
                             <span className="text-[9px] font-semibold text-[#667085] bg-white px-1.5 py-0.5 rounded border border-[#E5E8EC]">
                               {crit?.dimension || '3C'}
@@ -208,6 +237,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                           <p className="text-[11px] text-[#667085] bg-white p-2 rounded border border-[#E5E8EC]/80 italic">
                             "{plan.action}"
                           </p>
+                          <button type="button" onClick={() => { setSelectedPlanForEdit(plan); setEditMetrics(plan.advisorMetrics || planIds(plan).map(advisorId => ({ advisorId, sphInitial: null, sphUpdated: null, observations: '' }))); }} className="text-[11px] font-semibold text-[#007EA8] hover:underline text-left">Ver SPH y observaciones</button>
 
                           <div className="pt-2 border-t border-[#E5E8EC] flex items-center justify-between text-[10px] text-[#667085]">
                             <div className="flex items-center gap-1">
@@ -219,7 +249,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
 
                           {/* Quick Status Action Buttons */}
                           <div className="pt-2 flex items-center justify-end gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-                            {plan.status !== 'EN_CURSO' && plan.status !== 'COMPLETADO' && (
+                            {(!isAdvisor || planIds(plan).length === 1) && plan.status !== 'EN_CURSO' && plan.status !== 'COMPLETADO' && (
                               <button
                                 onClick={() => handleUpdateStatus(plan.id, 'EN_CURSO')}
                                 className="text-[10px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded transition-colors"
@@ -228,7 +258,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                               </button>
                             )}
 
-                            {plan.status !== 'COMPLETADO' && (
+                            {(!isAdvisor || planIds(plan).length === 1) && plan.status !== 'COMPLETADO' && (
                               <button
                                 onClick={() => handleUpdateStatus(plan.id, 'COMPLETADO')}
                                 className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded transition-colors"
@@ -284,7 +314,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                   return (
                     <tr key={plan.id} className="hover:bg-[#F6F7F9]/80 transition-colors">
                       <td className="py-3 px-4 font-semibold text-[#031E3C]">
-                        {advisor?.name || 'Asesor'}
+                        {planIds(plan).length > 1 ? `${planIds(plan).length} asesores: ${planLabel(plan)}` : advisor?.name || 'Asesor'}
                       </td>
                       <td className="py-3 px-3 text-[#031E3C] max-w-xs truncate">
                         {plan.objective}
@@ -302,6 +332,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                         <StatusBadge status={plan.status} size="sm" />
                       </td>
                       <td className="py-3 px-4 text-right">
+                        <button type="button" onClick={() => { setSelectedPlanForEdit(plan); setEditMetrics(plan.advisorMetrics || planIds(plan).map(advisorId => ({ advisorId, sphInitial: null, sphUpdated: null, observations: '' }))); }} className="mr-2 text-[#007EA8] hover:underline">SPH</button>
                         {!isAdvisor && <button
                           onClick={() => void handleDelete(plan.id)}
                           className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors"
@@ -322,7 +353,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
       {/* New Plan Modal */}
       {isNewModalOpen && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#031E3C]/60 p-4 backdrop-blur-xs">
-          <div className="cm-modal max-w-md w-full p-5 animate-in fade-in zoom-in-95">
+          <div className="cm-modal max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5 animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between pb-3 border-b border-[#E5E8EC]">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-lg bg-[#FF6B00]/10 text-[#FF6B00] flex items-center justify-center">
@@ -345,18 +376,14 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
 
             <form onSubmit={handleCreatePlan} className="space-y-4 pt-4 text-xs">
               <div>
-                <label className="block font-semibold text-[#031E3C] mb-1">Asesor</label>
-                <select
-                  value={advisorId}
-                  onChange={(e) => setAdvisorId(e.target.value)}
-                  className="w-full bg-[#F6F7F9] border border-[#E5E8EC] text-[#031E3C] rounded-lg px-3 py-2 focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#FF6B00]"
-                  required
-                >
-                  {advisors.map(a => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
+                <label className="block font-semibold text-[#031E3C] mb-1">Grupo de asesores</label>
+                <input type="search" value={advisorSearch} onChange={e => setAdvisorSearch(e.target.value)} placeholder="Buscar asesor" className="w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2" />
+                <div className="mt-2 max-h-36 overflow-y-auto rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] p-2 space-y-1">
+                  {eligibleAdvisors.filter(a => a.name.toLowerCase().includes(advisorSearch.toLowerCase())).map(a => <label key={a.id} className="flex items-center gap-2 p-1"><input type="checkbox" checked={advisorMetrics.some(row => row.advisorId === a.id)} disabled={a.id === initialEvaluationForPlan?.advisorId} onChange={e => setAdvisorMetrics(prev => e.target.checked ? [...prev, { advisorId: a.id, sphInitial: null, sphUpdated: null, observations: '' }] : prev.filter(row => row.advisorId !== a.id))} />{a.name}</label>)}
+                </div>
+                <p className="mt-1 text-[#667085]">El grupo debe compartir campaña, operación y supervisor.</p>
               </div>
+              {advisorMetrics.length > 0 && <div className="space-y-2"><p className="font-semibold text-[#031E3C]">Seguimiento por asesor</p>{metricFields(advisorMetrics, setAdvisorMetrics)}</div>}
 
               <div>
                 <label className="block font-semibold text-[#031E3C] mb-1">Criterio 3C a Trabajar</label>
@@ -421,6 +448,8 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                 </div>
               </div>
 
+              <label className="block font-semibold text-[#031E3C]">Observaciones generales<textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2" /></label>
+
               <div className="pt-3 border-t border-[#E5E8EC] flex items-center justify-end gap-2">
                 <button
                   type="button"
@@ -441,6 +470,8 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
           </div>
         </div>, document.body
       )}
+
+      {selectedPlanForEdit && createPortal(<div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#031E3C]/60 p-4 backdrop-blur-xs"><div className="cm-modal max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5"><div className="flex justify-between items-center border-b border-[#E5E8EC] pb-3"><h3 className="font-bold text-[#031E3C]">SPH y observaciones · {planIds(selectedPlanForEdit).length} asesor(es)</h3><button onClick={() => setSelectedPlanForEdit(null)} aria-label="Cerrar"><X className="w-5 h-5" /></button></div><p className="text-xs text-[#667085] my-3">{selectedPlanForEdit.objective}</p><form onSubmit={handleSaveMetrics} className="space-y-3 text-xs">{editMetrics.length ? metricFields(editMetrics, setEditMetrics, isAdvisor) : <p className="text-[#667085]">Este plan anterior no tiene SPH registrado.</p>}{!isAdvisor && editMetrics.length > 0 && <div className="flex justify-end"><button disabled={saving} type="submit" className="rounded-lg bg-[#FF6B00] px-4 py-2 font-semibold text-white">{saving ? 'Guardando…' : 'Guardar seguimiento'}</button></div>}</form></div></div>, document.body)}
 
     </div>
   );

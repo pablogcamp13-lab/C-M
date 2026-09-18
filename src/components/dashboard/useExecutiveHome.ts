@@ -94,7 +94,7 @@ export const useExecutiveHome = (mode: ExecutiveMode, originFilter: EvaluationOr
     const filteredAdvisorIds = new Set(filteredAdvisors.map(advisor => advisor.id));
     const filteredEvaluationIds = new Set(scopedEvaluations.map(evaluation => evaluation.id));
     const scopedPlans = actionPlans.filter(plan => {
-      if (!filteredAdvisorIds.has(plan.advisorId)) return false;
+      if (!(plan.advisorIds?.length ? plan.advisorIds : [plan.advisorId]).some(id => filteredAdvisorIds.has(id))) return false;
       if (plan.evaluationId && !filteredEvaluationIds.has(plan.evaluationId)) return false;
       const planDate = plan.createdDate || plan.targetDate || plan.dueDate;
       if (planDate && filters.dateFrom && planDate < filters.dateFrom) return false;
@@ -199,7 +199,7 @@ export const useExecutiveHome = (mode: ExecutiveMode, originFilter: EvaluationOr
 
     const planPriority: Record<ActionPlan['status'], number> = { VENCIDO: 0, PENDIENTE: 1, EN_CURSO: 2, COMPLETADO: 3 };
     const planGroups = new Map<string, ActionPlan[]>();
-    pendingPlans.forEach(plan => planGroups.set(plan.advisorId, [...(planGroups.get(plan.advisorId) || []), plan]));
+    pendingPlans.forEach(plan => (plan.advisorIds?.length ? plan.advisorIds : [plan.advisorId]).filter(id => filteredAdvisorIds.has(id)).forEach(id => planGroups.set(id, [...(planGroups.get(id) || []), plan])));
     const pendingAdvisors: PendingAdvisor[] = [...planGroups.entries()].map(([id, plans]) => {
       const status = [...plans].sort((a, b) => planPriority[a.status] - planPriority[b.status])[0].status;
       const reason = status === 'VENCIDO' ? 'Plan de acción vencido' : status === 'PENDIENTE' ? 'Plan de acción pendiente' : 'Plan de acción en curso';
