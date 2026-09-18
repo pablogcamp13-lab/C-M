@@ -15,6 +15,7 @@ import {
   User, 
   X, 
   Save, 
+  Pencil,
   Trash2, 
   LayoutGrid,
   List,
@@ -36,6 +37,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
 }) => {
   const { actionPlans, advisors, users, currentUser, addActionPlan, updateActionPlan, deleteActionPlan } = useApp();
   const isAdvisor = currentUser.role === 'ASESOR';
+  const isAdmin = currentUser.role === 'ADMINISTRADOR';
 
   const leaders = useMemo(() => users.filter(u => u.role !== 'ASESOR'), [users]);
 
@@ -50,6 +52,9 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
   const [advisorMetrics, setAdvisorMetrics] = useState<ActionPlanAdvisorMetric[]>(initialEvaluationForPlan?.advisorId ? [{ advisorId: initialEvaluationForPlan.advisorId, sphInitial: null, sphUpdated: null, sphRetraining: null, followUpType: 'SEGUIMIENTO_FEEDBACK', observations: '' }] : []);
   const [advisorSearch, setAdvisorSearch] = useState('');
   const [editMetrics, setEditMetrics] = useState<ActionPlanAdvisorMetric[]>([]);
+  const [adminEditPlan, setAdminEditPlan] = useState<ActionPlan | null>(null);
+  const [adminEditAdvisorIds, setAdminEditAdvisorIds] = useState<string[]>([]);
+  const [adminEditMetrics, setAdminEditMetrics] = useState<ActionPlanAdvisorMetric[]>([]);
   const [criterionId, setCriterionId] = useState<string>(
     initialEvaluationForPlan ? CRITERIA_DEFINITIONS.find(c => c.name.toLowerCase().includes(initialEvaluationForPlan.primaryGap.toLowerCase().substring(0, 5)))?.id || 'crit_1_1' : 'crit_1_1'
   );
@@ -68,8 +73,16 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
 
   const anchorAdvisor = advisors.find(a => a.id === advisorMetrics[0]?.advisorId);
   const eligibleAdvisors = advisors.filter(a => a.status === 'ACTIVO' && (!anchorAdvisor || (a.campaignId === anchorAdvisor.campaignId && a.operationId === anchorAdvisor.operationId && a.supervisorId === anchorAdvisor.supervisorId)));
+  const adminAnchor = advisors.find(a => a.id === adminEditAdvisorIds[0]);
+  const adminEligibleAdvisors = advisors.filter(a => a.status === 'ACTIVO' && (!adminAnchor || (a.campaignId === adminAnchor.campaignId && a.operationId === adminAnchor.operationId && a.supervisorId === adminAnchor.supervisorId)));
   const planIds = (plan: ActionPlan) => plan.advisorIds?.length ? plan.advisorIds : [plan.advisorId];
   const planLabel = (plan: ActionPlan) => planIds(plan).map(id => advisors.find(a => a.id === id)?.name || 'Asesor').join(', ');
+  const openAdminEdit = (plan: ActionPlan) => {
+    const ids = planIds(plan);
+    setAdminEditPlan(plan);
+    setAdminEditAdvisorIds(ids);
+    setAdminEditMetrics(plan.advisorMetrics || ids.map(advisorId => ({ advisorId, sphInitial: null, sphUpdated: null, sphRetraining: null, followUpType: 'SEGUIMIENTO_FEEDBACK', observations: '' })));
+  };
   const metricFields = (rows: ActionPlanAdvisorMetric[], setRows: React.Dispatch<React.SetStateAction<ActionPlanAdvisorMetric[]>>, readOnly = false) => rows.map((row, index) => (
     <div key={row.advisorId} className="rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] p-3 space-y-2">
       <div className="font-semibold text-[#031E3C]">{advisors.find(a => a.id === row.advisorId)?.name || 'Asesor'}</div>
@@ -115,6 +128,23 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
       await updateActionPlan(selectedPlanForEdit.id, { advisorMetrics: editMetrics });
       setSelectedPlanForEdit(null);
       setRequestState({ type: 'success', text: 'SPH y observaciones guardados.' });
+    } catch (error) { setRequestState({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible actualizar el plan.' }); }
+    finally { setSaving(false); }
+  };
+
+  const handleSaveAdminPlan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminEditPlan || !adminEditAdvisorIds.length) return;
+    setSaving(true); setRequestState(null);
+    try {
+      await updateActionPlan(adminEditPlan.id, {
+        ...adminEditPlan,
+        advisorId: adminEditAdvisorIds[0],
+        advisorIds: adminEditAdvisorIds,
+        advisorMetrics: adminEditMetrics.map(row => ({ ...row, advisorId: row.advisorId })).filter(row => adminEditAdvisorIds.includes(row.advisorId)),
+      });
+      setAdminEditPlan(null);
+      setRequestState({ type: 'success', text: 'Plan actualizado correctamente.' });
     } catch (error) { setRequestState({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible actualizar el plan.' }); }
     finally { setSaving(false); }
   };
@@ -239,7 +269,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                           <p className="text-[11px] text-[#667085] bg-white p-2 rounded border border-[#E5E8EC]/80 italic">
                             "{plan.action}"
                           </p>
-                          <button type="button" onClick={() => { setSelectedPlanForEdit(plan); setEditMetrics(plan.advisorMetrics || planIds(plan).map(advisorId => ({ advisorId, sphInitial: null, sphUpdated: null, sphRetraining: null, followUpType: 'SEGUIMIENTO_FEEDBACK', observations: '' }))); }} className="text-[11px] font-semibold text-[#007EA8] hover:underline text-left">Ver SPH y seguimiento</button>
+                          <div className="flex gap-3"><button type="button" onClick={() => { setSelectedPlanForEdit(plan); setEditMetrics(plan.advisorMetrics || planIds(plan).map(advisorId => ({ advisorId, sphInitial: null, sphUpdated: null, sphRetraining: null, followUpType: 'SEGUIMIENTO_FEEDBACK', observations: '' }))); }} className="text-[11px] font-semibold text-[#007EA8] hover:underline text-left">Ver SPH y seguimiento</button>{isAdmin && <button type="button" onClick={() => openAdminEdit(plan)} className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#FF6B00] hover:underline"><Pencil className="h-3 w-3" />Editar todo</button>}</div>
 
                           <div className="pt-2 border-t border-[#E5E8EC] flex items-center justify-between text-[10px] text-[#667085]">
                             <div className="flex items-center gap-1">
@@ -335,6 +365,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                       </td>
                       <td className="py-3 px-4 text-right">
                         <button type="button" onClick={() => { setSelectedPlanForEdit(plan); setEditMetrics(plan.advisorMetrics || planIds(plan).map(advisorId => ({ advisorId, sphInitial: null, sphUpdated: null, sphRetraining: null, followUpType: 'SEGUIMIENTO_FEEDBACK', observations: '' }))); }} className="mr-2 text-[#007EA8] hover:underline">SPH</button>
+                        {isAdmin && <button type="button" onClick={() => openAdminEdit(plan)} className="mr-2 inline-flex items-center gap-1 text-[#FF6B00] hover:underline"><Pencil className="h-3 w-3" />Editar todo</button>}
                         {!isAdvisor && <button
                           onClick={() => void handleDelete(plan.id)}
                           className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors"
@@ -472,6 +503,21 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
           </div>
         </div>, document.body
       )}
+
+      {adminEditPlan && isAdmin && createPortal(<div className="fixed inset-0 z-[110] flex items-center justify-center bg-[#031E3C]/60 p-4 backdrop-blur-xs"><div className="cm-modal max-w-3xl w-full max-h-[92vh] overflow-y-auto p-5"><div className="flex justify-between items-center border-b border-[#E5E8EC] pb-3"><div><p className="text-[10px] font-bold uppercase text-[#FF6B00]">Administración</p><h3 className="font-bold text-[#031E3C]">Editar plan de acción completo</h3></div><button type="button" onClick={() => setAdminEditPlan(null)} aria-label="Cerrar"><X className="w-5 h-5" /></button></div><form onSubmit={handleSaveAdminPlan} className="space-y-3 pt-4 text-xs">
+        <div><label className="block font-semibold text-[#031E3C]">Grupo de asesores</label><div className="mt-1 max-h-28 overflow-y-auto rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] p-2">{adminEligibleAdvisors.map(a => <label key={a.id} className="flex items-center gap-2 p-1"><input type="checkbox" checked={adminEditAdvisorIds.includes(a.id)} onChange={e => { setAdminEditAdvisorIds(ids => e.target.checked ? [...ids, a.id] : ids.filter(id => id !== a.id)); setAdminEditMetrics(rows => e.target.checked ? [...rows, { advisorId: a.id, sphInitial: null, sphUpdated: null, sphRetraining: null, followUpType: 'SEGUIMIENTO_FEEDBACK', observations: '' }] : rows.filter(row => row.advisorId !== a.id)); }} />{a.name}</label>)}</div></div>
+        <div><label className="block font-semibold text-[#031E3C]">Criterio 3C</label><select value={adminEditPlan.criterionId || ''} onChange={e => setAdminEditPlan(prev => prev && ({ ...prev, criterionId: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2">{CRITERIA_DEFINITIONS.map(c => <option key={c.id} value={c.id}>[{c.dimension}] {c.name}</option>)}</select></div>
+        <label className="block font-semibold text-[#031E3C]">Objetivo<input value={adminEditPlan.objective || ''} onChange={e => setAdminEditPlan(prev => prev && ({ ...prev, objective: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2" /></label>
+        <label className="block font-semibold text-[#031E3C]">Acción / Intervención<textarea rows={3} value={adminEditPlan.action || ''} onChange={e => setAdminEditPlan(prev => prev && ({ ...prev, action: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2" /></label>
+        <div className="grid grid-cols-2 gap-2"><label className="font-semibold text-[#031E3C]">Fecha meta<input type="date" value={adminEditPlan.targetDate || ''} onChange={e => setAdminEditPlan(prev => prev && ({ ...prev, targetDate: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2" /></label><label className="font-semibold text-[#031E3C]">Fecha de seguimiento<input type="date" value={adminEditPlan.followUpDate || ''} onChange={e => setAdminEditPlan(prev => prev && ({ ...prev, followUpDate: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2" /></label><label className="font-semibold text-[#031E3C]">Fecha límite<input type="date" value={adminEditPlan.dueDate || ''} onChange={e => setAdminEditPlan(prev => prev && ({ ...prev, dueDate: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2" /></label><label className="font-semibold text-[#031E3C]">Fecha completado<input type="date" value={adminEditPlan.completedDate || ''} onChange={e => setAdminEditPlan(prev => prev && ({ ...prev, completedDate: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2" /></label></div>
+        <div className="grid grid-cols-2 gap-2"><label className="font-semibold text-[#031E3C]">Responsable<select value={adminEditPlan.responsibleId || ''} onChange={e => setAdminEditPlan(prev => prev && ({ ...prev, responsibleId: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2">{leaders.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}</select></label><label className="font-semibold text-[#031E3C]">Estado<select value={adminEditPlan.status} onChange={e => setAdminEditPlan(prev => prev && ({ ...prev, status: e.target.value as ActionPlanStatus }))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2">{statusColumns.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}</select></label></div>
+        {adminEditMetrics.length > 0 && <div className="space-y-2"><p className="font-semibold text-[#031E3C]">SPH y seguimiento por asesor</p>{metricFields(adminEditMetrics, setAdminEditMetrics)}</div>}
+        <label className="block font-semibold text-[#031E3C]">Observaciones generales<textarea rows={2} value={adminEditPlan.notes || ''} onChange={e => setAdminEditPlan(prev => prev && ({ ...prev, notes: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2" /></label>
+        <label className="block font-semibold text-[#031E3C]">Comentarios<textarea rows={2} value={adminEditPlan.comments || ''} onChange={e => setAdminEditPlan(prev => prev && ({ ...prev, comments: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2" /></label>
+        <label className="block font-semibold text-[#031E3C]">Evidencia<textarea rows={2} value={adminEditPlan.evidence || ''} onChange={e => setAdminEditPlan(prev => prev && ({ ...prev, evidence: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2" /></label>
+        <label className="block font-semibold text-[#031E3C]">Resultado<textarea rows={2} value={adminEditPlan.result || ''} onChange={e => setAdminEditPlan(prev => prev && ({ ...prev, result: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2" /></label>
+        <div className="flex justify-end gap-2 border-t border-[#E5E8EC] pt-3"><button type="button" onClick={() => setAdminEditPlan(null)} className="px-3 py-2 font-semibold text-[#667085]">Cancelar</button><button disabled={saving || !adminEditAdvisorIds.length} type="submit" className="rounded-lg bg-[#FF6B00] px-4 py-2 font-semibold text-white">{saving ? 'Guardando…' : 'Guardar cambios'}</button></div>
+      </form></div></div>, document.body)}
 
       {selectedPlanForEdit && createPortal(<div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#031E3C]/60 p-4 backdrop-blur-xs"><div className="cm-modal max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5"><div className="flex justify-between items-center border-b border-[#E5E8EC] pb-3"><h3 className="font-bold text-[#031E3C]">SPH y observaciones · {planIds(selectedPlanForEdit).length} asesor(es)</h3><button onClick={() => setSelectedPlanForEdit(null)} aria-label="Cerrar"><X className="w-5 h-5" /></button></div><p className="text-xs text-[#667085] my-3">{selectedPlanForEdit.objective}</p><form onSubmit={handleSaveMetrics} className="space-y-3 text-xs">{editMetrics.length ? metricFields(editMetrics, setEditMetrics, isAdvisor) : <p className="text-[#667085]">Este plan anterior no tiene SPH registrado.</p>}{!isAdvisor && editMetrics.length > 0 && <div className="flex justify-end"><button disabled={saving} type="submit" className="rounded-lg bg-[#FF6B00] px-4 py-2 font-semibold text-white">{saving ? 'Guardando…' : 'Guardar seguimiento'}</button></div>}</form></div></div>, document.body)}
 
