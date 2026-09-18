@@ -112,6 +112,32 @@ export function registerOperationsModule({app,db,requireAuth,repository,sync}:De
   };
   const syncResult = async (res:express.Response,payload:any,status=200) => { try{await sync();return res.status(status).json(payload);}catch(error:any){return res.status(502).json({error:'La operación no pudo consolidarse en el repositorio principal.',code:'PRIMARY_STORAGE_SYNC_FAILED',result:payload});} };
 
+  app.post('/api/staffing/advisors',requireAuth,async(req,res)=>{
+    const user=guardWrite(req,res);if(!user)return;
+    const b=req.body||{},name=String(b.name||'').trim(),dni=cleanDni(b.dni),companyId=String(b.companyId||''),operationId=String(b.operationId||''),campaignId=String(b.campaignId||''),supervisorId=String(b.supervisorId||''),teamId=String(b.teamId||'')||null;
+    if(name.length<3)return res.status(400).json({error:'El nombre completo es obligatorio.'});
+    if(!/^\d{8}$/.test(dni))return res.status(400).json({error:'El DNI debe tener 8 dígitos.'});
+    const target=operation(operationId);
+    if(!target||target.status!=='ACTIVA'||target.company_status!=='ACTIVA'||target.company_id!==companyId||target.campaign_id!==campaignId)return res.status(400).json({error:'Selecciona una empresa y campaña activas válidas.'});
+    if(!canSeeOperation(user,operationId))return res.status(403).json({error:'La campaña está fuera de tu alcance.'});
+    if(!db.prepare(`SELECT 1 FROM users WHERE id=? AND status='ACTIVO' AND role IN ('SUPERVISOR','FORMADOR','ADMINISTRADOR','CONSULTOR')`).get(supervisorId)||!supervisorValid(operationId,supervisorId))return res.status(400).json({error:'Selecciona un supervisor activo vinculado a la campaña.'});
+    if(db.prepare('SELECT 1 FROM advisors WHERE dni=?').get(dni))return res.status(409).json({error:'Ya existe un asesor con ese DNI.'});
+    const now=new Date().toISOString(),effectiveAt=isoDate(b.hireDate)||now.slice(0,10),advisorId=id('advisor'),userId=id('user'),assignmentId=id('assignment'),usernameBase=`asesor_${dni}`;let username=usernameBase;
+    if(db.prepare('SELECT 1 FROM users WHERE username=? OR email=?').get(username,`${username}@asesores3c.com`))username=`${username}_${randomBytes(3).toString('hex')}`;
+    db.exec('BEGIN IMMEDIATE');
+    try{
+      let team=db.prepare('SELECT id FROM teams WHERE campaign_id=? AND supervisor_id=? ORDER BY id LIMIT 1').get(campaignId,supervisorId) as {id:string}|undefined;
+      if(!team){team={id:id('team')};db.prepare('INSERT INTO teams (id,campaign_id,supervisor_id,name) VALUES (?,?,?,?)').run(team.id,campaignId,supervisorId,`${target.campaign_name} · ${(db.prepare('SELECT name FROM users WHERE id=?').get(supervisorId) as any)?.name||'Supervisor'}`);}
+      const advisor={id:advisorId,name,dni,employeeCode:String(b.employeeCode||`ADV-${dni.slice(-4)}`),campaignId,operationId,teamId:team.id,supervisorId,status:'ACTIVO',active:true,shift:b.shift||'MANANA',hireDate:effectiveAt,campaignStartDate:isoDate(b.campaignStartDate)||effectiveAt,schedule:String(b.schedule||'').trim()||undefined,baselineConnectionTime:String(b.baselineConnectionTime||'06:00'),baselineConnectionMinutes:Number(b.baselineConnectionMinutes)||360,baselineSph:Number.isFinite(Number(b.baselineSph))?Number(b.baselineSph):0.2,baselineDate:isoDate(b.baselineDate)||effectiveAt,baselinePeriod:String(b.baselinePeriod||'Línea Base Inicial')};
+      db.prepare('INSERT INTO advisors (id,dni,employee_code,name,campaign_id,team_id,supervisor_id,data_json) VALUES (?,?,?,?,?,?,?,?)').run(advisorId,dni,advisor.employeeCode,name,campaignId,team.id,supervisorId,JSON.stringify(advisor));
+      db.prepare('INSERT INTO users (id,name,email,username,role,status,team_id,advisor_id,created_at,password_hash,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,?,1)').run(userId,name,`${username}@asesores3c.com`,username,'ASESOR','ACTIVO',team.id,advisorId,now,hashPassword(dni));
+      db.prepare("INSERT INTO operation_assignments (id,advisor_id,operation_id,team_id,supervisor_id,role,operational_status,start_date,active,source,actor_id,observation) VALUES (?,?,?,?,?,?,?, ?,1,'MANUAL',?,?)").run(assignmentId,advisorId,operationId,team.id,supervisorId,'ASESOR','PRODUCCION',effectiveAt,user.id,'Alta manual desde Dotación.');
+      db.prepare('INSERT INTO staffing_movements (id,advisor_id,assignment_id,type,occurred_at,effective_at,created_at,origin,destination,actor_id,observation) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(id('movement'),advisorId,assignmentId,'ALTA',now,effectiveAt,now,null,JSON.stringify({operationId,companyId,campaignId,supervisorId}),user.id,'Alta manual desde Dotación.');
+      db.exec('COMMIT');
+      return syncResult(res,{advisor},201);
+    }catch(error:any){db.exec('ROLLBACK');return res.status(409).json({error:error?.message||'No se pudo guardar el asesor.'});}
+  });
+
   app.get('/api/operations',requireAuth,(req,res)=>{
     const user=guardRead(req,res);if(!user)return;
     const scope=activeOperationIds(user),search=normalizeName(req.query.search),companyFilter=String(req.query.companyId||''),statusFilter=String(req.query.status||'');

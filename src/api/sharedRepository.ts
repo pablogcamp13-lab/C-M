@@ -223,7 +223,8 @@ export const organizationApi = {
   async inconsistencies() { return json<any>(await fetch('/api/staffing/inconsistencies',{headers:headers()})); },
   resolve(body:any) { return mutate<any>('/api/staffing/resolve','POST',body); },
   reverse(id:string,body:any) { return mutate<any>(`/api/staffing/movements/${id}/reverse`,'POST',body); },
-  async exportRows(query:Record<string,unknown>={}) { return json<any>(await fetch(`/api/staffing/export?${queryString(query)}`,{headers:headers()})); }
+  async exportRows(query:Record<string,unknown>={}) { return json<any>(await fetch(`/api/staffing/export?${queryString(query)}`,{headers:headers()})); },
+  createAdvisor(body:any) { return mutate<any>('/api/staffing/advisors','POST',body); }
 };
 
 export const developmentApi = {

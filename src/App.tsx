@@ -227,7 +227,7 @@ const MainLayout: React.FC = () => {
       {isNewAdvisorModalOpen && (
         <NewAdvisorModal
           onClose={() => setIsNewAdvisorModalOpen(false)}
-          onSuccess={(adv) => setSelectedAdvisorIdForProfile(adv.id)}
+          onSuccess={(adv) => { setSelectedAdvisorIdForProfile(adv.id); window.dispatchEvent(new Event('cm:data-changed')); }}
         />
       )}
 
