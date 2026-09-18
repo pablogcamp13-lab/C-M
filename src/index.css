@@ -254,21 +254,23 @@
 
 /* Custom Scrollbar for clean tables and side panels */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 9px;
+  height: 9px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #F1F4F8;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #CBD5E1;
-  border-radius: 4px;
+  background: #55708c;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94A3B8;
+  background: #7896b2;
 }
 
 .home-hero.hero-improvement { background-image:linear-gradient(90deg,rgba(3,18,37,.2) 0%,rgba(3,18,37,.04) 54%,rgba(3,18,37,.12) 100%),url('/home/mejora-continua.png'); background-position:center; background-size:cover; }
