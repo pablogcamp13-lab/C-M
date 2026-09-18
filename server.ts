@@ -958,6 +958,30 @@ async function startServer() {
     }
   });
   const adminEvaluationRows = async () => { let rows=(db.prepare('SELECT payload_json FROM evaluations ORDER BY evaluated_at DESC').all() as any[]).flatMap(row=>{try{return[JSON.parse(row.payload_json)]}catch{return[]}});if(googleStorage.enabled)try{const primary=await googleStorage.loadEvaluations();rows=supabaseStorage.enabled?primary:uniqueEvaluations([...primary,...rows]);}catch{}return rows; };
+  app.delete('/api/evaluations/speech-batches/:batchId',requireAuth,async(req,res)=>{
+    const user=(req as any).authUser as User;
+    if(user.role!=='ADMINISTRADOR')return res.status(403).json({error:'Solo Administración puede eliminar una carga SA.'});
+    const batchId=String(req.params.batchId||'').trim();
+    const batch=(await adminEvaluationRows()).filter((item:any)=>item.origin==='SPEECH_ANALYTICS'&&item.sourceBatchId===batchId);
+    if(!batch.length)return res.status(404).json({error:'La carga ya no existe.'});
+    if(batch.some((item:any)=>!scopedRecord(user,item)))return res.status(403).json({error:'No tienes acceso a toda esta carga.'});
+    const ids=batch.map((item:any)=>item.id),idSet=new Set(ids);
+    if(ids.some((id:string)=>(db.prepare('SELECT 1 FROM calibrations WHERE evaluation_id=? LIMIT 1').get(id) as any)))return res.status(409).json({error:'La carga contiene evaluaciones con calibración. Elimina primero esas calibraciones.'});
+    try{
+      if(supabaseStorage.enabled)await supabaseStorage.deleteEvaluationBatch(ids);
+      else if(googleStorage.enabled)for(const id of ids)await googleStorage.deleteEvaluation(id);
+      db.exec('BEGIN IMMEDIATE');
+      try{
+        const removeCommitment=db.prepare('DELETE FROM evaluation_commitments WHERE evaluation_id=?'),removeFeedback=db.prepare('DELETE FROM feedbacks WHERE evaluation_id=?'),removeEvaluation=db.prepare('DELETE FROM evaluations WHERE id=?');
+        for(const id of ids){removeCommitment.run(id);removeFeedback.run(id);removeEvaluation.run(id);}
+        const stateRow=db.prepare('SELECT payload_json FROM app_state WHERE id=?').get('global') as any;
+        if(stateRow?.payload_json){const state=JSON.parse(stateRow.payload_json);db.prepare('UPDATE app_state SET payload_json=?,updated_at=? WHERE id=?').run(JSON.stringify({...state,evaluations:(state.evaluations||[]).filter((item:any)=>!idSet.has(item.id))}),new Date().toISOString(),'global');}
+        db.exec('COMMIT');
+      }catch(error){db.exec('ROLLBACK');throw error;}
+      if(lastCompletePlatformState)lastCompletePlatformState={...lastCompletePlatformState,evaluations:(lastCompletePlatformState.evaluations||[]).filter((item:any)=>!idSet.has(item.id))};
+      return res.json({deleted:ids.length,batchId});
+    }catch(error:any){console.error('[speech-import] No fue posible eliminar la carga.',error);return res.status(/calibraci|cambi[oó]/i.test(error?.message||'')?409:502).json({error:error?.message||'No fue posible eliminar la carga.'});}
+  });
   const speechCampaignContext=(directory:any,user:User,campaignName:string)=>{
     const key=normalizeSpeechText(campaignName);
     const campaigns=(directory.campaigns||[]).filter((item:Campaign)=>normalizeSpeechText(item.name)===key&&item.status==='ACTIVA');

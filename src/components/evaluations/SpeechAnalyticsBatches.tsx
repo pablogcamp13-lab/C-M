@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { BarChart3, ChevronRight, FileSpreadsheet, Folder, Users } from 'lucide-react';
+import { BarChart3, ChevronRight, FileSpreadsheet, Folder, Trash2, Users } from 'lucide-react';
 import type { Evaluation } from '../../types';
 
 export const batchDate = (item: Evaluation) => item.sourceBatchDate || item.createdAt?.slice(0, 10) || item.date;
@@ -21,7 +21,7 @@ export const SpeechAnalyticsBatches: React.FC<{ evaluations: Evaluation[]; onOpe
   </section>;
 };
 
-export const SpeechAnalyticsBatchSummary: React.FC<{ evaluations: Evaluation[] }> = ({ evaluations: items }) => {
+export const SpeechAnalyticsBatchSummary: React.FC<{ evaluations: Evaluation[]; onDeleteBatch?: (batch: { id: string; name: string; count: number }) => void }> = ({ evaluations: items, onDeleteBatch }) => {
   const pending = items.filter(item => item.validationStatus === 'AUTOMATIC_PENDING' || item.validationStatus === 'PENDIENTE_AUTOMATICO').length;
   const linked = items.filter(item => item.advisorResolutionStatus !== 'PENDING').length;
   const scores = items.map(item => item.technicalScore ?? item.scoreTotal ?? item.speechScore).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
@@ -30,10 +30,18 @@ export const SpeechAnalyticsBatchSummary: React.FC<{ evaluations: Evaluation[] }
   const companyCounts: Record<string, number> = {};
   items.forEach(item => { const name = item.sourceCompanyName || 'Por relacionar'; companyCounts[name] = (companyCounts[name] || 0) + 1; });
   const files = [...new Set(items.map(item => item.sourceFileName).filter(Boolean))];
+  const batches = [...items.reduce((groups, item) => {
+    if (!item.sourceBatchId) return groups;
+    const batch = groups.get(item.sourceBatchId) || { id: item.sourceBatchId, name: item.sourceFileName || 'Archivo SA', count: 0 };
+    batch.count++;
+    groups.set(item.sourceBatchId, batch);
+    return groups;
+  }, new Map<string, { id: string; name: string; count: number }>()).values()];
   return <section className="space-y-3" aria-label="Resumen de la carga">
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><Metric icon={<FileSpreadsheet/>} label="Evaluaciones" value={items.length}/><Metric icon={<Users/>} label="Asesores" value={advisorCount}/><Metric icon={<BarChart3/>} label="Promedio" value={average === null ? 'Sin nota' : `${average}%`}/><Metric icon={<span>✓</span>} label="Validadas" value={items.length - pending}/></div>
     <div className="grid gap-2 text-xs sm:grid-cols-2"><div className="rounded-xl border border-[var(--cm-border)] bg-[var(--cm-surface-elevated)] p-3"><b>Estado</b><p className="mt-1 text-[var(--cm-text-secondary)]">{linked} relacionadas · {items.length - linked} con alerta · {pending} pendientes de validación</p></div><div className="rounded-xl border border-[var(--cm-border)] bg-[var(--cm-surface-elevated)] p-3"><b>Distribución por empresa</b><p className="mt-1 text-[var(--cm-text-secondary)]">{Object.entries(companyCounts).map(([name, count]) => `${name}: ${count}`).join(' · ')}</p></div></div>
     {files.length > 0 && <p className="text-xs text-[var(--cm-text-secondary)]">Archivos: {files.join(', ')}</p>}
+    {onDeleteBatch && batches.length > 0 && <div className="space-y-2"><h4 className="text-xs font-bold">Cargas en esta carpeta</h4>{batches.map(batch => <div key={batch.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--cm-border)] bg-[var(--cm-surface-elevated)] p-3 text-xs"><span className="min-w-0 truncate"><b>{batch.name}</b><span className="ml-2 text-[var(--cm-text-secondary)]">{batch.count} evaluaciones</span></span><button type="button" onClick={() => onDeleteBatch(batch)} className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-rose-300 px-2 py-1.5 font-bold text-rose-600 hover:bg-rose-50"><Trash2 className="h-3.5 w-3.5"/>Eliminar carga</button></div>)}</div>}
   </section>;
 };
 

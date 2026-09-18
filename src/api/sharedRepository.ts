@@ -106,6 +106,9 @@ export interface SpeechImportPreview {
 }
 
 export const speechImportApi = {
+  async deleteBatch(batchId: string) {
+    return json<{ deleted: number; batchId: string }>(await fetch(`/api/evaluations/speech-batches/${encodeURIComponent(batchId)}`, { method: 'DELETE', headers: headers() }));
+  },
   async preview(file: File, campaignName: string) {
     return json<SpeechImportPreview>(await fetch('/api/evaluations/import-speech/preview', {
       method: 'POST',

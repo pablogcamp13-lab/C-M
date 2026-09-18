@@ -5,6 +5,7 @@ import { Evaluation } from '../../types';
 import { SpeechAnalyticsImportModal } from './SpeechAnalyticsImportModal';
 import { ResolveAdvisorModal } from './ResolveAdvisorModal';
 import { SpeechAnalyticsBatches, SpeechAnalyticsBatchSummary, batchDate, displayBatchDate } from './SpeechAnalyticsBatches';
+import { speechImportApi } from '../../api/sharedRepository';
 import { FiltersBar } from '../common/FiltersBar';
 import { ThreeScore } from '../common/ThreeScore';
 import { StatusBadge } from '../common/StatusBadge';
@@ -28,11 +29,14 @@ interface EvaluationsListProps {
 export const EvaluationsList: React.FC<EvaluationsListProps> = ({ 
   onSelectEvaluation, onOpenNewEvaluation
 }) => {
-  const { filteredEvaluations, advisors, users, currentUser, deleteEvaluation, refreshEvaluations } = useApp();
+  const { evaluations, filteredEvaluations, advisors, users, currentUser, deleteEvaluation, refreshEvaluations } = useApp();
   const [sortField, setSortField] = useState<'date' | 'score' | 'advisor'>('date');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteBatchTarget, setDeleteBatchTarget] = useState<{ id: string; name: string; count: number } | null>(null);
+  const [deletingBatch, setDeletingBatch] = useState(false);
+  const [deleteBatchError, setDeleteBatchError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'QUALITY' | 'D3C'>('ALL');
@@ -101,7 +105,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
           </div><div className="flex flex-wrap items-center justify-end gap-2"><select value={typeFilter} onChange={event => setTypeFilter(event.target.value as typeof typeFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todas</option><option value="QUALITY">Calidad</option><option value="D3C">Mejora Continua</option></select><select value={resultFilter} onChange={event => setResultFilter(event.target.value as typeof resultFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todo resultado</option><option value="VENTA">Venta</option><option value="NO_VENTA">No venta</option></select><select value={stateFilter} onChange={event => setStateFilter(event.target.value as typeof stateFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todo estado</option><option value="PENDIENTE">Pendiente de revisión</option><option value="FINALIZADA">Finalizada</option></select>{canImport&&<button onClick={()=>setImportOpen(true)} className="cm-button-secondary px-3 py-2 text-xs font-bold"><FileUp className="h-4 w-4"/>IMPORTAR</button>}{!isReadOnly && <button onClick={onOpenNewEvaluation} className="inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-[#1FD6FF] to-[#2E7BFF] px-3 py-2 text-xs font-bold text-[#031326]"><Phone className="h-4 w-4" />Nueva evaluación</button>}</div>
         </div>
 
-        {selectedBatchDate ? <SpeechAnalyticsBatchSummary evaluations={batchEvaluations}/> : <SpeechAnalyticsBatches evaluations={filteredEvaluations} onOpen={setSelectedBatchDate}/>}
+        {selectedBatchDate ? <SpeechAnalyticsBatchSummary evaluations={batchEvaluations} onDeleteBatch={currentUser.role === 'ADMINISTRADOR' ? batch => { setDeleteBatchError(null); setDeleteBatchTarget({...batch,count:evaluations.filter(item => item.origin === 'SPEECH_ANALYTICS' && item.sourceBatchId === batch.id).length}); } : undefined}/> : <SpeechAnalyticsBatches evaluations={filteredEvaluations} onOpen={setSelectedBatchDate}/>}
 
         {/* Evaluations Table */}
         <div className="bg-white border border-[#E5E8EC] rounded-xl overflow-hidden shadow-2xs">
@@ -287,6 +291,28 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
 
       </div>
 
+      {deleteBatchTarget && createPortal(
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="delete-batch-title">
+          <div className="cm-modal w-full max-w-sm rounded-xl border border-rose-400/30 p-5 shadow-2xl">
+            <h3 id="delete-batch-title" className="flex items-center gap-2 text-sm font-bold"><Trash2 className="h-4 w-4 text-rose-600"/>¿Eliminar esta carga SA?</h3>
+            <p className="mt-2 text-xs text-[var(--cm-text-secondary)]">Se eliminarán definitivamente las {deleteBatchTarget.count} evaluaciones de <b>{deleteBatchTarget.name}</b> y sus feedbacks asociados. Las otras cargas de la carpeta permanecerán intactas.</p>
+            {deleteBatchError && <p role="alert" className="mt-3 rounded-lg border border-rose-300 bg-rose-50 p-2 text-xs text-rose-700">{deleteBatchError}</p>}
+            <div className="mt-5 flex justify-end gap-2"><button type="button" disabled={deletingBatch} onClick={() => setDeleteBatchTarget(null)} className="cm-button-secondary px-3 py-2 text-xs">Cancelar</button><button type="button" disabled={deletingBatch} onClick={async () => {
+              if (!deleteBatchTarget) return;
+              setDeletingBatch(true); setDeleteBatchError(null);
+              try {
+                const { deleted } = await speechImportApi.deleteBatch(deleteBatchTarget.id);
+                const refreshed = await refreshEvaluations();
+                if (selectedBatchDate && !refreshed.some(item => item.origin === 'SPEECH_ANALYTICS' && batchDate(item) === selectedBatchDate)) setSelectedBatchDate(null);
+                setDeleteBatchTarget(null);
+                setDeleteSuccess(`La carga ${deleteBatchTarget.name} fue eliminada correctamente (${deleted} evaluaciones).`);
+              } catch (error) { setDeleteBatchError(error instanceof Error ? error.message : 'No fue posible eliminar la carga.'); }
+              finally { setDeletingBatch(false); }
+            }} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-bold text-white hover:bg-rose-700 disabled:opacity-60">{deletingBatch ? 'Eliminando…' : 'Sí, eliminar carga'}</button></div>
+          </div>
+        </div>, document.body
+      )}
+
       {/* Delete Confirmation Modal */}
       {deleteConfirmId && createPortal(
         <div className="fixed inset-0 z-[300] bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="delete-evaluation-title">
@@ -341,7 +367,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
             <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400">
               <span className="text-xl" aria-hidden="true">✓</span>
             </div>
-            <h3 id="delete-success-title" className="text-sm font-bold text-[#031E3C]">Evaluación eliminada</h3>
+            <h3 id="delete-success-title" className="text-sm font-bold text-[#031E3C]">{deleteSuccess.startsWith('La carga') ? 'Carga eliminada' : 'Evaluación eliminada'}</h3>
             <p className="mt-2 text-xs text-[#667085]">{deleteSuccess}</p>
             <div className="mt-5 flex justify-end border-t border-[#E5E8EC] pt-4">
               <button autoFocus onClick={() => setDeleteSuccess(null)} className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700">Entendido</button>
