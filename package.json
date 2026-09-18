@@ -27,7 +27,8 @@
     "migration:validate": "node migration/supabase/scripts/validate-migration.mjs",
     "migration:dry-run": "node migration/supabase/scripts/import-to-supabase.mjs",
     "test:operations": "node scripts/test-operations-module.mjs",
-    "test:roster-reassignment": "tsx scripts/test-roster-reassignment.mjs"
+    "test:roster-reassignment": "tsx scripts/test-roster-reassignment.mjs",
+    "test:roster-sync": "tsx scripts/test-roster-sync.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",

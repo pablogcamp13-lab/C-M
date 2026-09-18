@@ -188,7 +188,21 @@ export const organizationApi = {
   addSupervisor(id:string,body:any) { return mutate<any>(`/api/operations/${id}/supervisors`,'POST',body); },
   removeSupervisor(id:string,supervisorId:string,body:any) { return mutate<any>(`/api/operations/${id}/supervisors/${supervisorId}`,'DELETE',body); },
   async staffing(query:Record<string,unknown>={}) { return json<any>(await fetch(`/api/staffing?${queryString(query)}`,{headers:headers()})); },
-  importRoster(body:any) { return mutate<any>('/api/staffing/import','POST',body); },
+  async importRoster(body:any) {
+    try {
+      return await json<any>(await fetch('/api/staffing/import', {
+        method:'POST',
+        headers:{'Content-Type':'application/json',...headers()},
+        body:JSON.stringify(body),
+        signal:AbortSignal.timeout(90_000)
+      }));
+    } catch (error) {
+      if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+        throw new Error('La confirmación tardó demasiado. Revisa la dotación antes de reintentar; el guardado podría haberse completado.');
+      }
+      throw error;
+    }
+  },
   updateAssignment(id:string,body:any) { return mutate<any>(`/api/staffing/${id}/assignment`,'PATCH',body); },
   bulkMove(body:any) { return mutate<any>('/api/staffing/bulk-move','POST',body); },
   bulkSupervisor(body:any) { return mutate<any>('/api/staffing/bulk-supervisor','POST',body); },

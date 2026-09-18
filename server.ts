@@ -1,6 +1,7 @@
 import express from "express";
 import { mergeEvaluationSources } from "./server/platformStateRecovery";
 import { registerOperationsModule } from "./server/operationsModule";
+import { rosterImportSnapshot } from "./server/rosterSync";
 import path from "path";
 import { googleStorage as googleDriveStorage } from "./server/googleStorage";
 import { supabaseStorage } from "./server/supabaseStorage";
@@ -530,6 +531,13 @@ async function syncRepositorySnapshot(){
   structuredRepositoryCache={value:current,expiresAt:Date.now()+15_000};
   return current;
 }
+async function syncRosterImportSnapshot(advisorIds:string[]){
+  const current=repository();
+  const snapshot=rosterImportSnapshot(current,advisorIds);
+  if(snapshot.advisors.length!==new Set(advisorIds).size)throw new Error('La sincronización no encontró todos los asesores importados.');
+  await supabaseStorage.saveRepository(snapshot,passwordHashes());
+  structuredRepositoryCache={value:current,expiresAt:Date.now()+15_000};
+}
 
 async function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
@@ -605,7 +613,10 @@ async function startServer() {
       return res.status(400).json({ error: 'No fue posible leer el archivo enviado.' });
     });
   };
-  registerOperationsModule({app,db,requireAuth,repository,sync:async()=>{await syncRepositorySnapshot();}});
+  registerOperationsModule({app,db,requireAuth,repository,sync:async(advisorIds)=>{
+    if(advisorIds?.length&&supabaseStorage.enabled)await syncRosterImportSnapshot(advisorIds);
+    else await syncRepositorySnapshot();
+  }});
 
   app.post('/api/auth/login', async (req, res) => {
     const { identity, password } = req.body || {};

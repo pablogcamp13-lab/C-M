@@ -8,7 +8,7 @@ type Dependencies = {
   db: any;
   requireAuth: express.RequestHandler;
   repository: () => any;
-  sync: () => Promise<void>;
+  sync: (advisorIds?: string[]) => Promise<void>;
 };
 
 const id = (prefix:string) => `${prefix}_${randomBytes(9).toString('hex')}`;
@@ -163,7 +163,7 @@ export function registerOperationsModule({app,db,requireAuth,repository,sync}:De
       });
     }catch(error){return res.status(400).json({error:error instanceof Error?error.message:'La validación de la dotación falló.'});}
 
-    const now=new Date().toISOString(),summary={rows:prepared.length,created:0,updated:0,reassigned:0,alreadyAssigned:0,assignmentsCreated:0};
+    const now=new Date().toISOString(),summary={rows:prepared.length,created:0,updated:0,reassigned:0,alreadyAssigned:0,assignmentsCreated:0},importedAdvisorIds:string[]=[];
     db.exec('BEGIN IMMEDIATE');
     try{
       for(const row of prepared){
@@ -172,6 +172,7 @@ export function registerOperationsModule({app,db,requireAuth,repository,sync}:De
         let team=db.prepare('SELECT * FROM teams WHERE campaign_id=? AND supervisor_id=? ORDER BY id LIMIT 1').get(target.campaign_id,supervisor.id) as any;
         if(!team){team={id:id('team'),campaign_id:target.campaign_id,supervisor_id:supervisor.id,name:`${target.campaign_name} · ${supervisor.name}`};db.prepare('INSERT INTO teams (id,campaign_id,supervisor_id,name) VALUES (?,?,?,?)').run(team.id,team.campaign_id,team.supervisor_id,team.name);}
         const advisorId=existing?.id||String(incoming.id||id('advisor'));
+        importedAdvisorIds.push(advisorId);
         const updated={
           ...(currentData||{}),
           ...incoming,
@@ -213,7 +214,7 @@ export function registerOperationsModule({app,db,requireAuth,repository,sync}:De
       }
       const verified=prepared.filter(row=>{const result=db.prepare(`SELECT a.id FROM advisors a JOIN operation_assignments oa ON oa.advisor_id=a.id AND oa.active=1 WHERE a.dni=? AND a.campaign_id=? AND oa.operation_id=?`).get(row.dni,target.campaign_id,operationId);const total=(db.prepare('SELECT COUNT(*) total FROM operation_assignments WHERE advisor_id=(SELECT id FROM advisors WHERE dni=?) AND active=1').get(row.dni) as any)?.total;return Boolean(result)&&Number(total)===1;}).length;
       if(verified!==prepared.length)throw new Error(`La verificación sólo confirmó ${verified} de ${prepared.length} personas.`);
-      await sync();
+      await sync(importedAdvisorIds);
       db.exec('COMMIT');
       return res.json({
         saved:true,
@@ -225,6 +226,7 @@ export function registerOperationsModule({app,db,requireAuth,repository,sync}:De
       });
     }catch(error){
       db.exec('ROLLBACK');
+      console.error('[staffing-import] La carga fue revertida:',error);
       return res.status(409).json({error:error instanceof Error?error.message:'La importación fue revertida; no se aplicaron cambios.'});
     }
   });
