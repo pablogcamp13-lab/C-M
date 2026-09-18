@@ -122,6 +122,16 @@ export const speechImportApi = {
     return json<{ evaluation: Evaluation }>(await fetch(`/api/evaluations/${encodeURIComponent(evaluationId)}/link-advisor`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify({ advisorId })
     }));
+  },
+  async createAdvisor(evaluationId: string, data: { name: string; dni: string; companyId: string; operationId: string; supervisorId: string }) {
+    try {
+      return await json<{ advisor: Advisor }>(await fetch(`/api/evaluations/${encodeURIComponent(evaluationId)}/create-advisor`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(data), signal: AbortSignal.timeout(90_000)
+      }));
+    } catch (error) {
+      if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) throw new Error('La confirmación tardó demasiado. Revisa si el asesor aparece en Dotación antes de intentar crearlo otra vez.');
+      throw error;
+    }
   }
 };
 

@@ -22,6 +22,7 @@ const readable = (user:User) => user.role !== 'ASESOR';
 
 export function registerOperationsModule({app,db,requireAuth,repository,sync}:Dependencies) {
   const activeOperationIds = (user:User) => {
+    if(user.role==='MONITOR')return null;
     const accessScope=user.accessScope||(user.role==='SUPERVISOR'?'TEAM':'GLOBAL');
     if(accessScope==='GLOBAL')return null;
     if(accessScope==='COMPANY'){

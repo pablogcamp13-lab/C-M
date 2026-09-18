@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp } from '../../context/AppContext';
 import { Evaluation } from '../../types';
-import { speechImportApi } from '../../api/sharedRepository';
 import { SpeechAnalyticsImportModal } from './SpeechAnalyticsImportModal';
+import { ResolveAdvisorModal } from './ResolveAdvisorModal';
 import { SpeechAnalyticsBatches, SpeechAnalyticsBatchSummary, batchDate, displayBatchDate } from './SpeechAnalyticsBatches';
 import { FiltersBar } from '../common/FiltersBar';
 import { ThreeScore } from '../common/ThreeScore';
@@ -28,7 +28,7 @@ interface EvaluationsListProps {
 export const EvaluationsList: React.FC<EvaluationsListProps> = ({ 
   onSelectEvaluation, onOpenNewEvaluation
 }) => {
-  const { filteredEvaluations, advisors, users, campaigns, operations, currentUser, deleteEvaluation, refreshEvaluations } = useApp();
+  const { filteredEvaluations, advisors, users, currentUser, deleteEvaluation, refreshEvaluations } = useApp();
   const [sortField, setSortField] = useState<'date' | 'score' | 'advisor'>('date');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -41,20 +41,10 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
   const [importOpen, setImportOpen] = useState(false);
   const [selectedBatchDate, setSelectedBatchDate] = useState<string | null>(null);
   const [linkTarget, setLinkTarget] = useState<Evaluation | null>(null);
-  const [linkAdvisorId, setLinkAdvisorId] = useState('');
-  const [linkBusy, setLinkBusy] = useState(false);
-  const [linkError, setLinkError] = useState('');
   const isAdvisor = currentUser.role === 'ASESOR';
   const isReadOnly = ['ASESOR', 'SUPERVISOR'].includes(currentUser.role);
   const canDelete = ['ADMINISTRADOR', 'CONSULTOR'].includes(currentUser.role);
   const canImport = ['ADMINISTRADOR', 'CONSULTOR', 'MONITOR'].includes(currentUser.role);
-  const normalize = (value: string) => value.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-  const linkCampaignName = linkTarget?.sourceCampaignName || campaigns.find(campaign => campaign.id === linkTarget?.campaignId)?.name || '';
-  const linkCandidates = linkTarget ? advisors.filter(advisor => {
-    const operation = operations.find(item => item.id === advisor.operationId);
-    const campaignName = campaigns.find(item => item.id === operation?.campaignId)?.name || '';
-    return advisor.status === 'ACTIVO' && advisor.active !== false && normalize(campaignName) === normalize(linkCampaignName);
-  }) : [];
   const batchEvaluations = selectedBatchDate ? filteredEvaluations.filter(ev => ev.origin === 'SPEECH_ANALYTICS' && batchDate(ev) === selectedBatchDate) : [];
   const visibleEvaluations = filteredEvaluations.filter(ev => {
     if (selectedBatchDate ? ev.origin !== 'SPEECH_ANALYTICS' || batchDate(ev) !== selectedBatchDate : ev.origin === 'SPEECH_ANALYTICS') return false;
@@ -254,7 +244,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                             >
                               <Eye className="w-4 h-4" />
                             </button>
-                            {ev.advisorResolutionStatus==='PENDING'&&canImport&&<button onClick={()=>{setLinkTarget(ev);setLinkAdvisorId('');setLinkError('');}} className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="Relacionar con asesor"><Link2 className="h-4 w-4"/></button>}
+                            {ev.advisorResolutionStatus==='PENDING'&&canImport&&<button onClick={()=>setLinkTarget(ev)} className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="Relacionar con asesor"><Link2 className="h-4 w-4"/></button>}
                             {canDelete && <button
                               onClick={() => { setDeleteError(null); setDeleteConfirmId(ev.id); }}
                               className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -363,7 +353,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
 
       {importOpen&&<SpeechAnalyticsImportModal onClose={()=>setImportOpen(false)} onImported={refreshEvaluations}/>}
 
-      {linkTarget&&createPortal(<div className="fixed inset-0 z-[330] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="link-advisor-title"><div className="cm-modal w-full max-w-lg p-5"><div className="flex items-start justify-between"><div><p className="cm-eyebrow">RESOLVER ALERTA</p><h3 id="link-advisor-title" className="text-base font-bold">Relacionar evaluación con asesor</h3><p className="mt-1 text-xs text-[var(--cm-text-secondary)]">{linkTarget.sourceAdvisorName||'Asesor no identificado'}{linkTarget.sourceAdvisorDni?` · DNI ${linkTarget.sourceAdvisorDni}`:''}</p></div><button onClick={()=>setLinkTarget(null)} disabled={linkBusy} className="cm-navbar__icon-button" aria-label="Cerrar">×</button></div><label className="mt-5 block text-xs font-bold">Asesor activo de {linkCampaignName}<select value={linkAdvisorId} onChange={event=>setLinkAdvisorId(event.target.value)} className="cm-select mt-2 w-full p-3"><option value="">Seleccionar asesor</option>{linkCandidates.map(advisor=><option key={advisor.id} value={advisor.id}>{advisor.name} · {advisor.dni}</option>)}</select></label>{!linkCandidates.length&&<p className="mt-3 rounded-lg border border-amber-400/35 bg-amber-400/10 p-3 text-xs text-amber-700">Administración debe crear o asignar al asesor a esta campaña antes de relacionarlo.</p>}{linkError&&<p role="alert" className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-700">{linkError}</p>}<div className="mt-5 flex justify-end gap-2 border-t border-[var(--cm-border)] pt-4"><button onClick={()=>setLinkTarget(null)} disabled={linkBusy} className="cm-button-secondary px-3 py-2 text-xs">Cancelar</button><button disabled={linkBusy||!linkAdvisorId} onClick={async()=>{setLinkBusy(true);setLinkError('');try{await speechImportApi.linkAdvisor(linkTarget.id,linkAdvisorId);await refreshEvaluations();setLinkTarget(null);}catch(reason){setLinkError(reason instanceof Error?reason.message:'No fue posible relacionar al asesor.');}finally{setLinkBusy(false);}}} className="cm-button-primary px-3 py-2 text-xs disabled:opacity-50"><Link2 className="h-4 w-4"/>{linkBusy?'Relacionando…':'Confirmar relación'}</button></div></div></div>,document.body)}
+      {linkTarget&&<ResolveAdvisorModal key={linkTarget.id} evaluation={linkTarget} onClose={()=>setLinkTarget(null)}/>}
 
     </div>
   );
