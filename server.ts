@@ -576,11 +576,22 @@ async function requireAuth(req: express.Request, res: express.Response, next: ex
       session = db.prepare('SELECT s.*, u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?').get(token);
     } catch (error) { console.error('[structured-storage] No fue posible reparar el vínculo del asesor.', error instanceof Error ? error.message : ''); }
   }
+  if (session && token && supabaseStorage.enabled && Date.now() - (lastSessionCheck.get(token) || 0) >= 5 * 60_000) {
+    try {
+      const remoteSession = await supabaseStorage.loadSession(token);
+      if (!remoteSession) { db.prepare('DELETE FROM sessions WHERE token=?').run(token); return res.status(401).json({ error: 'Sesión no válida o expirada.' }); }
+      if (new Date(remoteSession.expires_at).getTime() - Date.now() < 24 * 60 * 60_000) {
+        await supabaseStorage.saveSession(token, remoteSession.user_id, remoteSession.created_at);
+      }
+      lastSessionCheck.set(token, Date.now());
+    } catch (error) { console.error('[auth] No fue posible renovar la sesión.', error instanceof Error ? error.message : ''); }
+  }
   if (!session) return res.status(401).json({ error: 'Sesión no válida o expirada.' });
   (req as any).authUser = publicUser(session); (req as any).token = token; next();
 }
 
 let lastGoogleAuthSync = 0;
+const lastSessionCheck = new Map<string, number>();
 const advisorDnisForAuth = new Map<string, string>();
 const advisorUsersByDni = new Map<string, string>();
 async function syncAuthUsersFromGoogle(force = false) {
@@ -660,7 +671,7 @@ async function startServer() {
     res.json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)) });
   });
   app.post('/api/auth/logout', requireAuth, async (req, res) => {
-    const token = (req as any).token; db.prepare('DELETE FROM sessions WHERE token=?').run(token);
+    const token = (req as any).token; db.prepare('DELETE FROM sessions WHERE token=?').run(token); lastSessionCheck.delete(token);
     try { if (googleStorage.enabled) await googleStorage.deleteSession(token); }
     catch (error) { console.error('[google-storage] No fue posible eliminar la sesión persistente.', error instanceof Error ? error.message : ''); }
     res.status(204).end();
@@ -1610,7 +1621,6 @@ async function startServer() {
       res.setHeader('Cache-Control', 'no-store'); res.sendFile(path.join(distPath, "index.html"));
     });
   }
-
   const listen = (port: number, attempts = 0) => {
     const server = app.listen(port, "0.0.0.0", () => {
       console.log(`Server 3C running on http://0.0.0.0:${port}`);

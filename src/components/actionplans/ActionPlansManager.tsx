@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp } from '../../context/AppContext';
 import { ActionPlan, ActionPlanAdvisorMetric, ActionPlanStatus } from '../../types';
@@ -70,6 +70,35 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
     return users.find(u => u.role === 'SUPERVISOR')?.id || leaders[0]?.id || users[0]?.id || '';
   });
   const [notes, setNotes] = useState<string>('');
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const draftKey = `cm:action-plan-draft:${currentUser.id}:${initialEvaluationForPlan?.id || 'new'}`;
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(draftKey);
+      if (saved) {
+        const draft = JSON.parse(saved);
+        if (Array.isArray(draft.advisorMetrics)) setAdvisorMetrics(draft.advisorMetrics);
+        if (typeof draft.criterionId === 'string') setCriterionId(draft.criterionId);
+        if (typeof draft.objective === 'string') setObjective(draft.objective);
+        if (typeof draft.action === 'string') setAction(draft.action);
+        if (typeof draft.targetDate === 'string') setTargetDate(draft.targetDate);
+        if (typeof draft.followUpDate === 'string') setFollowUpDate(draft.followUpDate);
+        if (typeof draft.responsibleId === 'string') setResponsibleId(draft.responsibleId);
+        if (typeof draft.notes === 'string') setNotes(draft.notes);
+        setDraftRestored(true);
+        setIsNewModalOpen(true);
+      }
+    } catch { /* El formulario sigue disponible si el almacenamiento local falla. */ }
+    setDraftReady(true);
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (!draftReady || !isNewModalOpen) return;
+    try { localStorage.setItem(draftKey, JSON.stringify({ advisorMetrics, criterionId, objective, action, targetDate, followUpDate, responsibleId, notes })); }
+    catch { /* La sesión sigue funcionando aunque el navegador no permita borradores. */ }
+  }, [draftReady, isNewModalOpen, draftKey, advisorMetrics, criterionId, objective, action, targetDate, followUpDate, responsibleId, notes]);
 
   const anchorAdvisor = advisors.find(a => a.id === advisorMetrics[0]?.advisorId);
   const eligibleAdvisors = advisors.filter(a => a.status === 'ACTIVO' && (!anchorAdvisor || (a.campaignId === anchorAdvisor.campaignId && a.operationId === anchorAdvisor.operationId && a.supervisorId === anchorAdvisor.supervisorId)));
@@ -77,12 +106,28 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
   const adminEligibleAdvisors = advisors.filter(a => a.status === 'ACTIVO' && (!adminAnchor || (a.campaignId === adminAnchor.campaignId && a.operationId === adminAnchor.operationId && a.supervisorId === adminAnchor.supervisorId)));
   const planIds = (plan: ActionPlan) => plan.advisorIds?.length ? plan.advisorIds : [plan.advisorId];
   const planLabel = (plan: ActionPlan) => planIds(plan).map(id => advisors.find(a => a.id === id)?.name || 'Asesor').join(', ');
+  const openMetricsEdit = (plan: ActionPlan) => {
+    let draft: ActionPlanAdvisorMetric[] | null = null;
+    try { draft = JSON.parse(localStorage.getItem(`cm:action-plan-metrics:${currentUser.id}:${plan.id}`) || 'null'); } catch {}
+    setSelectedPlanForEdit(plan);
+    setEditMetrics(Array.isArray(draft) ? draft : plan.advisorMetrics || planIds(plan).map(advisorId => ({ advisorId, sphInitial: null, sphUpdated: null, sphRetraining: null, followUpType: 'SEGUIMIENTO_FEEDBACK', observations: '' })));
+  };
+  useEffect(() => {
+    if (!selectedPlanForEdit) return;
+    try { localStorage.setItem(`cm:action-plan-metrics:${currentUser.id}:${selectedPlanForEdit.id}`, JSON.stringify(editMetrics)); } catch {}
+  }, [selectedPlanForEdit, editMetrics, currentUser.id]);
   const openAdminEdit = (plan: ActionPlan) => {
     const ids = planIds(plan);
-    setAdminEditPlan(plan);
-    setAdminEditAdvisorIds(ids);
-    setAdminEditMetrics(plan.advisorMetrics || ids.map(advisorId => ({ advisorId, sphInitial: null, sphUpdated: null, sphRetraining: null, followUpType: 'SEGUIMIENTO_FEEDBACK', observations: '' })));
+    let draft: { plan?: ActionPlan; ids?: string[]; metrics?: ActionPlanAdvisorMetric[] } = {};
+    try { draft = JSON.parse(localStorage.getItem(`cm:action-plan-edit:${currentUser.id}:${plan.id}`) || '{}'); } catch {}
+    setAdminEditPlan(draft.plan?.id === plan.id ? draft.plan : plan);
+    setAdminEditAdvisorIds(draft.ids?.length ? draft.ids : ids);
+    setAdminEditMetrics(draft.metrics || plan.advisorMetrics || ids.map(advisorId => ({ advisorId, sphInitial: null, sphUpdated: null, sphRetraining: null, followUpType: 'SEGUIMIENTO_FEEDBACK', observations: '' })));
   };
+  useEffect(() => {
+    if (!adminEditPlan) return;
+    try { localStorage.setItem(`cm:action-plan-edit:${currentUser.id}:${adminEditPlan.id}`, JSON.stringify({ plan: adminEditPlan, ids: adminEditAdvisorIds, metrics: adminEditMetrics })); } catch {}
+  }, [adminEditPlan, adminEditAdvisorIds, adminEditMetrics, currentUser.id]);
   const metricFields = (rows: ActionPlanAdvisorMetric[], setRows: React.Dispatch<React.SetStateAction<ActionPlanAdvisorMetric[]>>, readOnly = false) => rows.map((row, index) => (
     <div key={row.advisorId} className="rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] p-3 space-y-2">
       <div className="font-semibold text-[#031E3C]">{advisors.find(a => a.id === row.advisorId)?.name || 'Asesor'}</div>
@@ -108,9 +153,11 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
     setSaving(true); setRequestState(null);
     try {
       await addActionPlan({ advisorId: advisorMetrics[0].advisorId, advisorIds: advisorMetrics.map(row => row.advisorId), advisorMetrics, evaluationId: initialEvaluationForPlan?.id, criterionId, objective: objective.trim(), action: action.trim(), targetDate, followUpDate, responsibleId, status: 'PENDIENTE', notes });
+      try { localStorage.removeItem(draftKey); } catch {}
+      setDraftRestored(false);
       setIsNewModalOpen(false); setRequestState({ type: 'success', text: 'Plan de acción guardado correctamente.' });
       if (onClearInitialEvaluation) onClearInitialEvaluation();
-    } catch (error) { setRequestState({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible guardar el plan.' }); }
+    } catch (error) { const message = error instanceof Error ? error.message : 'No fue posible guardar el plan.'; setRequestState({ type: 'error', text: /sesi[oó]n no v[aá]lida|expirada/i.test(message) ? 'La sesión expiró. Vuelve a iniciar sesión: el borrador del plan quedó guardado en este navegador.' : message }); }
     finally { setSaving(false); }
   };
 
@@ -126,6 +173,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
     setSaving(true); setRequestState(null);
     try {
       await updateActionPlan(selectedPlanForEdit.id, { advisorMetrics: editMetrics });
+      try { localStorage.removeItem(`cm:action-plan-metrics:${currentUser.id}:${selectedPlanForEdit.id}`); } catch {}
       setSelectedPlanForEdit(null);
       setRequestState({ type: 'success', text: 'SPH y observaciones guardados.' });
     } catch (error) { setRequestState({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible actualizar el plan.' }); }
@@ -143,6 +191,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
         advisorIds: adminEditAdvisorIds,
         advisorMetrics: adminEditMetrics.map(row => ({ ...row, advisorId: row.advisorId })).filter(row => adminEditAdvisorIds.includes(row.advisorId)),
       });
+      try { localStorage.removeItem(`cm:action-plan-edit:${currentUser.id}:${adminEditPlan.id}`); } catch {}
       setAdminEditPlan(null);
       setRequestState({ type: 'success', text: 'Plan actualizado correctamente.' });
     } catch (error) { setRequestState({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible actualizar el plan.' }); }
@@ -269,7 +318,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                           <p className="text-[11px] text-[#667085] bg-white p-2 rounded border border-[#E5E8EC]/80 italic">
                             "{plan.action}"
                           </p>
-                          <div className="flex gap-3"><button type="button" onClick={() => { setSelectedPlanForEdit(plan); setEditMetrics(plan.advisorMetrics || planIds(plan).map(advisorId => ({ advisorId, sphInitial: null, sphUpdated: null, sphRetraining: null, followUpType: 'SEGUIMIENTO_FEEDBACK', observations: '' }))); }} className="text-[11px] font-semibold text-[#007EA8] hover:underline text-left">Ver SPH y seguimiento</button>{isAdmin && <button type="button" onClick={() => openAdminEdit(plan)} className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#FF6B00] hover:underline"><Pencil className="h-3 w-3" />Editar todo</button>}</div>
+                          <div className="flex gap-3"><button type="button" onClick={() => openMetricsEdit(plan)} className="text-[11px] font-semibold text-[#007EA8] hover:underline text-left">Ver SPH y seguimiento</button>{isAdmin && <button type="button" onClick={() => openAdminEdit(plan)} className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#FF6B00] hover:underline"><Pencil className="h-3 w-3" />Editar todo</button>}</div>
 
                           <div className="pt-2 border-t border-[#E5E8EC] flex items-center justify-between text-[10px] text-[#667085]">
                             <div className="flex items-center gap-1">
@@ -364,7 +413,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                         <StatusBadge status={plan.status} size="sm" />
                       </td>
                       <td className="py-3 px-4 text-right">
-                        <button type="button" onClick={() => { setSelectedPlanForEdit(plan); setEditMetrics(plan.advisorMetrics || planIds(plan).map(advisorId => ({ advisorId, sphInitial: null, sphUpdated: null, sphRetraining: null, followUpType: 'SEGUIMIENTO_FEEDBACK', observations: '' }))); }} className="mr-2 text-[#007EA8] hover:underline">SPH</button>
+                        <button type="button" onClick={() => openMetricsEdit(plan)} className="mr-2 text-[#007EA8] hover:underline">SPH</button>
                         {isAdmin && <button type="button" onClick={() => openAdminEdit(plan)} className="mr-2 inline-flex items-center gap-1 text-[#FF6B00] hover:underline"><Pencil className="h-3 w-3" />Editar todo</button>}
                         {!isAdvisor && <button
                           onClick={() => void handleDelete(plan.id)}
@@ -408,6 +457,8 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
             </div>
 
             <form onSubmit={handleCreatePlan} className="space-y-4 pt-4 text-xs">
+              {draftRestored && <p role="status" className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sky-800">Se recuperó tu borrador guardado en este navegador.</p>}
+              {requestState?.type === 'error' && <p role="alert" className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-red-700">{requestState.text}</p>}
               <div>
                 <label className="block font-semibold text-[#031E3C] mb-1">Grupo de asesores</label>
                 <input type="search" value={advisorSearch} onChange={e => setAdvisorSearch(e.target.value)} placeholder="Buscar asesor" className="w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2" />

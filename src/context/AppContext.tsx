@@ -254,6 +254,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     restoreSession();
   }, []);
 
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const keepSessionActive = () => { if (authApi.token()) void authApi.currentUser().catch(() => undefined); };
+    const interval = window.setInterval(keepSessionActive, 10 * 60_000);
+    const onVisibility = () => { if (document.visibilityState === 'visible') keepSessionActive(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { window.clearInterval(interval); document.removeEventListener('visibilitychange', onVisibility); };
+  }, [isAuthenticated]);
+
   // La fuente de verdad de la dotación es el backend/Sheets. Nunca se envían los
   // datos iniciales del navegador al abrir una sesión nueva.
   useEffect(() => {
