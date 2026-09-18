@@ -1134,9 +1134,9 @@ async function startServer() {
     if(user.role!=='ADMINISTRADOR'&&!monitorImported) return res.status(403).json({error:'No tienes permiso para editar esta evaluación.'});
     const body=req.body||{},now=new Date().toISOString();
     if((body.validate||body.validationStatus==='VALIDATED')&&current.advisorResolutionStatus==='PENDING')return res.status(400).json({error:'Relaciona primero la evaluación con un asesor activo.'});
-    const editableFields=['date','time','callId','recordingCode','type','product','sale','saleResult','noSaleReason','comments','items','qualityCriticalErrorIds','qualityCriticalErrorSnapshot'];
+    const editableFields=['date','time','callId','recordingCode','type','product','sale','saleResult','noSaleReason','comments','items','qualityCriticalErrorIds','qualityCriticalErrorSnapshot','audioUrl','audioFileName','audioFileSize','audioDurationSeconds','audioMimeType'];
     const changes=Object.fromEntries(editableFields.filter(key=>body[key]!==undefined).map(key=>[key,body[key]]));
-    const contentEdit=editableFields.some(key=>body[key]!==undefined);
+    const contentEdit=editableFields.filter(key=>!key.startsWith('audio')).some(key=>body[key]!==undefined);
     if(changes.date&&!/^\d{4}-\d{2}-\d{2}$/.test(String(changes.date))) return res.status(400).json({error:'La fecha de evaluación no es válida.'});
     if(changes.time&&!/^\d{2}:\d{2}$/.test(String(changes.time))) return res.status(400).json({error:'La hora de evaluación no es válida.'});
     const items=Array.isArray(changes.items)?changes.items:current.items;

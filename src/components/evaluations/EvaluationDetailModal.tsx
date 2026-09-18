@@ -7,6 +7,7 @@ import { StatusBadge } from '../common/StatusBadge';
 import { ThreeScore } from '../common/ThreeScore';
 import { AudioPlayer } from '../common/AudioPlayer';
 import { getItemCompliance } from '../../utils/calculations';
+import { filesApi } from '../../api/sharedRepository';
 import { 
   X, 
   FileAudio, 
@@ -33,7 +34,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   const { advisors, users, currentUser, updateEvaluation } = useApp();
   const [expandedCriterion, setExpandedCriterion] = useState<string | null>(null);
   const [agentDetail,setAgentDetail]=useState<any>(null); const [commitment,setCommitment]=useState(''); const [commitmentDate,setCommitmentDate]=useState(''); const [savingCommitment,setSavingCommitment]=useState(false); const [commitmentError,setCommitmentError]=useState('');
-  const [isEditing,setIsEditing]=useState(false); const [savingEdit,setSavingEdit]=useState(false); const [editError,setEditError]=useState('');
+  const [isEditing,setIsEditing]=useState(false); const [savingEdit,setSavingEdit]=useState(false); const [editError,setEditError]=useState(''); const [uploadingAudio,setUploadingAudio]=useState(false); const [audioError,setAudioError]=useState('');
   const [draftItems,setDraftItems]=useState<EvaluationItem[]>([]);
   const [draftMeta,setDraftMeta]=useState({date:'',time:'',callId:'',recordingCode:'',type:'DIAGNOSTICO_INICIAL',product:'',sale:false,saleResult:'NO_VENTA',noSaleReason:'',comments:''});
 
@@ -67,6 +68,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   const isPendingSpeech = evaluation.origin==='SPEECH_ANALYTICS'&&(evaluation.validationStatus==='AUTOMATIC_PENDING'||evaluation.validationStatus==='PENDIENTE_AUTOMATICO');
   const monitorCanValidate = currentUser.role==='MONITOR'&&isPendingSpeech&&evaluation.evaluatorId===currentUser.id;
   const canEdit = currentUser.role === 'ADMINISTRADOR'||monitorCanValidate;
+  const canAttachAudio = canEdit && !evaluation.audioUrl;
   const changeItem=(id:string,changes:Partial<EvaluationItem>)=>setDraftItems(items=>items.map(item=>item.id===id?{...item,...changes}:item));
   const saveEdit=async()=>{
     if(!evaluation||savingEdit)return;
@@ -79,6 +81,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
     finally{setSavingEdit(false);}
   };
   const saveCommitment=async()=>{setSavingCommitment(true);setCommitmentError('');try{const token=sessionStorage.getItem('CONTACT_CENTER_AUTH_TOKEN');const response=await fetch(`/api/evaluations/${evaluation.id}/commitment`,{method:'PATCH',headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify({commitment,commitmentDate})});const data=await response.json();if(!response.ok)throw new Error(data.error);setAgentDetail((value:any)=>({...value,commitment:data.commitment}));}catch(error:any){setCommitmentError(error.message||'No fue posible guardar el compromiso.');}finally{setSavingCommitment(false);}};
+  const attachAudio=async(file:File,_previewUrl:string,duration:number)=>{if(!evaluation||uploadingAudio)return;setUploadingAudio(true);setAudioError('');try{const uploaded=await filesApi.upload(file);const saved=await updateEvaluation(evaluation.id,{audioUrl:uploaded.url,audioFileName:uploaded.name,audioFileSize:Number(uploaded.size)||file.size,audioDurationSeconds:duration,audioMimeType:uploaded.mimeType});onUpdated?.(saved);}catch(error){setAudioError(error instanceof Error?error.message:'No fue posible guardar el audio.');}finally{setUploadingAudio(false);}};
   const isQuality = evaluation.evaluationType === 'QUALITY' || evaluation.items.some(item => QUALITY_ATTRIBUTES.some(attribute => attribute.id === item.criterionId));
   const advisorName = advisor?.name || evaluation.sourceAdvisorName || 'Asesor por relacionar';
   const qualityScores = isQuality ? ['C1', 'C2', 'C3', 'C4'].map(criterion => {
@@ -246,7 +249,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
           {!evaluation.audioUrl && evaluation.origin === 'SPEECH_ANALYTICS' && evaluation.audioFileName && (
             <div className="cm-card flex items-center gap-3 p-4 text-xs text-[var(--cm-text-secondary)]">
               <FileAudio className="h-4 w-4 shrink-0 text-[var(--cm-primary)]" />
-              <span>Audio referenciado por Speech Analytics: <strong className="text-[var(--cm-text)]">{evaluation.audioFileName}</strong>. El archivo de audio aún no fue adjuntado.</span>
+              <div className="flex-1"><span>Audio referenciado por Speech Analytics: <strong className="text-[var(--cm-text)]">{evaluation.audioFileName}</strong>. El archivo de audio aún no fue adjuntado.</span>{canAttachAudio&&<AudioPlayer audioFileName={evaluation.audioFileName} uploadLabel="Agregar audio" compact busy={uploadingAudio} onAudioUpload={attachAudio}/>} {audioError&&<p className="mt-2 text-xs text-[var(--cm-danger)]">{audioError}</p>}</div>
             </div>
           )}
 

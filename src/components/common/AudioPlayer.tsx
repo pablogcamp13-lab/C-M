@@ -22,6 +22,7 @@ interface AudioPlayerProps {
   readOnly?: boolean;
   sticky?: boolean;
   compact?: boolean;
+  uploadLabel?: string;
   busy?: boolean;
   onTimeUpdate?: (currentTimeSeconds: number, formattedTimestamp: string) => void;
   onInsertTimestamp?: (timestamp: string, seconds: number) => void;
@@ -45,6 +46,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   readOnly = false,
   sticky = false,
   compact = false,
+  uploadLabel = 'Reemplazar',
   busy = false,
   onTimeUpdate,
   onInsertTimestamp,
@@ -359,7 +361,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                   title="Cargar archivo de audio MP3 o MPEG"
                 >
                   <Upload className="h-3.5 w-3.5 text-[var(--cm-text-secondary)]" />
-                  <span className="hidden md:inline">Reemplazar</span>
+                  <span className="hidden md:inline">{uploadLabel}</span>
                 </button>
                 {onRemoveAudio && audioFileName && (
                   <button
