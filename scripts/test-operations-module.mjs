@@ -3,6 +3,7 @@ import {spawn} from 'node:child_process';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import XLSX from 'xlsx';
 
 const temp=await mkdtemp(join(tmpdir(),'cm-operations-'));
 const port=3900+Math.floor(Math.random()*300),base=`http://127.0.0.1:${port}`;
@@ -31,6 +32,14 @@ try{
   assert.equal((await api(`/api/evaluations/${pendingSpeech.id}/create-advisor`,{token:admin,method:'POST',body:{...createSpeechAdvisorBody,dni:'99999999'}})).response.status,400,'The imported DNI cannot be changed while resolving the alert');
   assert.equal((await api(`/api/evaluations/${pendingSpeech.id}/create-advisor`,{token:admin,method:'POST',body:{...createSpeechAdvisorBody,companyId:talent.id}})).response.status,400,'The selected operation must belong to the selected company');
   const createdSpeechAdvisor=await api(`/api/evaluations/${pendingSpeech.id}/create-advisor`,{token:admin,method:'POST',body:createSpeechAdvisorBody});assert.equal(createdSpeechAdvisor.response.status,201,JSON.stringify(createdSpeechAdvisor.data));assert.equal(createdSpeechAdvisor.data.advisor.dni,'70184044');
+  const legacyFile='15000-O15001-20260917-122612-900388129-02-1789665960.7681388.MAMANIMIRIAM.mp3';
+  const oldLegacy=await api('/api/evaluations/import-speech',{token:admin,method:'POST',body:{campaignName:'Retenciones Bitel',fileName:'legacy.xlsx',rows:[{externalId:'speech-legacy-repair-1',fileName:legacyFile,sourceAdvisorDni:'20260917',sourceAdvisorName:'Sin identificar',speechScore:0,items:[]}]}});assert.equal(oldLegacy.response.status,201);
+  const speechBook=XLSX.utils.book_new();XLSX.utils.book_append_sheet(speechBook,XLSX.utils.json_to_sheet([{ID:'speech-structured-reference-1',Archivo:'MIRIAM_GABRIELA_MAMANI_70184044_900388129_5m17s.mp3',nota_final:'0'},{ID:'speech-legacy-repair-1',Archivo:legacyFile,nota_final:'0'}]),'Resultados');
+  const previewResponse=await fetch(`${base}/api/evaluations/import-speech/preview`,{method:'POST',headers:{Authorization:`Bearer ${admin}`,'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','X-File-Name':'speech-identity.xlsx','X-Campaign-Name':'Retenciones Bitel'},body:XLSX.write(speechBook,{type:'buffer',bookType:'xlsx'})});
+  const speechPreview=await previewResponse.json();assert.equal(previewResponse.status,200,JSON.stringify(speechPreview));
+  assert.equal(speechPreview.rows[1].sourceAdvisorDni,'70184044');assert.equal(speechPreview.rows[1].status,'REPAIR');
+  const correctedImport=await api('/api/evaluations/import-speech',{token:admin,method:'POST',body:{campaignName:'Retenciones Bitel',fileName:'speech-identity.xlsx',rows:speechPreview.rows}});assert.equal(correctedImport.response.status,201,JSON.stringify(correctedImport.data));assert.equal(correctedImport.data.summary.repaired,1);
+  const correctedEvaluation=(await api('/api/admin/dashboard',{token:admin})).data.evaluations.find(item=>item.sourceExternalId==='speech-legacy-repair-1');assert.equal(correctedEvaluation.sourceAdvisorDni,'70184044');assert.equal(correctedEvaluation.advisorId,createdSpeechAdvisor.data.advisor.id);
   assert.equal((await api(`/api/evaluations/${pendingSpeech.id}/create-advisor`,{token:admin,method:'POST',body:createSpeechAdvisorBody})).response.status,409,'A repeated click cannot create a duplicate advisor');
   const linkedSpeech=await api(`/api/evaluations/${pendingSpeech.id}/link-advisor`,{token:admin,method:'PATCH',body:{advisorId:createdSpeechAdvisor.data.advisor.id}});assert.equal(linkedSpeech.response.status,200,JSON.stringify(linkedSpeech.data));assert.equal(linkedSpeech.data.evaluation.advisorResolutionStatus,'RESOLVED');
   const persistedSpeech=(await api('/api/admin/dashboard',{token:admin})).data.evaluations.find(item=>item.id===pendingSpeech.id);assert.equal(persistedSpeech.advisorId,createdSpeechAdvisor.data.advisor.id);

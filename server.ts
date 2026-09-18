@@ -2,6 +2,7 @@ import express from "express";
 import { mergeEvaluationSources } from "./server/platformStateRecovery";
 import { registerOperationsModule } from "./server/operationsModule";
 import { rosterImportSnapshot } from "./server/rosterSync";
+import { speechAdvisorIdentityFromFile, speechFileIdentityMatches } from "./server/speechFileIdentity";
 import path from "path";
 import { googleStorage as googleDriveStorage } from "./server/googleStorage";
 import { supabaseStorage } from "./server/supabaseStorage";
@@ -224,26 +225,12 @@ const speechCriterionMap = [
   ['consentimiento_validaciones', 'q_3_2'],
   ['cumplimiento_transversal', 'q_4_1']
 ] as const;
-const speechAdvisorIdentityFromFile = (fileName: string) => {
-  const structuredMatch = fileName.match(/(?:^|_)(\d{8})(?=_|\.|$)/);
-  const dniMatch = structuredMatch || fileName.match(/(?<!\d)(\d{8})(?!\d)/);
-  const dni = dniMatch?.[1] || '';
-  const prefix = dniMatch?.index === undefined ? '' : fileName.slice(0, dniMatch.index);
-  const name = prefix
-    .replace(/^.*[\\/]/, '')
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLocaleLowerCase('es-PE')
-    .replace(/(^|\s)(\p{L})/gu, (_, separator: string, letter: string) => `${separator}${letter.toLocaleUpperCase('es-PE')}`);
-  return { dni, name };
-};
-const speechPreviewRow = (row: Record<string, unknown>, rowNumber: number) => {
+const speechPreviewRow = (row: Record<string, unknown>, rowNumber: number, fileMatches: Map<string, { dni: string; name: string }> = new Map()) => {
   const externalId = speechText(speechValue(row, 'ID')) || `FILA-${rowNumber}`;
   const fileName = speechText(speechValue(row, 'Archivo'));
   // La nomenclatura SA usa el nombre antes del primer DNI de 8 dígitos.
   // La columna nombre_asesor contiene alias e incluso "NINGUNO", por lo que no es fiable para identificar.
-  const fileIdentity = speechAdvisorIdentityFromFile(fileName);
+  const fileIdentity = fileMatches.get(fileName) || speechAdvisorIdentityFromFile(fileName);
   const sourceAdvisorReportedName = speechText(speechValue(row, 'nombre_asesor', 'Asesor'));
   const sourceAdvisorName = fileIdentity.name || (/^(ningun[oa]|sin asesor|no identificado|n\/?a)$/i.test(sourceAdvisorReportedName) ? '' : sourceAdvisorReportedName);
   const dateTime = speechDateTime(speechValue(row, 'Fecha'));
@@ -280,7 +267,8 @@ const speechPreviewRow = (row: Record<string, unknown>, rowNumber: number) => {
 };
 const speechNeedsRepair = (current: any, source: any) => current?.origin === 'SPEECH_ANALYTICS'
   && normalizedValidationStatus(current) === 'AUTOMATIC_PENDING'
-  && ((current.speechScore == null || (current.speechScore === 0 && source.speechScore !== 0)) && source.speechScore != null
+  && (String(current.sourceAdvisorDni || '') !== String(source.sourceAdvisorDni || '') && /^\d{8}$/.test(String(source.sourceAdvisorDni || ''))
+    || (current.speechScore == null || (current.speechScore === 0 && source.speechScore !== 0)) && source.speechScore != null
     || (current.items || []).every((item: any) => item.compliance === 'NO_APLICA')
       && (source.items || []).some((item: any) => item.compliance !== 'NO_APLICA'));
 
@@ -1039,8 +1027,9 @@ async function startServer() {
       const existing=await adminEvaluationRows(),existingIds=new Set(existing.map((item:any)=>item.id)),existingById=new Map(existing.map((item:any)=>[item.id,item]));
       const existingSourceKeys=new Set(existing.filter((item:any)=>item.origin==='SPEECH_ANALYTICS'&&normalizeSpeechText(item.sourceCampaignName||directory.campaigns.find((campaign:Campaign)=>campaign.id===item.campaignId)?.name)===context.key).map((item:any)=>`${speechText(item.sourceExternalId)}|${speechText(item.recordingCode||item.audioFileName)}`));
       const seenInFile=new Set<string>();
+      const fileMatches=speechFileIdentityMatches(sourceRows.map(source=>speechText(speechValue(source,'Archivo'))));
       const rows=sourceRows.map((source,rowIndex)=>{
-        const parsed=speechPreviewRow(source,rowIndex+2),advisor=context.resolve(parsed.sourceAdvisorDni,parsed.sourceAdvisorName),operation=advisor?.operationId?context.operationById.get(advisor.operationId):undefined,company=operation?context.companyById.get(operation.companyId):undefined;
+        const parsed=speechPreviewRow(source,rowIndex+2,fileMatches),advisor=context.resolve(parsed.sourceAdvisorDni,parsed.sourceAdvisorName),operation=advisor?.operationId?context.operationById.get(advisor.operationId):undefined,company=operation?context.companyById.get(operation.companyId):undefined;
         const sourceKey=`${parsed.externalId}|${parsed.fileName}`,evaluationId=`eval_speech_${speechHash(`${context.key}|${sourceKey}`)}`,prior=existingById.get(evaluationId),repair=!seenInFile.has(sourceKey)&&speechNeedsRepair(prior,parsed),duplicate=seenInFile.has(sourceKey)||!repair&&(existingIds.has(evaluationId)||existingSourceKeys.has(sourceKey));seenInFile.add(sourceKey);
         const warning=duplicate?'La evaluación ya fue importada.':advisor?'':parsed.sourceAdvisorDni?`El DNI ${parsed.sourceAdvisorDni} no figura en la dotación activa de ${context.campaigns[0].name}. Se creará con alerta para relacionarlo después.`:'El archivo no contiene un DNI válido de 8 dígitos. Se creará con alerta para relacionarlo después.';
         return{...parsed,evaluationId,matchedAdvisorId:advisor?.id||'',matchedAdvisorName:advisor?.name||'',matchedOperationId:operation?.id||'',matchedOperationName:operation?.name||'',matchedCompanyId:company?.id||'',matchedCompanyName:company?.name||'',status:duplicate?'DUPLICATE':repair?'REPAIR':advisor?'READY':'WARNING',warning};
@@ -1064,7 +1053,9 @@ async function startServer() {
       const externalId=speechText(source.externalId),sourceKey=`${externalId}|${speechText(source.fileName)}`,evaluationId=`eval_speech_${speechHash(`${context.key}|${sourceKey}`)}`;
       const prior=existingById.get(evaluationId);
       if(prior&&speechNeedsRepair(prior,source)&&source.status==='REPAIR'){
-        repaired.push(correctMigracionesQualityEvaluation({...prior,items:source.items,speechScore:source.speechScore,scoreTotal:source.speechScore,technicalScore:source.speechScore,comments:speechText(source.description)},directory.campaigns));
+        const sourceDni=speechText(source.sourceAdvisorDni),sourceAdvisorName=speechText(source.sourceAdvisorName),advisor=context.resolve(sourceDni,sourceAdvisorName),operation=advisor?.operationId?context.operationById.get(advisor.operationId):undefined,company=operation?context.companyById.get(operation.companyId):undefined,assignment=advisor&&operation?context.activeAssignments.find((item:OperationAssignment)=>item.advisorId===advisor.id&&item.operationId===operation.id):undefined;
+        repaired.push(correctMigracionesQualityEvaluation({...prior,items:source.items,speechScore:source.speechScore,scoreTotal:source.speechScore,technicalScore:source.speechScore,comments:speechText(source.description),sourceAdvisorDni:sourceDni,sourceAdvisorName,...(advisor?{advisorId:advisor.id,operationId:operation?.id,companyId:company?.id,assignmentId:assignment?.id,supervisorId:advisor.supervisorId||'',supervisorAtEvaluation:advisor.supervisorId||'',advisorResolutionStatus:'RESOLVED',importAlert:undefined}: {importAlert:`El DNI ${sourceDni} no figura en la dotación activa de ${campaignName}. Solicita a Administración crear o regularizar al asesor y luego relaciónalo.`})},directory.campaigns));
+        if(advisor)linked++;else pending++;
         existingById.delete(evaluationId);
         continue;
       }
@@ -1090,8 +1081,8 @@ async function startServer() {
         const insertPerson=db.prepare(`INSERT OR IGNORE INTO advisors(id,dni,employee_code,name,campaign_id,team_id,supervisor_id,data_json) VALUES(?,?,?,?,?,?,?,?)`),insertEvaluation=db.prepare(`INSERT OR IGNORE INTO evaluations(id,advisor_id,evaluator_id,evaluation_type,evaluated_at,payload_json,created_at) VALUES(?,?,?,?,?,?,?)`);
         for(const person of pendingPeople)insertPerson.run(person.id,person.dni,person.employeeCode,person.name,person.campaignId,null,null,JSON.stringify(person));
         for(const evaluation of created)insertEvaluation.run(evaluation.id,evaluation.advisorId,evaluation.evaluatorId,evaluation.evaluationType,`${evaluation.date}T${evaluation.time}:00`,JSON.stringify(evaluation),evaluation.createdAt);
-        const updateEvaluation=db.prepare('UPDATE evaluations SET payload_json=? WHERE id=?');
-        for(const evaluation of repaired)updateEvaluation.run(JSON.stringify(evaluation),evaluation.id);
+        const updateEvaluation=db.prepare('UPDATE evaluations SET advisor_id=?,payload_json=? WHERE id=?');
+        for(const evaluation of repaired)updateEvaluation.run(evaluation.advisorId,JSON.stringify(evaluation),evaluation.id);
         db.exec('COMMIT');
       }catch(error){db.exec('ROLLBACK');throw error;}
       if(lastCompletePlatformState)lastCompletePlatformState={...lastCompletePlatformState,evaluations:uniqueEvaluations([...created,...(lastCompletePlatformState.evaluations||[]).map((item:any)=>repaired.find((fixed:any)=>fixed.id===item.id)||item)])};
