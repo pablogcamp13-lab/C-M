@@ -49,7 +49,7 @@ class SupabaseStorage {
   get enabled() { return Boolean(databaseUrl()); }
   private db() {
     if (!this.enabled) throw new Error('SUPABASE_DATABASE_URL no está configurada.');
-    return this.pool ||= new Pool({ connectionString: databaseUrl(), ssl: { rejectUnauthorized: false }, max: 8, idleTimeoutMillis: 30_000, statement_timeout: 30_000 });
+    return this.pool ||= new Pool({ connectionString: databaseUrl(), ssl: { rejectUnauthorized: false }, max: 8, connectionTimeoutMillis: 10_000, idleTimeoutMillis: 30_000, statement_timeout: 30_000 });
   }
   async health() { const started=Date.now(); await this.db().query('select 1'); return { ok:true, durationMs:Date.now()-started }; }
   private async transaction<T>(run:(client:any)=>Promise<T>):Promise<T>{const client=await this.db().connect();try{await client.query('BEGIN');const result=await run(client);await client.query('COMMIT');return result;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}}
