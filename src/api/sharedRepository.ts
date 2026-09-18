@@ -101,7 +101,7 @@ export const evaluationsApi = {
 export interface SpeechImportPreview {
   fileName: string;
   campaign: { key: string; name: string };
-  summary: { total: number; ready: number; warnings: number; duplicates: number };
+  summary: { total: number; ready: number; warnings: number; repairs: number; duplicates: number };
   rows: Array<Record<string, any>>;
 }
 
@@ -114,7 +114,7 @@ export const speechImportApi = {
     }));
   },
   async commit(preview: SpeechImportPreview) {
-    return json<{ summary: { created: number; linked: number; pending: number; duplicates: number } }>(await fetch('/api/evaluations/import-speech', {
+    return json<{ summary: { created: number; repaired: number; linked: number; pending: number; duplicates: number } }>(await fetch('/api/evaluations/import-speech', {
       method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify({ campaignName: preview.campaign.name, fileName: preview.fileName, rows: preview.rows })
     }));
   },

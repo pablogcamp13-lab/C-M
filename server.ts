@@ -250,14 +250,15 @@ const speechPreviewRow = (row: Record<string, unknown>, rowNumber: number) => {
   const dimensions: Record<string, string> = { C1:'CONECTAR', C2:'CLARIFICAR', C3:'CONVERTIR', C4:'CONECTAR_C4' };
   const items = speechCriterionMap.map(([sourceField, criterionId]) => {
     const attribute = QUALITY_ATTRIBUTES.find(item => item.id === criterionId)!;
-    const compliance = speechCompliance(speechValue(row, sourceField, `${sourceField}_justif`));
-    const finding = speechText(speechValue(row, `${sourceField} — por qué`, `${sourceField} por que`, `${sourceField}_justif — por qué`, `${sourceField}_justif por que`));
+    const compliance = speechCompliance(speechValue(row, sourceField, attribute.code, `${sourceField}_justif`));
+    const finding = speechText(speechValue(row, `${sourceField} — por qué`, `${sourceField} por que`, `${sourceField}_justif — por qué`, `${sourceField}_justif por que`, `${attribute.code} — por qué`, `${attribute.code} por que`));
     const critical = 'critical' in attribute && Boolean(attribute.critical);
     const classification = critical ? (/cumplimiento/i.test(attribute.focus) ? 'CRITICO_COMPLIANCE' : /usuario/i.test(attribute.focus) ? 'CRITICO_USUARIO_FINAL' : 'CRITICO_NEGOCIO') : 'NO_CRITICO';
     return { id:`item_${criterionId}`, criterionId, dimension:dimensions[attribute.criterion], compliance, percentage:compliance==='CUMPLE'?100:0, level:compliance==='CUMPLE'?4:compliance==='NO_CUMPLE'?1:0, finding, evidence:'', recommendedAction:'', attributeWeight:attribute.weight, qualityGuideline:{...attribute,critical,active:true}, category:attribute.criterion, attribute:attribute.name, errorType:compliance==='NO_CUMPLE'?(critical?'Incumplimiento crítico':'Incumplimiento de atributo'):'', classification };
   });
-  const speechScoreValue = Number(speechValue(row, 'nota_final'));
-  const speechScore = Number.isFinite(speechScoreValue) ? speechScoreValue : null;
+  const rawSpeechScore = speechValue(row, 'nota_final', 'D');
+  const speechScoreValue = Number(rawSpeechScore);
+  const speechScore = rawSpeechScore !== '' && Number.isFinite(speechScoreValue) ? speechScoreValue : null;
   const approved = speechText(speechValue(row, 'aprobado'));
   const criticalValue = speechText(speechValue(row, 'error_critico'));
   const criticalDetected = speechCompliance(criticalValue) === 'CUMPLE';
@@ -265,17 +266,23 @@ const speechPreviewRow = (row: Record<string, unknown>, rowNumber: number) => {
   const description = [
     approved && `Resultado Speech Analytics: ${approved}`,
     speechText(speechValue(row, 'aprobado — por qué', 'aprobado por que')) && `Justificación del resultado: ${speechText(speechValue(row, 'aprobado — por qué', 'aprobado por que'))}`,
-    speechText(speechValue(row, 'fortalezas')) && `Fortalezas: ${speechText(speechValue(row, 'fortalezas'))}`,
+    speechText(speechValue(row, 'fortalezas', 'A')) && `Fortalezas: ${speechText(speechValue(row, 'fortalezas', 'A'))}`,
     speechScore !== null && `Nota informada por Speech Analytics: ${speechScore}`,
-    speechText(speechValue(row, 'nota_final — por qué', 'nota_final por que')) && `Justificación de la nota: ${speechText(speechValue(row, 'nota_final — por qué', 'nota_final por que'))}`,
+    speechText(speechValue(row, 'nota_final — por qué', 'nota_final por que', 'D — por qué')) && `Justificación de la nota: ${speechText(speechValue(row, 'nota_final — por qué', 'nota_final por que', 'D — por qué'))}`,
     criticalValue && `Error crítico: ${criticalValue}`,
     criticalType && `Tipo de error crítico: ${criticalType}`,
     speechText(speechValue(row, 'error_critico — por qué', 'error_critico por que', 'error_critico_justif', 'error_critico_justif — por qué')) && `Detalle del error crítico: ${speechText(speechValue(row, 'error_critico — por qué', 'error_critico por que', 'error_critico_justif', 'error_critico_justif — por qué'))}`,
-    speechText(speechValue(row, 'oportunidades_mejora')) && `Oportunidades de mejora: ${speechText(speechValue(row, 'oportunidades_mejora'))}`
+    speechText(speechValue(row, 'oportunidades_mejora', 'B')) && `Oportunidades de mejora: ${speechText(speechValue(row, 'oportunidades_mejora', 'B'))}`,
+    speechText(speechValue(row, 'C')) && `Acción sugerida: ${speechText(speechValue(row, 'C'))}`
   ].filter(Boolean).join('\n\n');
   const saleLabel = normalizeSpeechText(speechValue(row, 'venta_evaluable'));
   return { rowNumber, externalId, fileName, sourceAdvisorName, sourceAdvisorReportedName, sourceAdvisorDni:fileIdentity.dni, ...dateTime, durationSeconds:Math.max(0, Math.round(Number(speechValue(row, 'Duración (min)')) * 60) || 0), speechScore, speechApproved:approved, criticalDetected, criticalType, description, items, sale:saleLabel.includes('vendida'), saleResult:saleLabel.includes('vendida')?'VENTA_CONCRETADA':'NO_VENTA' };
 };
+const speechNeedsRepair = (current: any, source: any) => current?.origin === 'SPEECH_ANALYTICS'
+  && normalizedValidationStatus(current) === 'AUTOMATIC_PENDING'
+  && ((current.speechScore == null || (current.speechScore === 0 && source.speechScore !== 0)) && source.speechScore != null
+    || (current.items || []).every((item: any) => item.compliance === 'NO_APLICA')
+      && (source.items || []).some((item: any) => item.compliance !== 'NO_APLICA'));
 
 async function cleanupEvaluationDuplicates() {
   const rows = db.prepare('SELECT id,payload_json FROM evaluations ORDER BY created_at DESC').all() as any[];
@@ -993,15 +1000,16 @@ async function startServer() {
       const sourceRows=XLSX.utils.sheet_to_json<Record<string,unknown>>(sheet,{defval:'',raw:true});
       if(!sourceRows.length)return res.status(400).json({error:'La hoja Resultados no contiene registros.'});
       if(sourceRows.length>2000)return res.status(400).json({error:'El archivo supera el máximo de 2,000 evaluaciones por importación.'});
-      const existing=await adminEvaluationRows(),existingIds=new Set(existing.map((item:any)=>item.id));
+      const existing=await adminEvaluationRows(),existingIds=new Set(existing.map((item:any)=>item.id)),existingById=new Map(existing.map((item:any)=>[item.id,item]));
       const existingSourceKeys=new Set(existing.filter((item:any)=>item.origin==='SPEECH_ANALYTICS'&&normalizeSpeechText(item.sourceCampaignName||directory.campaigns.find((campaign:Campaign)=>campaign.id===item.campaignId)?.name)===context.key).map((item:any)=>`${speechText(item.sourceExternalId)}|${speechText(item.recordingCode||item.audioFileName)}`));
+      const seenInFile=new Set<string>();
       const rows=sourceRows.map((source,rowIndex)=>{
         const parsed=speechPreviewRow(source,rowIndex+2),advisor=context.resolve(parsed.sourceAdvisorDni,parsed.sourceAdvisorName),operation=advisor?.operationId?context.operationById.get(advisor.operationId):undefined,company=operation?context.companyById.get(operation.companyId):undefined;
-        const sourceKey=`${parsed.externalId}|${parsed.fileName}`,evaluationId=`eval_speech_${speechHash(`${context.key}|${sourceKey}`)}`,duplicate=existingIds.has(evaluationId)||existingSourceKeys.has(sourceKey);existingSourceKeys.add(sourceKey);
+        const sourceKey=`${parsed.externalId}|${parsed.fileName}`,evaluationId=`eval_speech_${speechHash(`${context.key}|${sourceKey}`)}`,prior=existingById.get(evaluationId),repair=!seenInFile.has(sourceKey)&&speechNeedsRepair(prior,parsed),duplicate=seenInFile.has(sourceKey)||!repair&&(existingIds.has(evaluationId)||existingSourceKeys.has(sourceKey));seenInFile.add(sourceKey);
         const warning=duplicate?'La evaluación ya fue importada.':advisor?'':parsed.sourceAdvisorDni?`El DNI ${parsed.sourceAdvisorDni} no figura en la dotación activa de ${context.campaigns[0].name}. Se creará con alerta para relacionarlo después.`:'El archivo no contiene un DNI válido de 8 dígitos. Se creará con alerta para relacionarlo después.';
-        return{...parsed,evaluationId,matchedAdvisorId:advisor?.id||'',matchedAdvisorName:advisor?.name||'',matchedOperationId:operation?.id||'',matchedOperationName:operation?.name||'',matchedCompanyId:company?.id||'',matchedCompanyName:company?.name||'',status:duplicate?'DUPLICATE':advisor?'READY':'WARNING',warning};
+        return{...parsed,evaluationId,matchedAdvisorId:advisor?.id||'',matchedAdvisorName:advisor?.name||'',matchedOperationId:operation?.id||'',matchedOperationName:operation?.name||'',matchedCompanyId:company?.id||'',matchedCompanyName:company?.name||'',status:duplicate?'DUPLICATE':repair?'REPAIR':advisor?'READY':'WARNING',warning};
       });
-      const summary={total:rows.length,ready:rows.filter(row=>row.status==='READY').length,warnings:rows.filter(row=>row.status==='WARNING').length,duplicates:rows.filter(row=>row.status==='DUPLICATE').length};
+      const summary={total:rows.length,ready:rows.filter(row=>row.status==='READY').length,warnings:rows.filter(row=>row.status==='WARNING').length,repairs:rows.filter(row=>row.status==='REPAIR').length,duplicates:rows.filter(row=>row.status==='DUPLICATE').length};
       return res.json({fileName:decodeURIComponent(req.header('x-file-name')||'speech-analytics.xlsx'),campaign:{key:context.key,name:context.campaigns[0].name},summary,rows});
     }catch(error){console.error('[speech-import] No fue posible analizar el archivo.',error);return res.status(400).json({error:'No fue posible leer el archivo. Verifica que sea un XLSX válido de Speech Analytics.'});}
   });
@@ -1012,12 +1020,18 @@ async function startServer() {
     if(!rows.length||rows.length>2000)return res.status(400).json({error:'No hay evaluaciones válidas para importar.'});
     const directory=await readRepository(),context=speechCampaignContext(directory,user,campaignName);
     if(!context.campaigns.length||!context.operations.length)return res.status(400).json({error:'La campaña seleccionada ya no está disponible.'});
-    const existing=await adminEvaluationRows(),existingIds=new Set(existing.map((item:any)=>item.id)),existingSourceKeys=new Set(existing.filter((item:any)=>item.origin==='SPEECH_ANALYTICS'&&normalizeSpeechText(item.sourceCampaignName||directory.campaigns.find((campaign:Campaign)=>campaign.id===item.campaignId)?.name)===context.key).map((item:any)=>`${speechText(item.sourceExternalId)}|${speechText(item.recordingCode||item.audioFileName)}`));
-    const created:any[]=[],pendingPeople:any[]=[];let duplicates=0,linked=0,pending=0;
+    const existing=await adminEvaluationRows(),existingIds=new Set(existing.map((item:any)=>item.id)),existingById=new Map(existing.map((item:any)=>[item.id,item])),existingSourceKeys=new Set(existing.filter((item:any)=>item.origin==='SPEECH_ANALYTICS'&&normalizeSpeechText(item.sourceCampaignName||directory.campaigns.find((campaign:Campaign)=>campaign.id===item.campaignId)?.name)===context.key).map((item:any)=>`${speechText(item.sourceExternalId)}|${speechText(item.recordingCode||item.audioFileName)}`));
+    const created:any[]=[],repaired:any[]=[],pendingPeople:any[]=[];let duplicates=0,linked=0,pending=0;
     const dimensions:Record<string,string>={C1:'CONECTAR',C2:'CLARIFICAR',C3:'CONVERTIR',C4:'CONECTAR_C4'};
     const sourceBatchDate=limaDate(),sourceBatchId=`sa_${sourceBatchDate.replace(/-/g,'')}_${speechHash(`${campaignName}|${req.body?.fileName}|${Date.now()}`).slice(0,12)}`;
     for(const source of rows){
       const externalId=speechText(source.externalId),sourceKey=`${externalId}|${speechText(source.fileName)}`,evaluationId=`eval_speech_${speechHash(`${context.key}|${sourceKey}`)}`;
+      const prior=existingById.get(evaluationId);
+      if(prior&&speechNeedsRepair(prior,source)&&source.status==='REPAIR'){
+        repaired.push(correctMigracionesQualityEvaluation({...prior,items:source.items,speechScore:source.speechScore,comments:speechText(source.description)},directory.campaigns));
+        existingById.delete(evaluationId);
+        continue;
+      }
       if(!externalId||existingIds.has(evaluationId)||existingSourceKeys.has(sourceKey)){duplicates++;continue;}
       const fileIdentity=speechAdvisorIdentityFromFile(speechText(source.fileName)),sourceDni=(fileIdentity.dni||speechText(source.sourceAdvisorDni)).replace(/\D/g,''),sourceAdvisorName=fileIdentity.name||speechText(source.sourceAdvisorName),advisor=context.resolve(sourceDni,sourceAdvisorName),operation=advisor?.operationId?context.operationById.get(advisor.operationId):undefined,campaign=(operation&&context.campaignById.get(operation.campaignId))||context.campaigns[0],company=operation?context.companyById.get(operation.companyId):undefined;
       const operationId=operation?.id;
@@ -1027,22 +1041,25 @@ async function startServer() {
       const items=QUALITY_ATTRIBUTES.map(attribute=>{const imported=(source.items||[]).find((item:any)=>item.criterionId===attribute.id)||{},compliance=['CUMPLE','NO_CUMPLE','NO_APLICA'].includes(imported.compliance)?imported.compliance:'NO_APLICA',critical='critical' in attribute&&Boolean(attribute.critical),classification=critical?(/cumplimiento/i.test(attribute.focus)?'CRITICO_COMPLIANCE':/usuario/i.test(attribute.focus)?'CRITICO_USUARIO_FINAL':'CRITICO_NEGOCIO'):'NO_CRITICO';return{id:`item_${attribute.id}`,criterionId:attribute.id,dimension:dimensions[attribute.criterion],compliance,percentage:compliance==='CUMPLE'?100:0,level:compliance==='CUMPLE'?4:compliance==='NO_CUMPLE'?1:0,finding:speechText(imported.finding),evidence:'',recommendedAction:'',attributeWeight:attribute.weight,qualityGuideline:{...attribute,critical,active:true},category:attribute.criterion,attribute:attribute.name,errorType:compliance==='NO_CUMPLE'?(critical?'Incumplimiento crítico':'Incumplimiento de atributo'):'',classification};});
       const criticalDetected=Boolean(source.criticalDetected),criticalName=speechText(source.criticalType)||'Error crítico detectado por Speech Analytics',now=new Date().toISOString(),gaps=items.filter(item=>item.compliance==='NO_CUMPLE');
       const assignment=advisor&&operationId?context.activeAssignments.find((item:OperationAssignment)=>item.advisorId===advisor.id&&item.operationId===operationId):undefined;
-      let evaluation:any={id:evaluationId,advisorId,evaluatorId:user.id,evaluatorName:user.name,campaignId:campaign.id,operationId,companyId:company?.id,assignmentId:assignment?.id,teamId:advisor?.teamId||'',supervisorId:advisor?.supervisorId||'',supervisorAtEvaluation:advisor?.supervisorId||'',product:campaign.products?.[0]||'Migraciones',date:/^\d{4}-\d{2}-\d{2}$/.test(String(source.date))?source.date:new Date().toISOString().slice(0,10),time:/^\d{2}:\d{2}$/.test(String(source.time))?source.time:'00:00',callId:externalId,recordingCode:speechText(source.fileName),type:'DIAGNOSTICO_INICIAL',evaluationType:'QUALITY',qualityStatus:'DRAFT',validationStatus:'AUTOMATIC_PENDING',origin:'SPEECH_ANALYTICS',sourceTag:'SA',sourceBatchId,sourceBatchDate,sourceCampaignName:campaignName,sourceCompanyName:company?.name,sourceOperationName:operation?.name,qualityCriticalErrorIds:criticalDetected?[`speech_${speechHash(criticalName)}`]:[],qualityCriticalErrorSnapshot:criticalDetected?[{id:`speech_${speechHash(criticalName)}`,name:criticalName,description:'Detectado por Speech Analytics.',active:true}]:[],sale:Boolean(source.sale),saleResult:source.sale?'VENTA_CONCRETADA':'NO_VENTA',comments:speechText(source.description),audioFileName:speechText(source.fileName),audioDurationSeconds:Math.max(0,Number(source.durationSeconds)||0),audioMimeType:'audio/mpeg',scoreConnect:null,scoreClarify:null,scoreConvert:null,scoreTotal:null,technicalScore:null,primaryGap:gaps[0]?.attribute||'Sin brechas identificadas',secondaryGap:gaps[1]?.attribute||'',strongestPillar:'',recommendation:gaps.length?'Revisar los atributos marcados como No cumple.':'Mantener el estándar alcanzado.',items,createdAt:now,sourceExternalId:externalId,sourceFileName:speechText(req.body?.fileName),sourceRowNumber:Number(source.rowNumber)||undefined,sourceAdvisorName,sourceAdvisorDni:sourceDni,advisorResolutionStatus:advisor?'RESOLVED':'PENDING',importAlert:advisor?undefined:`El DNI ${sourceDni||'no informado'} no figura en la dotación activa de ${campaign.name}. Solicita a Administración crear o regularizar al asesor y luego relaciónalo.`,speechScore:Number.isFinite(Number(source.speechScore))?Number(source.speechScore):null,speechApproved:speechText(source.speechApproved)};
+      let evaluation:any={id:evaluationId,advisorId,evaluatorId:user.id,evaluatorName:user.name,campaignId:campaign.id,operationId,companyId:company?.id,assignmentId:assignment?.id,teamId:advisor?.teamId||'',supervisorId:advisor?.supervisorId||'',supervisorAtEvaluation:advisor?.supervisorId||'',product:campaign.products?.[0]||'Migraciones',date:/^\d{4}-\d{2}-\d{2}$/.test(String(source.date))?source.date:new Date().toISOString().slice(0,10),time:/^\d{2}:\d{2}$/.test(String(source.time))?source.time:'00:00',callId:externalId,recordingCode:speechText(source.fileName),type:'DIAGNOSTICO_INICIAL',evaluationType:'QUALITY',qualityStatus:'DRAFT',validationStatus:'AUTOMATIC_PENDING',origin:'SPEECH_ANALYTICS',sourceTag:'SA',sourceBatchId,sourceBatchDate,sourceCampaignName:campaignName,sourceCompanyName:company?.name,sourceOperationName:operation?.name,qualityCriticalErrorIds:criticalDetected?[`speech_${speechHash(criticalName)}`]:[],qualityCriticalErrorSnapshot:criticalDetected?[{id:`speech_${speechHash(criticalName)}`,name:criticalName,description:'Detectado por Speech Analytics.',active:true}]:[],sale:Boolean(source.sale),saleResult:source.sale?'VENTA_CONCRETADA':'NO_VENTA',comments:speechText(source.description),audioFileName:speechText(source.fileName),audioDurationSeconds:Math.max(0,Number(source.durationSeconds)||0),audioMimeType:'audio/mpeg',scoreConnect:null,scoreClarify:null,scoreConvert:null,scoreTotal:null,technicalScore:null,primaryGap:gaps[0]?.attribute||'Sin brechas identificadas',secondaryGap:gaps[1]?.attribute||'',strongestPillar:'',recommendation:gaps.length?'Revisar los atributos marcados como No cumple.':'Mantener el estándar alcanzado.',items,createdAt:now,sourceExternalId:externalId,sourceFileName:speechText(req.body?.fileName),sourceRowNumber:Number(source.rowNumber)||undefined,sourceAdvisorName,sourceAdvisorDni:sourceDni,advisorResolutionStatus:advisor?'RESOLVED':'PENDING',importAlert:advisor?undefined:`El DNI ${sourceDni||'no informado'} no figura en la dotación activa de ${campaign.name}. Solicita a Administración crear o regularizar al asesor y luego relaciónalo.`,speechScore:source.speechScore === null || source.speechScore === '' ? null : Number.isFinite(Number(source.speechScore)) ? Number(source.speechScore) : null,speechApproved:speechText(source.speechApproved)};
       evaluation=correctMigracionesQualityEvaluation(evaluation,directory.campaigns);created.push(evaluation);existingIds.add(evaluationId);existingSourceKeys.add(sourceKey);if(advisor)linked++;else pending++;
     }
-    if(!created.length)return res.json({summary:{created:0,linked:0,pending:0,duplicates}});
+    if(!created.length&&!repaired.length)return res.json({summary:{created:0,repaired:0,linked:0,pending:0,duplicates}});
     try{
       if(supabaseStorage.enabled)await supabaseStorage.saveSpeechEvaluationBatch(created,pendingPeople);
       else if(googleStorage.enabled)for(const evaluation of created)await googleStorage.saveEvaluation(evaluation);
+      for(const evaluation of repaired){if(supabaseStorage.enabled)await supabaseStorage.saveEvaluation(evaluation);else if(googleStorage.enabled)await googleStorage.saveEvaluation(evaluation);}
       db.exec('BEGIN IMMEDIATE');
       try{
         const insertPerson=db.prepare(`INSERT OR IGNORE INTO advisors(id,dni,employee_code,name,campaign_id,team_id,supervisor_id,data_json) VALUES(?,?,?,?,?,?,?,?)`),insertEvaluation=db.prepare(`INSERT OR IGNORE INTO evaluations(id,advisor_id,evaluator_id,evaluation_type,evaluated_at,payload_json,created_at) VALUES(?,?,?,?,?,?,?)`);
         for(const person of pendingPeople)insertPerson.run(person.id,person.dni,person.employeeCode,person.name,person.campaignId,null,null,JSON.stringify(person));
         for(const evaluation of created)insertEvaluation.run(evaluation.id,evaluation.advisorId,evaluation.evaluatorId,evaluation.evaluationType,`${evaluation.date}T${evaluation.time}:00`,JSON.stringify(evaluation),evaluation.createdAt);
+        const updateEvaluation=db.prepare('UPDATE evaluations SET payload_json=? WHERE id=?');
+        for(const evaluation of repaired)updateEvaluation.run(JSON.stringify(evaluation),evaluation.id);
         db.exec('COMMIT');
       }catch(error){db.exec('ROLLBACK');throw error;}
-      if(lastCompletePlatformState)lastCompletePlatformState={...lastCompletePlatformState,evaluations:uniqueEvaluations([...created,...(lastCompletePlatformState.evaluations||[])])};
-      return res.status(201).json({summary:{created:created.length,linked,pending,duplicates}});
+      if(lastCompletePlatformState)lastCompletePlatformState={...lastCompletePlatformState,evaluations:uniqueEvaluations([...created,...(lastCompletePlatformState.evaluations||[]).map((item:any)=>repaired.find((fixed:any)=>fixed.id===item.id)||item)])};
+      return res.status(201).json({summary:{created:created.length,repaired:repaired.length,linked,pending,duplicates}});
     }catch(error:any){console.error('[speech-import] No fue posible guardar la importación.',error);return res.status(502).json({error:error.message||'No fue posible guardar la importación.'});}
   });
   app.post('/api/evaluations/:id/create-advisor',requireAuth,async(req,res)=>{
