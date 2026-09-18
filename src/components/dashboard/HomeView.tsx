@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Activity, ArrowDown, ArrowRight, ArrowUp, BarChart3, CheckSquare, Filter, Info, ListChecks, Plus, ShieldCheck, TrendingUp, UsersRound } from 'lucide-react';
+import { Activity, ArrowDown, ArrowRight, ArrowUp, BarChart3, CheckSquare, Filter, Info, Plus, ShieldCheck, TrendingUp, UsersRound } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, KpiCard, PageHeader, Select, TableSkeleton, Tabs, Tooltip } from '../ui';
 import { CompanyDistributionCard, EvaluationStatusCard, QualityTrendCard } from './ExecutiveCharts';
@@ -11,7 +11,7 @@ const scoreLabel = (value: number | null | undefined) => value === null || value
 const detailInfo = (text: string, definition: string) => <span className="cm-metric-detail">{text}<Tooltip content={definition}><button aria-label="Definición de la métrica"><Info /></button></Tooltip></span>;
 
 export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpenNewEvaluation }) => {
-  const { currentUser, isAuthReady, setCurrentSection, platformLoadError } = useApp();
+  const { currentUser, isAuthReady, setCurrentSection, platformLoadError, filteredEvaluations } = useApp();
   const [mode, setMode] = useState<ExecutiveMode>('D3C');
   const [originFilter, setOriginFilter] = useState<EvaluationOriginFilterValue>('ALL');
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -23,12 +23,22 @@ export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpe
   const loading = !isAuthReady;
   const methodologyName = mode === 'D3C' ? 'D+3C' : 'PUE';
   const scoreCount = data.scopedEvaluations.filter(item => mode === 'QUALITY' ? (item.technicalScore !== null && item.technicalScore !== undefined) || item.scoreTotal !== null : item.scoreTotal !== null).length;
+  // Keep both comparison cards visible even when the dashboard's origin filter is active.
+  const comparableEvaluations = filteredEvaluations.filter(item => (item.evaluationType === 'QUALITY' ? 'QUALITY' : 'D3C') === mode);
+  const originAverage = (speech: boolean) => {
+    const scores = comparableEvaluations.filter(item => (item.origin === 'SPEECH_ANALYTICS') === speech)
+      .map(item => mode === 'QUALITY' ? item.technicalScore ?? item.scoreTotal : item.scoreTotal)
+      .filter((score): score is number => typeof score === 'number' && Number.isFinite(score));
+    return { average: scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : null, count: scores.length };
+  };
+  const manual = originAverage(false);
+  const speech = originAverage(true);
   const kpis = [
     { label: `Resultado global ${methodologyName}`, value: scoreLabel(data.scoreAverage), detail: detailInfo(data.scoreAverage === null ? 'Sin evaluaciones con score' : `${scoreCount} evaluaciones con score`, `Promedio calculado sobre evaluaciones ${methodologyName} con score del periodo seleccionado.`), icon: <Activity />, className: data.scoreAverage === null ? undefined : data.scoreAverage < data.criticalThreshold ? 'is-danger' : 'is-success' },
     { label: 'Evaluaciones realizadas', value: String(data.scopedEvaluations.length), detail: detailInfo('Registros del periodo', `Cantidad de evaluaciones ${methodologyName} dentro de los filtros actuales.`), icon: <CheckSquare /> },
     { label: 'Asesores críticos', value: data.scopedEvaluations.length ? String(data.criticalAdvisorCount) : 'Sin datos', detail: detailInfo(data.scopedEvaluations.length ? `Resultado bajo ${data.criticalThreshold}%` : 'Sin evaluaciones para clasificar', 'Asesores únicos con al menos una evaluación bajo el umbral crítico configurado.'), icon: <UsersRound />, className: data.criticalAdvisorCount ? 'is-danger' : undefined },
-    { label: 'Planes pendientes', value: String(data.pendingPlans.length), detail: detailInfo(data.pendingPlans.length ? 'Pendientes, en curso o vencidos' : 'Sin seguimientos pendientes', 'Planes de acción reales, en alcance, que aún no están completados.'), icon: <ListChecks />, className: data.pendingPlans.some(plan => plan.status === 'VENCIDO') ? 'is-danger' : data.pendingPlans.length ? 'is-warning' : 'is-success' },
-    { label: 'Impacto operacional', value: data.operationalMeasurementCount ? `${data.operationalMeasurementCount}` : 'Sin datos', detail: detailInfo(data.operationalMeasurementCount ? 'Mediciones operacionales' : 'Sin mediciones en el periodo', 'Cantidad de mediciones operacionales disponibles bajo los filtros actuales.'), icon: <BarChart3 /> },
+    { label: 'Nota evaluaciones manuales', value: scoreLabel(manual.average), detail: detailInfo(`${manual.count} evaluaciones con nota`, `Promedio ${methodologyName} de evaluaciones manuales dentro de los filtros generales.`), icon: <CheckSquare /> },
+    { label: 'Nota Speech Analytics', value: scoreLabel(speech.average), detail: detailInfo(`${speech.count} evaluaciones con nota`, `Promedio ${methodologyName} de evaluaciones importadas de Speech Analytics dentro de los filtros generales.`), icon: <BarChart3 /> },
   ];
 
   return <div className="cm-page cm-home-executive">
