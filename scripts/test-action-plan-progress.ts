@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import type { ActionPlan, Advisor } from '../src/types';
 import { actionPlanProgress } from '../src/components/actionplans/actionPlanProgress';
+import { applySharedMetricDate, inheritedMetricDates, sharedMetricDate } from '../src/components/actionplans/actionPlanMetricDates';
 
 const plan = { advisorId: 'a', advisorIds: ['a', 'b', 'c', 'd'], advisorMetrics: [
   { advisorId: 'a', sphInitial: 0.38, sphInitialDate: '2026-09-01', sphRetraining: 0.42, sphRetrainingDate: '2026-09-10', sphUpdated: 0.4, sphUpdatedDate: '2026-09-18', observations: '' },
@@ -23,4 +24,9 @@ const individual = actionPlanProgress(plan, advisors, 'b');
 assert.deepEqual(individual.trend.map(item => item.sph), [0.42, null, 0.54]);
 assert.deepEqual(individual.trend.map(item => item.dateFrom), ['2026-09-03', null, '2026-09-19']);
 assert.deepEqual(individual.status, { active: 0, ceased: 1, missing: 0 });
+const unified = applySharedMetricDate(plan.advisorMetrics!, 'sphInitialDate', '2026-09-05');
+assert.equal(unified.every(row => row.sphInitialDate === '2026-09-05'), true);
+assert.equal(sharedMetricDate(unified, 'sphInitialDate'), '2026-09-05');
+assert.equal(inheritedMetricDates(unified).sphInitialDate, '2026-09-05');
+assert.equal(sharedMetricDate(plan.advisorMetrics!, 'sphInitialDate'), '', 'Legacy plans with different dates require choosing one shared date');
 console.log('Avance PDA: promedios, datos faltantes, cero válido y filtro por asesor correctos.');
