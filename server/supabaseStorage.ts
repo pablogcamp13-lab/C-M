@@ -30,6 +30,8 @@ export const normalizeDateForStorage = (value: unknown, fallback: string | null 
   const timestamp = normalizeTimestampForStorage(value, null);
   return timestamp ? timestamp.slice(0, 10) : fallback;
 };
+export const movementAssignmentLink = (sourceAssignmentId: string | undefined, advisorId: string, owners: Map<string,string>) =>
+  sourceAssignmentId && owners.get(sourceAssignmentId) === advisorId ? sourceAssignmentId : null;
 const personLookup = (rows:any[]) => new Map(rows.flatMap(row => [row.id, row.source_advisor_id].filter(Boolean).map(id => [String(id), row])));
 const advisorLink = (row:any, people:Map<string,any>) => {
   if (row.role !== 'ASESOR') return row.source_advisor_id || undefined;
@@ -68,7 +70,7 @@ class SupabaseStorage {
       operations:operationRows,
       operationSupervisors:operationSupervisors.rows.map((row:any)=>({operationId:row.operation_id,supervisorId:row.supervisor_id,active:Boolean(row.active),startAt:String(row.start_at).slice(0,10),endAt:row.end_at?String(row.end_at).slice(0,10):undefined} as OperationSupervisor)),
       operationAssignments:assignments.rows.map((row:any)=>({id:row.id,advisorId:row.person_id,operationId:row.operation_id,teamId:row.team_id||undefined,supervisorId:row.supervisor_id||undefined,role:row.role,operationalStatus:row.operational_status,startDate:String(row.start_at).slice(0,10),endDate:row.end_at?String(row.end_at).slice(0,10):undefined,active:Boolean(row.active),source:row.source,actorId:row.actor_user_id||undefined,observation:row.observation||undefined} as OperationAssignment)),
-      staffingMovements:movements.rows.map((row:any)=>({id:row.id,advisorId:row.person_id,assignmentId:row.assignment_id||undefined,type:row.type,effectiveAt:String(row.effective_at).slice(0,10),createdAt:row.created_at?.toISOString?.()||row.created_at,origin:json(row.origin_json,undefined),destination:json(row.destination_json,undefined),actorId:row.actor_user_id||undefined,observation:row.observation||undefined,reversedMovementId:row.reversed_movement_id||undefined} as StaffingMovement))
+      staffingMovements:movements.rows.map((row:any)=>({id:row.id,advisorId:row.person_id,assignmentId:row.assignment_id||row.source_assignment_id||undefined,type:row.type,effectiveAt:String(row.effective_at).slice(0,10),createdAt:row.created_at?.toISOString?.()||row.created_at,origin:json(row.origin_json,undefined),destination:json(row.destination_json,undefined),actorId:row.actor_user_id||undefined,observation:row.observation||undefined,reversedMovementId:row.reversed_movement_id||undefined} as StaffingMovement))
     };
   }
 
@@ -81,7 +83,16 @@ class SupabaseStorage {
     for(const team of repository.teams)await client.query(`INSERT INTO teams(id,operation_id,source_campaign_id,supervisor_id,name) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO UPDATE SET operation_id=EXCLUDED.operation_id,source_campaign_id=EXCLUDED.source_campaign_id,supervisor_id=EXCLUDED.supervisor_id,name=EXCLUDED.name`,[team.id,(repository.operations||[]).find(item=>item.campaignId===team.campaignId)?.id||null,team.campaignId,team.supervisorId,team.name]);
     for(const item of repository.operationSupervisors||[])await client.query(`INSERT INTO operation_supervisors(id,operation_id,supervisor_id,active,start_at,end_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(operation_id,supervisor_id,start_at) DO UPDATE SET active=EXCLUDED.active,end_at=EXCLUDED.end_at`,[uuid(`${item.operationId}|${item.supervisorId}|${item.startAt}`),item.operationId,item.supervisorId,item.active,normalizeDateForStorage(item.startAt),normalizeDateForStorage(item.endAt,null)]);
     for(const item of repository.operationAssignments||[])await client.query(`INSERT INTO assignments(id,person_id,operation_id,team_id,source_team_id,supervisor_id,role,operational_status,start_at,end_at,active,source,actor_user_id,source_actor_id,observation) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT(id) DO UPDATE SET operation_id=EXCLUDED.operation_id,team_id=EXCLUDED.team_id,supervisor_id=EXCLUDED.supervisor_id,operational_status=EXCLUDED.operational_status,end_at=EXCLUDED.end_at,active=EXCLUDED.active,actor_user_id=EXCLUDED.actor_user_id,observation=EXCLUDED.observation`,[item.id,item.advisorId,item.operationId,item.teamId||null,item.teamId||null,item.supervisorId||null,item.role,item.operationalStatus,normalizeDateForStorage(item.startDate),normalizeDateForStorage(item.endDate,null),item.active,item.source,item.actorId||null,item.actorId||null,item.observation||null]);
-    for(const item of repository.staffingMovements||[])await client.query(`INSERT INTO staffing_movements(id,person_id,assignment_id,source_assignment_id,type,effective_at,created_at,origin_json,destination_json,actor_user_id,source_actor_id,observation,reversed_movement_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(id) DO NOTHING`,[item.id,item.advisorId,item.assignmentId||null,item.assignmentId||null,item.type,normalizeTimestampForStorage(item.effectiveAt),normalizeTimestampForStorage(item.createdAt||item.occurredAt),JSON.stringify(item.origin||null),JSON.stringify(item.destination||null),item.actorId||null,item.actorId||null,item.observation||null,item.reversedMovementId||null]);
+    const movementAssignmentIds=[...new Set((repository.staffingMovements||[]).map(item=>item.assignmentId).filter((id):id is string=>Boolean(id)))];
+    const storedAssignments=movementAssignmentIds.length
+      ? (await client.query('SELECT id, person_id FROM assignments WHERE id = ANY($1::text[])',[movementAssignmentIds])).rows as {id:string;person_id:string}[]
+      : [];
+    const assignmentOwners=new Map(storedAssignments.map(row=>[row.id,row.person_id]));
+    for(const item of repository.staffingMovements||[]){
+      const sourceAssignmentId=item.assignmentId||null;
+      const assignmentId=movementAssignmentLink(sourceAssignmentId||undefined,item.advisorId,assignmentOwners);
+      await client.query(`INSERT INTO staffing_movements(id,person_id,assignment_id,source_assignment_id,type,effective_at,created_at,origin_json,destination_json,actor_user_id,source_actor_id,observation,reversed_movement_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(id) DO NOTHING`,[item.id,item.advisorId,assignmentId,sourceAssignmentId,item.type,normalizeTimestampForStorage(item.effectiveAt),normalizeTimestampForStorage(item.createdAt||item.occurredAt),JSON.stringify(item.origin||null),JSON.stringify(item.destination||null),item.actorId||null,item.actorId||null,item.observation||null,item.reversedMovementId||null]);
+    }
   });}
 
   async saveUser(user:User,passwordHash:string){
