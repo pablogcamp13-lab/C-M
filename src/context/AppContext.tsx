@@ -591,7 +591,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newEval: Evaluation = {
       ...evalData,
       evaluationType: evalData.evaluationType || 'D3C',
-      id: `eval_${Date.now()}`,
+      id: `eval_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
       createdAt: new Date().toISOString(),
       scoreConnect: summary.scoreConnect,
       scoreClarify: summary.scoreClarify,

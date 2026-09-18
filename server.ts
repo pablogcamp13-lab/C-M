@@ -878,7 +878,8 @@ async function startServer() {
       if (localDuplicate) return res.status(200).json({ evaluation: localDuplicate, deduplicated: true });
       // Evita volver a leer toda EVALUATIONS antes de cada alta. La deduplicación
       // local ya opera sobre el historial consolidado y reduce cuota/latencia.
-      if (googleStorage.enabled) await googleStorage.saveEvaluation(evaluation);
+      if (supabaseStorage.enabled) await supabaseStorage.saveEvaluation(evaluation);
+      else if (googleDriveStorage.sheetsEnabled) await googleDriveStorage.saveEvaluation(evaluation);
       try {
         db.prepare(`INSERT INTO evaluations (id,advisor_id,evaluator_id,evaluation_type,evaluated_at,payload_json,created_at) VALUES (?,?,?,?,?,?,?)`).run(evaluation.id, evaluation.advisorId, evaluation.evaluatorId, evaluation.evaluationType, evaluatedAt, JSON.stringify(evaluation), evaluation.createdAt || new Date().toISOString());
       } catch (cacheError) {
