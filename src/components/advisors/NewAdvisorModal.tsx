@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { useApp, formatAdvisorUsername } from '../../context/AppContext';
 import { Advisor } from '../../types';
-import { X, Save, UserPlus, Gauge, Clock, TrendingUp, KeyRound, ShieldCheck } from 'lucide-react';
-import { parseTimeToMinutes } from '../../utils/calculations';
+import { X, Save, UserPlus, KeyRound, ShieldCheck } from 'lucide-react';
 import { organizationApi } from '../../api/sharedRepository';
 
 interface NewAdvisorModalProps {
@@ -26,12 +25,6 @@ export const NewAdvisorModal: React.FC<NewAdvisorModalProps> = ({ onClose, onSuc
   const [hireDate, setHireDate] = useState(new Date().toISOString().split('T')[0]);
   const [campaignStartDate, setCampaignStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [schedule, setSchedule] = useState('09:00 - 18:00');
-
-  // Nivel 2: Línea Base Operacional
-  const [baselineConnectionTime, setBaselineConnectionTime] = useState('06:00');
-  const [baselineSph, setBaselineSph] = useState('0.20');
-  const [baselineDate, setBaselineDate] = useState(new Date().toISOString().split('T')[0]);
-  const [baselinePeriod, setBaselinePeriod] = useState('Línea Base Inicial');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -47,14 +40,12 @@ export const NewAdvisorModal: React.FC<NewAdvisorModalProps> = ({ onClose, onSuc
     if (!name.trim() || !dni.trim() || !companyId || !operationId || !campaignId || !supervisorId) { setError('Completa nombre, DNI, empresa, campaña y supervisor.'); return; }
     setSaving(true); setError('');
 
-    const sphNum = parseFloat(baselineSph) || 0.20;
-    const connMinutes = parseTimeToMinutes(baselineConnectionTime) || 360;
-
     try {
     const { advisor: newAdv } = await organizationApi.createAdvisor({
       name: name.trim(),
       employeeCode,
       dni: dni.trim(),
+      companyId,
       campaignId,
       operationId,
       teamId,
@@ -64,12 +55,6 @@ export const NewAdvisorModal: React.FC<NewAdvisorModalProps> = ({ onClose, onSuc
       hireDate: hireDate || new Date().toISOString().split('T')[0],
       campaignStartDate: campaignStartDate || undefined,
       schedule: schedule.trim() || undefined,
-      hasOperationalBaseline: true,
-      baselineConnectionTime: baselineConnectionTime.trim() || '06:00',
-      baselineConnectionMinutes: connMinutes,
-      baselineSph: Number(sphNum.toFixed(2)),
-      baselineDate: baselineDate || new Date().toISOString().split('T')[0],
-      baselinePeriod: baselinePeriod.trim() || 'Línea Base Inicial'
     });
 
     if (onSuccess) onSuccess(newAdv);
@@ -89,7 +74,7 @@ export const NewAdvisorModal: React.FC<NewAdvisorModalProps> = ({ onClose, onSuc
             </div>
             <div>
               <h3 className="font-bold text-base text-slate-900">Registrar Nuevo Asesor</h3>
-              <p className="text-[11px] text-slate-500">Datos del asesor y configuración de línea base</p>
+              <p className="text-[11px] text-slate-500">Datos del asesor y configuración operativa</p>
             </div>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1">
@@ -230,74 +215,6 @@ export const NewAdvisorModal: React.FC<NewAdvisorModalProps> = ({ onClose, onSuc
                 placeholder="09:00 - 18:00"
                 className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#031E3C] text-slate-800"
               />
-            </div>
-          </div>
-
-          {/* NIVEL 2 – LÍNEA BASE OPERACIONAL */}
-          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-3">
-            <div className="flex items-center gap-2">
-              <Gauge className="w-4 h-4 text-[#031E3C]" />
-              <span className="font-bold text-xs text-slate-800">Línea Base Operacional (Nivel 2)</span>
-            </div>
-            <p className="text-[11px] text-slate-500 leading-relaxed">
-              Punto de partida del asesor para medir el impacto de las intervenciones 3C sobre SPH y tiempo de conexión.
-            </p>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1 flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Tiempo Conexión Base</span>
-                </label>
-                <input
-                  type="text"
-                  value={baselineConnectionTime}
-                  onChange={(e) => setBaselineConnectionTime(e.target.value)}
-                  placeholder="06:00 (HH:MM)"
-                  className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#031E3C] font-mono text-slate-800"
-                />
-                <span className="text-[10px] text-slate-400">Formato HH:MM (ej. 06:15)</span>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1 flex items-center gap-1">
-                  <TrendingUp className="w-3.5 h-3.5 text-slate-400" />
-                  <span>SPH Base</span>
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="10"
-                  value={baselineSph}
-                  onChange={(e) => setBaselineSph(e.target.value)}
-                  placeholder="0.20"
-                  className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#031E3C] font-mono text-slate-800"
-                />
-                <span className="text-[10px] text-slate-400">Ventas por hora (ej. 0.22)</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Fecha de Línea Base</label>
-                <input
-                  type="date"
-                  value={baselineDate}
-                  onChange={(e) => setBaselineDate(e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#031E3C] text-slate-800"
-                />
-              </div>
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Período de Referencia</label>
-                <input
-                  type="text"
-                  value={baselinePeriod}
-                  onChange={(e) => setBaselinePeriod(e.target.value)}
-                  placeholder="Ej: Enero 2026"
-                  className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#031E3C] text-slate-800"
-                />
-              </div>
             </div>
           </div>
 
