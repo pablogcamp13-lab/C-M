@@ -5,6 +5,7 @@ import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, KpiCard, PageH
 import { CompanyDistributionCard, EvaluationStatusCard, QualityTrendCard } from './ExecutiveCharts';
 import { ExecutiveFilters, useExecutiveFilterSummary } from './ExecutiveFilters';
 import { type CampaignRank, type ExecutiveMode, useExecutiveHome } from './useExecutiveHome';
+import { EvaluationOriginFilter, type EvaluationOriginFilterValue } from './EvaluationOriginFilter';
 
 const scoreLabel = (value: number | null | undefined) => value === null || value === undefined ? 'Sin datos' : `${value}%`;
 const detailInfo = (text: string, definition: string) => <span className="cm-metric-detail">{text}<Tooltip content={definition}><button aria-label="Definición de la métrica"><Info /></button></Tooltip></span>;
@@ -12,9 +13,10 @@ const detailInfo = (text: string, definition: string) => <span className="cm-met
 export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpenNewEvaluation }) => {
   const { currentUser, isAuthReady, setCurrentSection, platformLoadError } = useApp();
   const [mode, setMode] = useState<ExecutiveMode>('D3C');
+  const [originFilter, setOriginFilter] = useState<EvaluationOriginFilterValue>('ALL');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filterSummary = useExecutiveFilterSummary();
-  const data = useExecutiveHome(mode);
+  const data = useExecutiveHome(mode, originFilter);
   const canCreateEvaluation = Boolean(onOpenNewEvaluation) && ['ADMINISTRADOR', 'CONSULTOR', 'MONITOR'].includes(currentUser.role);
   const firstName = currentUser.name.trim().split(/\s+/)[0] || currentUser.role;
   const hardError = Boolean(platformLoadError && !data.scopedEvaluations.length);
@@ -31,6 +33,7 @@ export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpe
 
   return <div className="cm-page cm-home-executive">
     <PageHeader breadcrumbs={['Inicio']} title={`Hola, ${firstName}`} description={`Resumen ejecutivo de Calidad y Mejora Continua · ${currentUser.role.toLocaleLowerCase('es-PE')}.`} actions={canCreateEvaluation ? <Button leadingIcon={<Plus />} onClick={onOpenNewEvaluation}>Nueva evaluación</Button> : undefined} context={<div className="cm-home-dashboard-controls"><Tabs value={mode} onChange={value => setMode(value as ExecutiveMode)} items={[{ value: 'D3C', label: 'Mejora Continua', count: data.totalByMode.D3C }, { value: 'QUALITY', label: 'Calidad', count: data.totalByMode.QUALITY }]} /><Button type="button" variant="secondary" size="sm" leadingIcon={<Filter />} className="cm-exec-filters-toggle" aria-expanded={filtersOpen} aria-controls="home-executive-filters" aria-label={`${filtersOpen ? 'Ocultar' : 'Mostrar'} filtros${filterSummary.activeCount > 0 ? `, ${filterSummary.activeCount} activos` : ''}`} onClick={() => setFiltersOpen(open => !open)}>{`Filtros${filterSummary.activeCount > 0 ? ` · ${filterSummary.activeCount}` : ''}`}</Button></div>} />
+    {mode === 'QUALITY' && <div className="px-5 pb-2 sm:px-7"><EvaluationOriginFilter value={originFilter} onChange={setOriginFilter}/></div>}
     <section className="cm-exec-filters-region" aria-label="Controles de filtrado">
       <div id="home-executive-filters" className={`cm-exec-filters-collapse ${filtersOpen ? 'is-open' : ''}`} aria-hidden={!filtersOpen} inert={!filtersOpen}>
         <div><ExecutiveFilters activeCount={filterSummary.activeCount} /></div>

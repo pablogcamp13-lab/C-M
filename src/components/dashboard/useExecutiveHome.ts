@@ -3,6 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { QUALITY_ATTRIBUTES } from '../../data/qualityPueData';
 import type { ActionPlan, Advisor, Campaign, Company, Evaluation, Operation, PlatformEvaluationType, User } from '../../types';
 import { calculatePareto } from '../../utils/calculations';
+import type { EvaluationOriginFilterValue } from './EvaluationOriginFilter';
 
 export type ExecutiveMode = PlatformEvaluationType;
 
@@ -73,7 +74,7 @@ const validationLabel = (status?: Evaluation['validationStatus']) => {
   return { id: 'unregistered', label: 'Sin estado registrado', tone: 'neutral' as const };
 };
 
-export const useExecutiveHome = (mode: ExecutiveMode) => {
+export const useExecutiveHome = (mode: ExecutiveMode, originFilter: EvaluationOriginFilterValue = 'ALL') => {
   const app = useApp();
   const {
     filteredEvaluations, filteredAdvisors, filteredOperationalMeasurements,
@@ -81,7 +82,7 @@ export const useExecutiveHome = (mode: ExecutiveMode) => {
   } = app;
 
   return useMemo(() => {
-    const scopedEvaluations = filteredEvaluations.filter(evaluation => (evaluation.evaluationType === 'QUALITY' ? 'QUALITY' : 'D3C') === mode);
+    const scopedEvaluations = filteredEvaluations.filter(evaluation => (evaluation.evaluationType === 'QUALITY' ? 'QUALITY' : 'D3C') === mode && (mode !== 'QUALITY' || originFilter === 'ALL' || (originFilter === 'SPEECH_ANALYTICS' ? evaluation.origin === 'SPEECH_ANALYTICS' : evaluation.origin !== 'SPEECH_ANALYTICS')));
     const scores = scopedEvaluations.map(evaluation => scoredValue(evaluation, mode));
     const scoreAverage = average(scores);
     const criticalThreshold = config.priorityThresholds.highGapMax;
@@ -282,5 +283,5 @@ export const useExecutiveHome = (mode: ExecutiveMode) => {
       operationalMeasurementCount: filteredOperationalMeasurements.length,
       totalByMode,
     };
-  }, [actionPlans, advisors, campaigns, companies, config, filteredAdvisors, filteredEvaluations, filteredOperationalMeasurements, filters, mode, operations, users]);
+  }, [actionPlans, advisors, campaigns, companies, config, filteredAdvisors, filteredEvaluations, filteredOperationalMeasurements, filters, mode, originFilter, operations, users]);
 };

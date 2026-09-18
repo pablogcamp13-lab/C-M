@@ -4,7 +4,7 @@ import { useApp } from '../../context/AppContext';
 import { Evaluation } from '../../types';
 import { speechImportApi } from '../../api/sharedRepository';
 import { SpeechAnalyticsImportModal } from './SpeechAnalyticsImportModal';
-import { SpeechAnalyticsBatches } from './SpeechAnalyticsBatches';
+import { SpeechAnalyticsBatches, SpeechAnalyticsBatchSummary, batchDate, displayBatchDate } from './SpeechAnalyticsBatches';
 import { FiltersBar } from '../common/FiltersBar';
 import { ThreeScore } from '../common/ThreeScore';
 import { StatusBadge } from '../common/StatusBadge';
@@ -16,7 +16,8 @@ import {
   Calendar,
   AlertCircle,
   FileUp,
-  Link2
+  Link2,
+  ArrowLeft
 } from 'lucide-react';
 
 interface EvaluationsListProps {
@@ -38,6 +39,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
   const [resultFilter, setResultFilter] = useState<'ALL' | 'VENTA' | 'NO_VENTA'>('ALL');
   const [stateFilter, setStateFilter] = useState<'ALL' | 'PENDIENTE' | 'FINALIZADA'>('ALL');
   const [importOpen, setImportOpen] = useState(false);
+  const [selectedBatchDate, setSelectedBatchDate] = useState<string | null>(null);
   const [linkTarget, setLinkTarget] = useState<Evaluation | null>(null);
   const [linkAdvisorId, setLinkAdvisorId] = useState('');
   const [linkBusy, setLinkBusy] = useState(false);
@@ -53,7 +55,9 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
     const campaignName = campaigns.find(item => item.id === operation?.campaignId)?.name || '';
     return advisor.status === 'ACTIVO' && advisor.active !== false && normalize(campaignName) === normalize(linkCampaignName);
   }) : [];
+  const batchEvaluations = selectedBatchDate ? filteredEvaluations.filter(ev => ev.origin === 'SPEECH_ANALYTICS' && batchDate(ev) === selectedBatchDate) : [];
   const visibleEvaluations = filteredEvaluations.filter(ev => {
+    if (selectedBatchDate ? ev.origin !== 'SPEECH_ANALYTICS' || batchDate(ev) !== selectedBatchDate : ev.origin === 'SPEECH_ANALYTICS') return false;
     if (typeFilter !== 'ALL' && ev.evaluationType !== typeFilter) return false;
     if (resultFilter !== 'ALL' && (ev.sale ? 'VENTA' : 'NO_VENTA') !== resultFilter) return false;
     const state = ev.validationStatus === 'AUTOMATIC_PENDING' || ev.validationStatus === 'PENDIENTE_AUTOMATICO' ? 'PENDIENTE' : 'FINALIZADA';
@@ -93,12 +97,13 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
       <FiltersBar />
 
       <div className="max-w-7xl mx-auto w-full p-4 sm:p-6 space-y-4">
+        {selectedBatchDate && <button type="button" onClick={() => setSelectedBatchDate(null)} className="cm-button-secondary px-3 py-2 text-xs font-bold"><ArrowLeft className="h-4 w-4"/>Volver a evaluaciones manuales</button>}
         
         {/* Compact Page Header (No redundant big cards) */}
         <div className="cm-page-heading flex items-center justify-between pb-1">
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-[#031E3C] tracking-tight font-heading">
-              {isAdvisor ? 'Mis evaluaciones' : 'Evaluaciones'}
+              {selectedBatchDate ? `Speech Analytics · ${displayBatchDate(selectedBatchDate)}` : isAdvisor ? 'Mis evaluaciones manuales' : 'Evaluaciones manuales'}
             </h2>
             <p className="text-xs text-[#667085] mt-0.5 font-medium">
               {visibleEvaluations.length} {visibleEvaluations.length === 1 ? 'registro encontrado' : 'registros encontrados'}
@@ -106,7 +111,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
           </div><div className="flex flex-wrap items-center justify-end gap-2"><select value={typeFilter} onChange={event => setTypeFilter(event.target.value as typeof typeFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todas</option><option value="QUALITY">Calidad</option><option value="D3C">Mejora Continua</option></select><select value={resultFilter} onChange={event => setResultFilter(event.target.value as typeof resultFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todo resultado</option><option value="VENTA">Venta</option><option value="NO_VENTA">No venta</option></select><select value={stateFilter} onChange={event => setStateFilter(event.target.value as typeof stateFilter)} className="cm-select px-2 py-1.5 text-xs"><option value="ALL">Todo estado</option><option value="PENDIENTE">Pendiente de revisión</option><option value="FINALIZADA">Finalizada</option></select>{canImport&&<button onClick={()=>setImportOpen(true)} className="cm-button-secondary px-3 py-2 text-xs font-bold"><FileUp className="h-4 w-4"/>IMPORTAR</button>}{!isReadOnly && <button onClick={onOpenNewEvaluation} className="inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-[#1FD6FF] to-[#2E7BFF] px-3 py-2 text-xs font-bold text-[#031326]"><Phone className="h-4 w-4" />Nueva evaluación</button>}</div>
         </div>
 
-        <SpeechAnalyticsBatches evaluations={filteredEvaluations}/>
+        {selectedBatchDate ? <SpeechAnalyticsBatchSummary evaluations={batchEvaluations}/> : <SpeechAnalyticsBatches evaluations={filteredEvaluations} onOpen={setSelectedBatchDate}/>}
 
         {/* Evaluations Table */}
         <div className="bg-white border border-[#E5E8EC] rounded-xl overflow-hidden shadow-2xs">
