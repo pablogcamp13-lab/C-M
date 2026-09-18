@@ -1168,7 +1168,7 @@ async function startServer() {
     ? user.advisorId === evaluation.advisorId
     : user.role === 'SUPERVISOR'
       ? user.id === evaluation.supervisorId || Boolean(user.teamId && user.teamId === evaluation.teamId)
-      : user.role === 'MONITOR' ? user.id === evaluation.evaluatorId : ['ADMINISTRADOR','CONSULTOR'].includes(user.role);
+      : user.role === 'MONITOR' ? user.id === evaluation.evaluatorId || evaluation.origin === 'SPEECH_ANALYTICS' : ['ADMINISTRADOR','CONSULTOR'].includes(user.role);
   app.get('/api/evaluations/:id/agent-detail', requireAuth, async (req, res) => {
     const user = (req as any).authUser as User; const evaluation = await loadEvaluationById(req.params.id);
     if (!evaluation || !canReadEvaluation(user, evaluation) || (user.role === 'ASESOR' && normalizedValidationStatus(evaluation) !== 'VALIDATED')) return res.status(404).json({ error:'Evaluación no encontrada.' });
@@ -1269,7 +1269,7 @@ async function startServer() {
     const user = (req as any).authUser as User; const directory = await readRepository();
     const onlyOwn = (state: any) => {
       if (!state) return state;
-      if (user.role === 'MONITOR') return { ...state, evaluations: (state.evaluations || []).filter((item: any) => item.evaluatorId === user.id), actionPlans: [], advisorInterventions: [], operationalMeasurements: [], importHistory: [] };
+      if (user.role === 'MONITOR') return { ...state, evaluations: (state.evaluations || []).filter((item: any) => item.evaluatorId === user.id || item.origin === 'SPEECH_ANALYTICS'), actionPlans: [], advisorInterventions: [], operationalMeasurements: [], importHistory: [] };
       if (user.accessScope && user.accessScope !== 'GLOBAL' && !['ASESOR','SUPERVISOR'].includes(user.role)) { const mine=(items:any[]|undefined)=>(items||[]).filter(item=>scopedRecord(user,item));return{...state,evaluations:mine(state.evaluations),actionPlans:(state.actionPlans||[]).filter((item:any)=>canAccessActionPlan(user,item,directory)),advisorInterventions:mine(state.advisorInterventions),operationalMeasurements:mine(state.operationalMeasurements),importHistory:[]}; }
       if (!['ASESOR','SUPERVISOR'].includes(user.role)) return state;
       const advisorIds = user.role === 'ASESOR' ? new Set(user.advisorId ? [user.advisorId] : []) : new Set(directory.advisors.filter(item => item.supervisorId === user.id || (user.teamId && item.teamId === user.teamId)).map(item => item.id));

@@ -45,6 +45,10 @@ try{
   const persistedSpeech=(await api('/api/admin/dashboard',{token:admin})).data.evaluations.find(item=>item.id===pendingSpeech.id);assert.equal(persistedSpeech.advisorId,createdSpeechAdvisor.data.advisor.id);
   const monitorUser=await api('/api/admin/users',{token:admin,method:'POST',body:{name:'Monitor Speech Test',email:'monitor.speech@test.local',username:'monitor.speech.test',role:'MONITOR'}});assert.equal(monitorUser.response.status,201);
   const monitorLogin=await api('/api/auth/login',{method:'POST',body:{identity:'monitor.speech.test',password:'12345678'}});assert.equal(monitorLogin.response.status,200);const monitor=monitorLogin.data.token;
+  const monitorState=await api('/api/platform-state',{token:monitor});assert.equal(monitorState.response.status,200);
+  assert.ok(monitorState.data.state.evaluations.some(item=>item.id===pendingSpeech.id),'Monitor can see an SA evaluation imported by another user');
+  assert.equal((await api(`/api/evaluations/${pendingSpeech.id}/agent-detail`,{token:monitor})).response.status,200,'Monitor can open another importer\'s SA evaluation');
+  assert.equal((await api(`/api/admin/evaluations/${pendingSpeech.id}`,{token:monitor,method:'PATCH',body:{comments:'Unauthorized edit'}})).response.status,403,'Viewing another importer\'s SA evaluation does not grant edit rights');
   const linkedSupervisors=await api(`/api/operations/${retainedOperations[0].id}/supervisors`,{token:monitor});assert.equal(linkedSupervisors.response.status,200);assert.ok(linkedSupervisors.data.supervisors.some(item=>item.id==='usr_admin'));
   const ownSpeech=await api('/api/evaluations/import-speech',{token:monitor,method:'POST',body:{campaignName:'Retenciones Bitel',fileName:'monitor-speech-test.xlsx',rows:[{externalId:'speech-monitor-create-1',fileName:'JUAN_MONITOR_70184045_1000002.mp3',sourceAdvisorDni:'70184045',sourceAdvisorName:'Juan Monitor',items:[]}]}});assert.equal(ownSpeech.response.status,201,JSON.stringify(ownSpeech.data));
   const ownPending=(await api('/api/admin/dashboard',{token:admin})).data.evaluations.find(item=>item.sourceExternalId==='speech-monitor-create-1');assert.ok(ownPending);
@@ -52,6 +56,8 @@ try{
   const monitorCreatedAdvisor=await api(`/api/evaluations/${ownPending.id}/create-advisor`,{token:monitor,method:'POST',body:monitorBody});assert.equal(monitorCreatedAdvisor.response.status,201,'Monitor can create the advisor for their imported evaluation');
   assert.equal((await api(`/api/evaluations/${ownPending.id}/link-advisor`,{token:monitor,method:'PATCH',body:{advisorId:monitorCreatedAdvisor.data.advisor.id}})).response.status,200,'Monitor can link their own imported evaluation');
   const historicalEvaluation=await api('/api/evaluations',{token:admin,method:'POST',body:{id:'eval_before_roster_import',advisorId:'adv_duplicate_retentions',evaluatorId:'usr_admin',evaluationType:'QUALITY',date:'2026-09-07',time:'10:00',technicalScore:80,items:[]}});assert.equal(historicalEvaluation.response.status,201);
+  const monitorStateAfterManual=await api('/api/platform-state',{token:monitor});assert.equal(monitorStateAfterManual.response.status,200);
+  assert.ok(!monitorStateAfterManual.data.state.evaluations.some(item=>item.id==='eval_before_roster_import'),'Monitor still cannot see another evaluator\'s manual evaluation');
   const historicalFeedback=await api('/api/feedbacks',{token:admin,method:'POST',body:{evaluation_id:'eval_before_roster_import',feedback_text:'Histórico que debe conservarse.'}});assert.equal(historicalFeedback.response.status,201);
   const importRows=[
     {advisor:{...duplicatedAdvisor,id:'client_id_must_not_replace_existing',name:'Asesor Retenciones Actualizado',operationId:retainedOperations[0].id,campaignId:retainedOperations[0].campaignId,supervisorId:'usr_admin',quartile:'Q4'}},
