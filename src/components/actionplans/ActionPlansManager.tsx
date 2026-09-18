@@ -47,7 +47,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
   const [saving, setSaving] = useState(false);
 
   // New Plan form state
-  const [advisorMetrics, setAdvisorMetrics] = useState<ActionPlanAdvisorMetric[]>(initialEvaluationForPlan?.advisorId ? [{ advisorId: initialEvaluationForPlan.advisorId, sphInitial: null, sphUpdated: null, observations: '' }] : []);
+  const [advisorMetrics, setAdvisorMetrics] = useState<ActionPlanAdvisorMetric[]>(initialEvaluationForPlan?.advisorId ? [{ advisorId: initialEvaluationForPlan.advisorId, sphInitial: null, sphUpdated: null, sphRetraining: null, followUpType: 'SEGUIMIENTO_FEEDBACK', observations: '' }] : []);
   const [advisorSearch, setAdvisorSearch] = useState('');
   const [editMetrics, setEditMetrics] = useState<ActionPlanAdvisorMetric[]>([]);
   const [criterionId, setCriterionId] = useState<string>(
@@ -73,10 +73,12 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
   const metricFields = (rows: ActionPlanAdvisorMetric[], setRows: React.Dispatch<React.SetStateAction<ActionPlanAdvisorMetric[]>>, readOnly = false) => rows.map((row, index) => (
     <div key={row.advisorId} className="rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] p-3 space-y-2">
       <div className="font-semibold text-[#031E3C]">{advisors.find(a => a.id === row.advisorId)?.name || 'Asesor'}</div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <label>SPH inicial<input type="number" min="0" step="any" required={!readOnly} disabled={readOnly} value={row.sphInitial ?? ''} onChange={e => setRows(prev => prev.map((item, i) => i === index ? { ...item, sphInitial: e.target.value === '' ? null : Number(e.target.value) } : item))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-white px-3 py-2" /></label>
         <label>SPH actualizado<input type="number" min="0" step="any" disabled={readOnly} value={row.sphUpdated ?? ''} onChange={e => setRows(prev => prev.map((item, i) => i === index ? { ...item, sphUpdated: e.target.value === '' ? null : Number(e.target.value) } : item))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-white px-3 py-2" /></label>
+        <label>SPH reentrenamiento<input type="number" min="0" step="any" disabled={readOnly} value={row.sphRetraining ?? ''} onChange={e => setRows(prev => prev.map((item, i) => i === index ? { ...item, sphRetraining: e.target.value === '' ? null : Number(e.target.value) } : item))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-white px-3 py-2" /></label>
       </div>
+      <label className="flex items-center gap-2 text-[#031E3C]"><input type="checkbox" disabled={readOnly} checked={row.followUpType === 'REENTRENAMIENTO'} onChange={e => setRows(prev => prev.map((item, i) => i === index ? { ...item, followUpType: e.target.checked ? 'REENTRENAMIENTO' : 'SEGUIMIENTO_FEEDBACK' } : item))} />{row.followUpType === 'REENTRENAMIENTO' ? 'Tuvo reentrenamiento' : 'Solo seguimiento por feedback'}</label>
       <label className="block">Observaciones<textarea rows={2} disabled={readOnly} value={row.observations} onChange={e => setRows(prev => prev.map((item, i) => i === index ? { ...item, observations: e.target.value } : item))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-white px-3 py-2" /></label>
     </div>
   ));
@@ -237,7 +239,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                           <p className="text-[11px] text-[#667085] bg-white p-2 rounded border border-[#E5E8EC]/80 italic">
                             "{plan.action}"
                           </p>
-                          <button type="button" onClick={() => { setSelectedPlanForEdit(plan); setEditMetrics(plan.advisorMetrics || planIds(plan).map(advisorId => ({ advisorId, sphInitial: null, sphUpdated: null, observations: '' }))); }} className="text-[11px] font-semibold text-[#007EA8] hover:underline text-left">Ver SPH y observaciones</button>
+                          <button type="button" onClick={() => { setSelectedPlanForEdit(plan); setEditMetrics(plan.advisorMetrics || planIds(plan).map(advisorId => ({ advisorId, sphInitial: null, sphUpdated: null, sphRetraining: null, followUpType: 'SEGUIMIENTO_FEEDBACK', observations: '' }))); }} className="text-[11px] font-semibold text-[#007EA8] hover:underline text-left">Ver SPH y seguimiento</button>
 
                           <div className="pt-2 border-t border-[#E5E8EC] flex items-center justify-between text-[10px] text-[#667085]">
                             <div className="flex items-center gap-1">
@@ -332,7 +334,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                         <StatusBadge status={plan.status} size="sm" />
                       </td>
                       <td className="py-3 px-4 text-right">
-                        <button type="button" onClick={() => { setSelectedPlanForEdit(plan); setEditMetrics(plan.advisorMetrics || planIds(plan).map(advisorId => ({ advisorId, sphInitial: null, sphUpdated: null, observations: '' }))); }} className="mr-2 text-[#007EA8] hover:underline">SPH</button>
+                        <button type="button" onClick={() => { setSelectedPlanForEdit(plan); setEditMetrics(plan.advisorMetrics || planIds(plan).map(advisorId => ({ advisorId, sphInitial: null, sphUpdated: null, sphRetraining: null, followUpType: 'SEGUIMIENTO_FEEDBACK', observations: '' }))); }} className="mr-2 text-[#007EA8] hover:underline">SPH</button>
                         {!isAdvisor && <button
                           onClick={() => void handleDelete(plan.id)}
                           className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors"
@@ -379,7 +381,7 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
                 <label className="block font-semibold text-[#031E3C] mb-1">Grupo de asesores</label>
                 <input type="search" value={advisorSearch} onChange={e => setAdvisorSearch(e.target.value)} placeholder="Buscar asesor" className="w-full rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] px-3 py-2" />
                 <div className="mt-2 max-h-36 overflow-y-auto rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] p-2 space-y-1">
-                  {eligibleAdvisors.filter(a => a.name.toLowerCase().includes(advisorSearch.toLowerCase())).map(a => <label key={a.id} className="flex items-center gap-2 p-1"><input type="checkbox" checked={advisorMetrics.some(row => row.advisorId === a.id)} disabled={a.id === initialEvaluationForPlan?.advisorId} onChange={e => setAdvisorMetrics(prev => e.target.checked ? [...prev, { advisorId: a.id, sphInitial: null, sphUpdated: null, observations: '' }] : prev.filter(row => row.advisorId !== a.id))} />{a.name}</label>)}
+                  {eligibleAdvisors.filter(a => a.name.toLowerCase().includes(advisorSearch.toLowerCase())).map(a => <label key={a.id} className="flex items-center gap-2 p-1"><input type="checkbox" checked={advisorMetrics.some(row => row.advisorId === a.id)} disabled={a.id === initialEvaluationForPlan?.advisorId} onChange={e => setAdvisorMetrics(prev => e.target.checked ? [...prev, { advisorId: a.id, sphInitial: null, sphUpdated: null, sphRetraining: null, followUpType: 'SEGUIMIENTO_FEEDBACK', observations: '' }] : prev.filter(row => row.advisorId !== a.id))} />{a.name}</label>)}
                 </div>
                 <p className="mt-1 text-[#667085]">El grupo debe compartir campaña, operación y supervisor.</p>
               </div>

@@ -308,6 +308,8 @@ export interface ActionPlanAdvisorMetric {
   advisorId: string;
   sphInitial: number | null;
   sphUpdated: number | null;
+  sphRetraining?: number | null;
+  followUpType?: 'REENTRENAMIENTO' | 'SEGUIMIENTO_FEEDBACK';
   observations: string;
 }
 
