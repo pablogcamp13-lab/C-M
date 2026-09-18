@@ -398,7 +398,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (ev.supervisorId !== currentUser.id && (!currentUser.teamId || ev.teamId !== currentUser.teamId)) return false;
     }
 
-    if (currentUser.role === 'MONITOR' && ev.evaluatorId !== currentUser.id) return false;
+    if (currentUser.role === 'MONITOR' && ev.origin !== 'SPEECH_ANALYTICS' && ev.evaluatorId !== currentUser.id) return false;
 
     if (filters.searchQuery) {
       const q = filters.searchQuery.toLowerCase();
