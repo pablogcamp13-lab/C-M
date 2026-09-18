@@ -71,7 +71,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   useEffect(() => {
     const driveId = audioUrl?.match(/\/d\/([^/?]+)/)?.[1] || audioUrl?.match(/[?&]id=([^&]+)/)?.[1];
     const source = audioUrl?.startsWith('/api/files/') ? audioUrl : driveId ? `/api/files/${driveId}/content` : audioUrl;
-    if (!source?.startsWith('/api/files/') && !source?.startsWith('/api/quality-alerts/')) {
+    if (!source?.startsWith('/api/files/') && !source?.startsWith('/api/quality-alerts/') && !source?.startsWith('/api/evaluations/')) {
       setPlayableUrl(source);
       setPlaybackError(null);
       return;
@@ -80,7 +80,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     const token = sessionStorage.getItem('CONTACT_CENTER_AUTH_TOKEN');
     setPlayableUrl(undefined);
     setPlaybackError(null);
-    fetch(source, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    fetch(source, { credentials: 'same-origin', headers: token ? { Authorization: `Bearer ${token}` } : {} })
       .then(response => {
         if (!response.ok) throw new Error('No fue posible obtener el audio.');
         return response.blob();
@@ -140,7 +140,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           setIsPlaying(true);
         }).catch(() => { setIsPlaying(false); setPlaybackError('El navegador no pudo reproducir este audio.'); });
       }
-    } else {
+    } else if (!audioUrl) {
       setIsPlaying(!isPlaying);
     }
   };
