@@ -134,9 +134,14 @@ export const ActionPlansManager: React.FC<ActionPlansManagerProps> = ({
     <div key={row.advisorId} className="rounded-lg border border-[#E5E8EC] bg-[#F6F7F9] p-3 space-y-2">
       <div className="font-semibold text-[#031E3C]">{advisors.find(a => a.id === row.advisorId)?.name || 'Asesor'}</div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        <label>SPH inicial<input type="number" min="0" step="any" required={!readOnly} disabled={readOnly} value={row.sphInitial ?? ''} onChange={e => setRows(prev => prev.map((item, i) => i === index ? { ...item, sphInitial: e.target.value === '' ? null : Number(e.target.value) } : item))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-white px-3 py-2" /></label>
-        <label>SPH actualizado<input type="number" min="0" step="any" disabled={readOnly} value={row.sphUpdated ?? ''} onChange={e => setRows(prev => prev.map((item, i) => i === index ? { ...item, sphUpdated: e.target.value === '' ? null : Number(e.target.value) } : item))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-white px-3 py-2" /></label>
-        <label>SPH reentrenamiento<input type="number" min="0" step="any" disabled={readOnly} value={row.sphRetraining ?? ''} onChange={e => setRows(prev => prev.map((item, i) => i === index ? { ...item, sphRetraining: e.target.value === '' ? null : Number(e.target.value) } : item))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-white px-3 py-2" /></label>
+        {([
+          ['sphInitial', 'sphInitialDate', 'inicial'],
+          ['sphRetraining', 'sphRetrainingDate', 'reentrenamiento'],
+          ['sphUpdated', 'sphUpdatedDate', 'actualizado'],
+        ] as const).map(([valueKey, dateKey, label]) => <div key={valueKey} className="space-y-2">
+          <label className="block">SPH {label}<input type="number" min="0" step="any" required={valueKey === 'sphInitial' && !readOnly} disabled={readOnly} value={row[valueKey] ?? ''} onChange={e => setRows(prev => prev.map((item, i) => i === index ? { ...item, [valueKey]: e.target.value === '' ? null : Number(e.target.value) } : item))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-white px-3 py-2" /></label>
+          <label className="block">Fecha SPH {label}<input type="date" disabled={readOnly} value={row[dateKey] || ''} onChange={e => setRows(prev => prev.map((item, i) => i === index ? { ...item, [dateKey]: e.target.value } : item))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-white px-3 py-2" /></label>
+        </div>)}
       </div>
       <label className="flex items-center gap-2 text-[#031E3C]"><input type="checkbox" disabled={readOnly} checked={row.followUpType === 'REENTRENAMIENTO'} onChange={e => setRows(prev => prev.map((item, i) => i === index ? { ...item, followUpType: e.target.checked ? 'REENTRENAMIENTO' : 'SEGUIMIENTO_FEEDBACK' } : item))} />{row.followUpType === 'REENTRENAMIENTO' ? 'Tuvo reentrenamiento' : 'Solo seguimiento por feedback'}</label>
       <label className="block">Observaciones<textarea rows={2} disabled={readOnly} value={row.observations} onChange={e => setRows(prev => prev.map((item, i) => i === index ? { ...item, observations: e.target.value } : item))} className="mt-1 w-full rounded-lg border border-[#E5E8EC] bg-white px-3 py-2" /></label>

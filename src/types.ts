@@ -307,8 +307,11 @@ export type ActionPlanStatus = 'PENDIENTE' | 'EN_CURSO' | 'COMPLETADO' | 'VENCID
 export interface ActionPlanAdvisorMetric {
   advisorId: string;
   sphInitial: number | null;
+  sphInitialDate?: string;
   sphUpdated: number | null;
+  sphUpdatedDate?: string;
   sphRetraining?: number | null;
+  sphRetrainingDate?: string;
   followUpType?: 'REENTRENAMIENTO' | 'SEGUIMIENTO_FEEDBACK';
   observations: string;
 }
