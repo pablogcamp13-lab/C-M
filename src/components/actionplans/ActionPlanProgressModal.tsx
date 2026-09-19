@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Cell, CartesianGrid, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { X } from 'lucide-react';
 import type { ActionPlan, Advisor } from '../../types';
 import { actionPlanProgress } from './actionPlanProgress';
@@ -11,12 +11,7 @@ const dateLabel = (point: { dateFrom: string | null; dateTo: string | null; date
 
 export const ActionPlanProgressModal: React.FC<Props> = ({ plan, advisors, onClose, onlyAdvisorId }) => {
   const [selectedAdvisorId, setSelectedAdvisorId] = useState(onlyAdvisorId || '');
-  const { ids, visibleIds, trend, status } = actionPlanProgress(plan, advisors, selectedAdvisorId);
-  const pie = [
-    { name: 'Activos', value: status.active, color: '#16c784' },
-    { name: 'Cesados', value: status.ceased, color: '#fb7185' },
-    ...(status.missing ? [{ name: 'Sin registro', value: status.missing, color: '#8fa7c0' }] : []),
-  ].filter(item => item.value > 0);
+  const { ids, visibleIds, trend, observations } = actionPlanProgress(plan, advisors, selectedAdvisorId);
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
     window.addEventListener('keydown', closeOnEscape);
@@ -26,7 +21,7 @@ export const ActionPlanProgressModal: React.FC<Props> = ({ plan, advisors, onClo
   return createPortal(<div className="fixed inset-0 z-[320] flex items-center justify-center bg-slate-950/75 p-3 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="plan-progress-title">
     <div className="cm-modal flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden">
       <header className="flex items-start justify-between gap-4 border-b border-[var(--cm-border)] px-5 py-4 sm:px-6">
-        <div><p className="cm-eyebrow">PLAN DE ACCIÓN</p><h2 id="plan-progress-title" className="text-lg font-bold">Avance de SPH y dotación</h2><p className="mt-1 text-xs text-[var(--cm-text-secondary)]">{plan.objective || plan.action}</p></div>
+        <div><p className="cm-eyebrow">PLAN DE ACCIÓN</p><h2 id="plan-progress-title" className="text-lg font-bold">Avance de SPH y observaciones</h2><p className="mt-1 text-xs text-[var(--cm-text-secondary)]">{plan.objective || plan.action}</p></div>
         <button type="button" onClick={onClose} aria-label="Cerrar avance" className="rounded-lg p-2 text-[var(--cm-text-secondary)] hover:bg-white/10 hover:text-[var(--cm-text)]"><X className="h-5 w-5" /></button>
       </header>
       <main className="min-h-0 overflow-y-auto p-5 sm:p-6">
@@ -46,10 +41,12 @@ export const ActionPlanProgressModal: React.FC<Props> = ({ plan, advisors, onClo
             {trend.some(point => point.sph !== null) ? <div className="h-64 w-full"><ResponsiveContainer width="100%" height="100%"><LineChart data={trend} margin={{ top: 14, right: 20, left: -18, bottom: 8 }} accessibilityLayer><CartesianGrid stroke="rgba(143,167,192,.18)" vertical={false}/><XAxis dataKey="stage" tick={{ fill: '#b9cce0', fontSize: 11 }} tickLine={false} axisLine={false}/><YAxis domain={[0, 'auto']} tick={{ fill: '#8fa7c0', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={value => Number(value).toFixed(2)}/><Tooltip content={({ active, payload }) => active && payload?.[0] ? <div className="cm-chart-tooltip"><b>{payload[0].payload.stage}</b><span>SPH: {Number(payload[0].payload.sph).toFixed(2)}</span><span>Fecha: {dateLabel(payload[0].payload)}</span><span>{payload[0].payload.count} con dato</span></div> : null}/><Line type="monotone" dataKey="sph" connectNulls stroke="#1fd6ff" strokeWidth={3} dot={{ r: 5, fill: '#0d2037', stroke: '#1fd6ff', strokeWidth: 2 }} activeDot={{ r: 7 }}/></LineChart></ResponsiveContainer></div> : <p className="grid h-64 place-items-center text-sm text-[var(--cm-text-secondary)]">Aún no hay valores de SPH registrados.</p>}
             {trend.some(point => point.sph === null) && <p className="mt-2 text-xs text-[var(--cm-text-muted)]">Las etapas sin medición no se consideran como cero.</p>}
           </section>
-          <section className="rounded-xl border border-[var(--cm-border)] bg-[var(--cm-surface-elevated)] p-4" aria-label="Estado de asesores del plan">
-            <h3 className="font-bold">Estado de los asesores</h3><p className="mb-3 text-xs text-[var(--cm-text-secondary)]">Dotación actual de la selección.</p>
-            <div className="h-56 w-full"><ResponsiveContainer width="100%" height="100%"><PieChart accessibilityLayer><Pie data={pie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={82} stroke="var(--cm-surface-elevated)">{pie.map(item => <Cell key={item.name} fill={item.color}/>)}</Pie><Tooltip formatter={(value, name) => [`${value} asesor(es)`, String(name)]}/></PieChart></ResponsiveContainer></div>
-            <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs">{pie.map(item => <span key={item.name} className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }}/>{item.name}: <b>{item.value}</b></span>)}</div>
+          <section className="rounded-xl border border-[var(--cm-border)] bg-[var(--cm-surface-elevated)] p-4" aria-label="Observaciones de asesores del plan">
+            <h3 className="font-bold">Observaciones</h3><p className="mb-3 text-xs text-[var(--cm-text-secondary)]">{selectedAdvisorId ? 'Detalle completo del asesor seleccionado.' : 'Resumen por asesor. Pasa el cursor sobre un comentario para leerlo completo.'}</p>
+            <div className="space-y-2">{observations.map(item => <div key={item.advisorId} className="rounded-lg border border-[var(--cm-border)] bg-[var(--cm-surface)] p-3 text-xs">
+              <b className="mb-1 block text-cyan-300">{item.advisorName}</b>
+              {selectedAdvisorId ? <p className="whitespace-pre-wrap break-words leading-relaxed text-[var(--cm-text-secondary)]">{item.text}</p> : <div className="group relative" title={item.text} tabIndex={0}><p className="truncate text-[var(--cm-text-secondary)]">{item.text}</p><div role="tooltip" className="pointer-events-none invisible absolute bottom-[calc(100%+.4rem)] right-0 z-20 w-max max-w-[min(32rem,75vw)] rounded-lg border border-cyan-400/30 bg-slate-950 px-3 py-2 text-left leading-relaxed text-slate-100 opacity-0 shadow-2xl transition group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">{item.text}</div></div>}
+            </div>)}</div>
           </section>
         </div>
       </main>

@@ -23,5 +23,10 @@ export function actionPlanProgress(plan: ActionPlan, advisors: Advisor[], select
     else if (advisor.status === 'INACTIVO' || advisor.active === false || Boolean(advisor.terminationDate && advisor.terminationDate <= new Date().toISOString().slice(0, 10))) status.ceased++;
     else status.active++;
   }
-  return { ids, visibleIds, trend, status };
+  const observations = visibleIds.map(id => ({
+    advisorId: id,
+    advisorName: advisors.find(item => item.id === id)?.name || 'Asesor sin registro',
+    text: plan.advisorMetrics?.find(item => item.advisorId === id)?.observations?.trim() || 'Sin observación registrada.',
+  }));
+  return { ids, visibleIds, trend, status, observations };
 }
