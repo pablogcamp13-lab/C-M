@@ -6,6 +6,7 @@ import {
   sharedRepositoryApi,
 } from "../../api/sharedRepository";
 import { useApp } from "../../context/AppContext";
+import { useToast } from "../ui";
 
 type CapsuleStatus = "BORRADOR" | "PUBLICADA" | "ARCHIVADA";
 type Capsule = {
@@ -216,6 +217,7 @@ const ContentFrame: React.FC<{
 
 export const DevelopmentView: React.FC = () => {
   const { currentUser } = useApp();
+  const {toast}=useToast();
   const admin = currentUser.role === "ADMINISTRADOR";
   const monitor = currentUser.role === "MONITOR";
   const manager = admin || monitor;
@@ -258,6 +260,7 @@ export const DevelopmentView: React.FC = () => {
     await developmentApi.updateCapsule(c.id, data);
     await load();
   };
+  const removeCapsule=async(c:Capsule)=>{try{await developmentApi.removeCapsule(c.id);await load();toast({tone:'success',title:'Cápsula eliminada',description:`${c.title} fue eliminada correctamente.`})}catch(error){toast({tone:'error',title:'No se pudo eliminar la cápsula',description:error instanceof Error?error.message:undefined})}};
   const capsuleStats = useMemo(() => new Map(capsules.map(c => {
     const rows=assignments.filter(a=>a.capsuleId===c.id),completed=rows.filter(a=>a.status==="COMPLETADA"),scored=completed.filter(a=>a.result!==null&&a.result!==undefined&&Number.isFinite(Number(a.result))),deltas=rows.map(a=>a.scoreDelta).filter((value):value is number=>value!==null&&value!==undefined&&Number.isFinite(Number(value))).map(Number);
     return [c.id,{assigned:rows.length,completed:completed.length,completion:rows.length?Math.round(completed.length/rows.length*100):0,average:scored.length?Math.round(scored.reduce((sum,a)=>sum+Number(a.result),0)/scored.length):null,impact:deltas.length?Math.round(deltas.reduce((sum,value)=>sum+value,0)/deltas.length):null}];
@@ -385,7 +388,7 @@ export const DevelopmentView: React.FC = () => {
                   <button
                     onClick={() => {
                       if (confirm(`¿Eliminar ${c.title}?`))
-                        void developmentApi.removeCapsule(c.id).then(load);
+                        void removeCapsule(c);
                     }}
                     className="cm-button-secondary p-1.5 text-[var(--cm-danger)]"
                     title="Eliminar"
@@ -464,12 +467,7 @@ export const DevelopmentView: React.FC = () => {
             setEditing(null);
           }}
           onSave={async (data) => {
-            editing
-              ? await developmentApi.updateCapsule(editing.id, data)
-              : await developmentApi.createCapsule(data);
-            setCreating(false);
-            setEditing(null);
-            await load();
+            try{const wasEditing=Boolean(editing);editing?await developmentApi.updateCapsule(editing.id,data):await developmentApi.createCapsule(data);setCreating(false);setEditing(null);await load();toast({tone:'success',title:wasEditing?'Cápsula actualizada':'Cápsula creada',description:wasEditing?'Los cambios fueron guardados correctamente.':'La cápsula fue guardada como borrador.'})}catch(error){toast({tone:'error',title:'No se pudo guardar la cápsula',description:error instanceof Error?error.message:undefined})}
           }}
         />
       )}

@@ -232,7 +232,7 @@ export const developmentApi = {
   async createCapsule(data: any) { return json<{ capsule: any }>(await fetch('/api/development/capsules', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(data) })); },
   async updateCapsule(id: string, data: any) { return json<{ capsule: any }>(await fetch(`/api/development/capsules/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(data) })); },
   async duplicateCapsule(id: string) { return json<{ capsule: any }>(await fetch(`/api/development/capsules/${id}/duplicate`, { method: 'POST', headers: headers() })); },
-  async removeCapsule(id: string) { await fetch(`/api/development/capsules/${id}`, { method: 'DELETE', headers: headers() }); },
+  async removeCapsule(id: string) { await json<any>(await fetch(`/api/development/capsules/${id}`, { method: 'DELETE', headers: headers() })); },
   async assignments() { return json<{ assignments: any[] }>(await fetch('/api/development/assignments', { headers: headers() })); },
   async assign(data: any) { return json<{ assignments: any[] }>(await fetch('/api/development/assignments', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, body: JSON.stringify(data) })); },
   async forum(capsuleId: string) { return json<{ posts: any[] }>(await fetch(`/api/development/capsules/${capsuleId}/forum`, { headers: headers() })); },
