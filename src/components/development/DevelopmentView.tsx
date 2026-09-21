@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Archive, Copy, Eye, Play, Plus, Send, Trash2, X } from "lucide-react";
+import { AlertTriangle, Archive, BookOpen, CheckCircle2, Clock3, Copy, Eye, Filter, Play, Plus, Send, Target, TrendingUp, Trash2, Users, X } from "lucide-react";
 import {
   developmentApi,
   sharedRepositoryApi,
@@ -14,6 +14,10 @@ type Capsule = {
   description: string;
   campaignId?: string;
   gap: string;
+  category?: string;
+  difficulty?: string;
+  version?: string;
+  expiresAt?: string;
   duration: number;
   status: CapsuleStatus;
   content: { type: "URL" | "EMBED" | "HTML" | "VIDEO"; value: string };
@@ -61,6 +65,10 @@ type Assignment = {
   forumPost?: string;
   evidence?: string;
   contentViewed?: boolean;
+  baselineScore?: number | null;
+  latestScore?: number | null;
+  scoreDelta?: number | null;
+  advisorActive?: boolean;
 };
 type ForumPost = {
   id: string;
@@ -74,6 +82,10 @@ const emptyCapsule = (): Omit<Capsule, "id" | "status"> => ({
   description: "",
   campaignId: "",
   gap: "",
+  category: "CALIDAD",
+  difficulty: "BASICA",
+  version: "1.0",
+  expiresAt: "",
   duration: 10,
   content: { type: "URL", value: "" },
   evaluation: {
@@ -216,6 +228,11 @@ export const DevelopmentView: React.FC = () => {
   const [creating, setCreating] = useState(false);
   const [assigning, setAssigning] = useState<Capsule | null>(null);
   const [active, setActive] = useState<Assignment | null>(null);
+  const [capsuleSearch, setCapsuleSearch] = useState("");
+  const [capsuleStatus, setCapsuleStatus] = useState("");
+  const [capsuleCampaign, setCapsuleCampaign] = useState("");
+  const [capsuleCategory,setCapsuleCategory]=useState("");
+  const [showCapsuleFilters, setShowCapsuleFilters] = useState(false);
   const load = async () => {
     const [c, a, directory] = await Promise.all([
       developmentApi.capsules(),
@@ -241,6 +258,11 @@ export const DevelopmentView: React.FC = () => {
     await developmentApi.updateCapsule(c.id, data);
     await load();
   };
+  const capsuleStats = useMemo(() => new Map(capsules.map(c => {
+    const rows=assignments.filter(a=>a.capsuleId===c.id),completed=rows.filter(a=>a.status==="COMPLETADA"),scored=completed.filter(a=>a.result!==null&&a.result!==undefined&&Number.isFinite(Number(a.result))),deltas=rows.map(a=>a.scoreDelta).filter((value):value is number=>value!==null&&value!==undefined&&Number.isFinite(Number(value))).map(Number);
+    return [c.id,{assigned:rows.length,completed:completed.length,completion:rows.length?Math.round(completed.length/rows.length*100):0,average:scored.length?Math.round(scored.reduce((sum,a)=>sum+Number(a.result),0)/scored.length):null,impact:deltas.length?Math.round(deltas.reduce((sum,value)=>sum+value,0)/deltas.length):null}];
+  })),[capsules,assignments]);
+  const filteredCapsules=useMemo(()=>capsules.filter(c=>(!capsuleSearch||`${c.title} ${c.description} ${c.gap}`.toLowerCase().includes(capsuleSearch.toLowerCase()))&&(!capsuleStatus||c.status===capsuleStatus)&&(!capsuleCampaign||c.campaignId===capsuleCampaign)&&(!capsuleCategory||c.category===capsuleCategory)),[capsules,capsuleSearch,capsuleStatus,capsuleCampaign,capsuleCategory]);
   const advisorTabs: AssignmentStatus[] = ["PENDIENTE", "EN_CURSO", "COMPLETADA", "VENCIDA"];
   return (
     <main className="cm-workspace min-h-full p-5 lg:p-8">
@@ -279,33 +301,34 @@ export const DevelopmentView: React.FC = () => {
           ))}
         </nav>
         {manager && tabs === "PANEL" && (
-          <section className="mt-5 grid gap-3 sm:grid-cols-3">
-            <Metric label="Cápsulas" value={capsules.length} />
-            <Metric
-              label="Publicadas"
-              value={capsules.filter((c) => c.status === "PUBLICADA").length}
-            />
-            <Metric
-              label="Asignaciones activas"
-              value={
-                assignments.filter((a) =>
-                  ["PENDIENTE", "EN_CURSO"].includes(a.status),
-                ).length
-              }
-            />
-          </section>
+          <DevelopmentPanel capsules={capsules} assignments={assignments} advisors={advisors} capsuleStats={capsuleStats}/>
         )}
         {manager && tabs === "CÁPSULAS" && (
-          <section className="mt-5 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
-            {capsules.map((c) => (
+          <section className="mt-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div><h2 className="font-bold">Biblioteca de desarrollo</h2><p className="text-xs text-[var(--cm-text-secondary)]">Relaciona contenidos con brechas y mide su efectividad.</p></div>
+              <button onClick={()=>setShowCapsuleFilters(value=>!value)} className="cm-button-secondary px-3 py-2 text-xs"><Filter className="h-4 w-4"/> Filtros {showCapsuleFilters?'−':'+'}</button>
+            </div>
+            {showCapsuleFilters&&<div className="cm-card mb-4 grid gap-3 p-3 md:grid-cols-2 xl:grid-cols-4">
+              <input className="cm-input p-2" placeholder="Buscar título, brecha o descripción" value={capsuleSearch} onChange={e=>setCapsuleSearch(e.target.value)}/>
+              <select className="cm-select p-2" value={capsuleStatus} onChange={e=>setCapsuleStatus(e.target.value)}><option value="">Todos los estados</option>{["BORRADOR","PUBLICADA","ARCHIVADA"].map(value=><option key={value} value={value}>{statusLabel[value]}</option>)}</select>
+              <select className="cm-select p-2" value={capsuleCampaign} onChange={e=>setCapsuleCampaign(e.target.value)}><option value="">Todas las campañas</option>{campaigns.map((campaign:any)=><option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}</select>
+              <select className="cm-select p-2" value={capsuleCategory} onChange={e=>setCapsuleCategory(e.target.value)}><option value="">Todas las categorías</option><option value="CALIDAD">Calidad</option><option value="VENTAS">Ventas</option><option value="COMPLIANCE">Compliance</option><option value="HABILIDADES">Habilidades blandas</option></select>
+            </div>}
+            <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+            {filteredCapsules.map((c) => {
+              const stats=capsuleStats.get(c.id)!;
+              const expired=Boolean(c.expiresAt&&c.expiresAt<new Date().toISOString().slice(0,10));
+              return (
               <article key={c.id} className="cm-card p-4">
                 <div className="flex justify-between gap-3">
                   <div>
-                    <span className="cm-badge">{statusLabel[c.status]}</span>
+                    <div className="flex flex-wrap gap-2"><span className="cm-badge">{expired?'Vencida':statusLabel[c.status]}</span><span className="cm-badge">{c.category||'CALIDAD'}</span><span className="cm-badge">{c.difficulty||'BÁSICA'}</span></div>
                     <h3 className="mt-2 font-bold">{c.title}</h3>
                     <p className="mt-1 text-xs text-[var(--cm-text-secondary)]">
                       {c.description || "Sin descripción"} · {c.duration} min
                     </p>
+                    <p className="mt-2 text-xs text-[var(--cm-primary)]">{c.gap||'Sin brecha asociada'} · v{c.version||'1.0'}{c.expiresAt?` · Vigente hasta ${c.expiresAt}`:''}</p>
                   </div>
                   <button
                     onClick={() => setEditing(c)}
@@ -314,6 +337,7 @@ export const DevelopmentView: React.FC = () => {
                     <Eye className="h-4 w-4" />
                   </button>
                 </div>
+                <div className="mt-4 grid grid-cols-3 gap-2 border-y border-[var(--cm-border)] py-3 text-center text-xs"><div><strong className="block text-base">{stats.assigned}</strong><span className="text-[var(--cm-text-secondary)]">Asignados</span></div><div><strong className="block text-base">{stats.completion}%</strong><span className="text-[var(--cm-text-secondary)]">Finalización</span></div><div><strong className="block text-base">{stats.impact===null?'—':`${stats.impact>0?'+':''}${stats.impact}`}</strong><span className="text-[var(--cm-text-secondary)]">Impacto</span></div></div>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <button
                     onClick={() => setEditing(c)}
@@ -341,7 +365,7 @@ export const DevelopmentView: React.FC = () => {
                   )}
                   {c.status === "PUBLICADA" && (
                     <>
-                      {admin && <button
+                      {admin && !expired && <button
                         onClick={() => setAssigning(c)}
                         className="cm-button-primary px-2 py-1 text-xs"
                       >
@@ -370,8 +394,9 @@ export const DevelopmentView: React.FC = () => {
                   </button>
                 </div>
               </article>
-            ))}
-            {!capsules.length && <Empty text="Aún no hay cápsulas creadas." />}
+            )})}
+            {!filteredCapsules.length && <Empty text={capsules.length?"No hay cápsulas que coincidan con los filtros.":"Aún no hay cápsulas creadas."} />}
+            </div>
           </section>
         )}
         {admin && ["ASIGNACIONES", "SEGUIMIENTO"].includes(tabs) && (
@@ -380,6 +405,7 @@ export const DevelopmentView: React.FC = () => {
             capsules={capsules}
             advisors={advisors}
             campaigns={campaigns}
+            mode={tabs}
           />
         )}{" "}
         {!manager && (
@@ -480,11 +506,22 @@ export const DevelopmentView: React.FC = () => {
   );
 };
 
-const Metric = ({ label, value }: { label: string; value: number }) => (
-  <article className="cm-card p-4">
-    <p className="text-xs text-[var(--cm-text-secondary)]">{label}</p>
-    <strong className="mt-1 block text-3xl">{value}</strong>
-  </article>
+const DevelopmentPanel=({capsules,assignments,advisors,capsuleStats}:any)=>{
+  const completed=assignments.filter((a:any)=>a.status==='COMPLETADA'),active=assignments.filter((a:any)=>['PENDIENTE','EN_CURSO'].includes(a.status)),overdue=assignments.filter((a:any)=>a.status==='VENCIDA'),results=completed.filter((a:any)=>a.result!==null&&a.result!==undefined).map((a:any)=>Number(a.result)).filter(Number.isFinite),deltas=assignments.filter((a:any)=>a.scoreDelta!==null&&a.scoreDelta!==undefined).map((a:any)=>Number(a.scoreDelta)).filter(Number.isFinite);
+  const completion=assignments.length?Math.round(completed.length/assignments.length*100):0,average=results.length?Math.round(results.reduce((a:number,b:number)=>a+b,0)/results.length):0,impact=deltas.length?Math.round(deltas.reduce((a:number,b:number)=>a+b,0)/deltas.length):null;
+  const gaps=Object.entries(assignments.reduce((out:any,item:any)=>{const gap=item.gap||capsules.find((c:any)=>c.id===item.capsuleId)?.gap||'Sin brecha';out[gap]=(out[gap]||0)+1;return out},{})).sort((a:any,b:any)=>b[1]-a[1]).slice(0,5);
+  const ranked=capsules.map((c:any)=>({capsule:c,stats:capsuleStats.get(c.id)})).filter((item:any)=>item.stats.assigned).sort((a:any,b:any)=>b.stats.completion-a.stats.completion).slice(0,5);
+  return <section className="mt-5 space-y-4">
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6"><Metric label="Publicadas" value={capsules.filter((c:any)=>c.status==='PUBLICADA').length} icon={<BookOpen/>}/><Metric label="Asignaciones activas" value={active.length} icon={<Users/>}/><Metric label="Finalización" value={`${completion}%`} icon={<CheckCircle2/>}/><Metric label="Vencidas" value={overdue.length} icon={<AlertTriangle/>} danger={Boolean(overdue.length)}/><Metric label="Nota promedio" value={average||'—'} icon={<Target/>}/><Metric label="Impacto posterior" value={impact===null?'—':`${impact>0?'+':''}${impact} pts`} icon={<TrendingUp/>}/></div>
+    <div className="grid gap-4 xl:grid-cols-[1fr_1.4fr]">
+      <article className="cm-card p-5"><h2 className="font-bold">Brechas con mayor demanda</h2><p className="text-xs text-[var(--cm-text-secondary)]">Asignaciones generadas para cerrar cada brecha.</p><div className="mt-5 space-y-4">{gaps.map(([gap,count]:any)=>{const width=assignments.length?Math.max(8,Math.round(count/assignments.length*100)):0;return <div key={gap}><div className="mb-1 flex justify-between gap-3 text-xs"><span className="truncate">{gap}</span><b>{count}</b></div><div className="h-2 rounded bg-[var(--cm-surface-elevated)]"><span className="block h-full rounded bg-[var(--cm-primary)]" style={{width:`${width}%`}}/></div></div>})}{!gaps.length&&<p className="py-8 text-center text-sm text-[var(--cm-text-secondary)]">Aún no hay asignaciones.</p>}</div></article>
+      <article className="cm-card overflow-hidden"><div className="p-5"><h2 className="font-bold">Efectividad por cápsula</h2><p className="text-xs text-[var(--cm-text-secondary)]">Finalización, aprendizaje e impacto en evaluaciones posteriores.</p></div><div className="overflow-x-auto"><table className="cm-table min-w-[620px]"><thead><tr><th>Cápsula</th><th>Asignados</th><th>Finalización</th><th>Nota</th><th>Impacto</th></tr></thead><tbody>{ranked.map(({capsule,stats}:any)=><tr key={capsule.id}><td><b>{capsule.title}</b><span className="block text-xs text-[var(--cm-text-secondary)]">{capsule.gap||'Sin brecha'}</span></td><td>{stats.assigned}</td><td>{stats.completion}%</td><td>{stats.average??'—'}</td><td className={stats.impact>0?'text-emerald-400':''}>{stats.impact===null?'Pendiente':`${stats.impact>0?'+':''}${stats.impact} pts`}</td></tr>)}</tbody></table>{!ranked.length&&<p className="p-8 text-center text-sm text-[var(--cm-text-secondary)]">Publica y asigna una cápsula para medir resultados.</p>}</div></article>
+    </div>
+    <p className="text-xs text-[var(--cm-text-secondary)]"><Clock3 className="mr-1 inline h-3.5 w-3.5"/>Impacto: diferencia entre la última evaluación previa y la evaluación posterior a la asignación. {advisors.filter((a:any)=>a.active!==false&&a.status!=='INACTIVO').length} asesores activos disponibles.</p>
+  </section>
+};
+const Metric = ({ label, value, icon, danger=false }: { label: string; value: number|string; icon?:React.ReactNode; danger?:boolean }) => (
+  <article className="cm-card p-4"><div className="flex items-center justify-between"><p className="text-xs text-[var(--cm-text-secondary)]">{label}</p><span className={danger?'text-[var(--cm-danger)]':'text-[var(--cm-primary)]'}>{icon&&React.cloneElement(icon as React.ReactElement<any>,{className:'h-4 w-4'})}</span></div><strong className="mt-2 block text-2xl">{value}</strong></article>
 );
 const Empty = ({ text }: { text: string }) => (
   <div className="cm-card col-span-full p-10 text-center text-sm text-[var(--cm-text-secondary)]">
@@ -557,6 +594,15 @@ const CapsuleModal = ({ initial, campaigns, onClose, onSave }: any) => {
                   onChange={(e) => set("gap", e.target.value)}
                 />
               </Field>
+              <Field label="Categoría">
+                <select className="cm-select p-2" value={form.category||"CALIDAD"} onChange={(e)=>set("category",e.target.value)}><option value="CALIDAD">Calidad</option><option value="VENTAS">Ventas</option><option value="COMPLIANCE">Compliance</option><option value="HABILIDADES">Habilidades blandas</option></select>
+              </Field>
+              <Field label="Dificultad">
+                <select className="cm-select p-2" value={form.difficulty||"BASICA"} onChange={(e)=>set("difficulty",e.target.value)}><option value="BASICA">Básica</option><option value="INTERMEDIA">Intermedia</option><option value="AVANZADA">Avanzada</option></select>
+              </Field>
+              <Field label="Versión">
+                <input className="cm-input p-2" value={form.version||"1.0"} onChange={(e)=>set("version",e.target.value)}/>
+              </Field>
               <Field label="Duración estimada">
                 <input
                   type="number"
@@ -624,6 +670,9 @@ const CapsuleModal = ({ initial, campaigns, onClose, onSave }: any) => {
                   value={form.dueAt}
                   onChange={(e) => set("dueAt", e.target.value)}
                 />
+              </Field>
+              <Field label="Vigencia de la cápsula">
+                <input type="date" className="cm-input p-2" value={form.expiresAt||""} onChange={(e)=>set("expiresAt",e.target.value)}/>
               </Field>
               <Field label="Criterio de finalización">
                 <select
@@ -835,6 +884,8 @@ const AssignModal = ({
   const [selected, setSelected] = useState<string[]>([]);
   const [campaignId, setCampaign] = useState("");
   const [groupId, setGroup] = useState("");
+  const [scope,setScope]=useState("INDIVIDUAL");
+  const [search,setSearch]=useState("");
   const [origin, setOrigin] = useState("Manual");
   const [originId, setOriginId] = useState("");
   const [dueAt, setDue] = useState("");
@@ -843,7 +894,8 @@ const AssignModal = ({
       (a: any) =>
         a.active !== false &&
         a.status !== "INACTIVO" &&
-        (!campaignId || a.campaignId === campaignId),
+        (!campaignId || a.campaignId === campaignId) &&
+        (!search||a.name.toLowerCase().includes(search.toLowerCase())),
     )
     .sort((a: any, b: any) => a.name.localeCompare(b.name));
   const groups = [
@@ -859,7 +911,10 @@ const AssignModal = ({
           </button>
         </div>
         <div className="mt-4 space-y-3">
-          <Field label="Campaña (asigna a todos)">
+          <Field label="Tipo de asignación">
+            <select className="cm-select p-2" value={scope} onChange={e=>{setScope(e.target.value);setSelected([]);setGroup("")}}><option value="INDIVIDUAL">Asesores seleccionados</option><option value="CAMPAIGN">Toda la campaña</option><option value="GROUP">Equipo completo</option></select>
+          </Field>
+          <Field label="Campaña">
             <select
               className="cm-select p-2"
               value={campaignId}
@@ -869,7 +924,7 @@ const AssignModal = ({
                 setSelected([]);
               }}
             >
-              <option value="">Sin asignación masiva</option>
+              <option value="">Todas las campañas</option>
               {campaigns
                 .filter((c: any) => c.status === "ACTIVA")
                 .map((c: any) => (
@@ -879,7 +934,7 @@ const AssignModal = ({
                 ))}
             </select>
           </Field>
-          <Field label="Grupo / equipo">
+          {scope==="GROUP"&&<Field label="Grupo / equipo">
             <select
               className="cm-select p-2"
               value={groupId}
@@ -892,8 +947,8 @@ const AssignModal = ({
                 </option>
               ))}
             </select>
-          </Field>
-          <Field label={`Asesores de dotación (${availableAdvisors.length})`}>
+          </Field>}
+          {scope==="INDIVIDUAL"&&<><Field label="Buscar asesor"><input className="cm-input p-2" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Nombre del asesor"/></Field><div className="flex items-center justify-between text-xs"><span>{selected.length} seleccionados</span><button className="text-[var(--cm-primary)]" onClick={()=>setSelected(availableAdvisors.map((a:any)=>a.id))}>Seleccionar visibles</button></div><Field label={`Asesores de dotación (${availableAdvisors.length})`}>
             <select
               multiple
               className="cm-select min-h-32 p-2"
@@ -908,7 +963,7 @@ const AssignModal = ({
                 </option>
               ))}
             </select>
-          </Field>
+          </Field></>}
           <Field label="Origen">
             <select
               className="cm-select p-2"
@@ -953,13 +1008,15 @@ const AssignModal = ({
             onClick={() =>
               void onSave({
                 advisorIds: selected,
-                campaignId,
-                groupId,
+                campaignId:scope==="CAMPAIGN"?campaignId:"",
+                groupId:scope==="GROUP"?groupId:"",
                 origin,
                 originId,
                 dueAt,
+                gap:capsule.gap,
               })
             }
+            disabled={(scope==="INDIVIDUAL"&&!selected.length)||(scope==="CAMPAIGN"&&!campaignId)||(scope==="GROUP"&&!groupId)}
             className="cm-button-primary px-3 py-2"
           >
             Asignar
@@ -969,8 +1026,9 @@ const AssignModal = ({
     </Overlay>
   );
 };
-const Tracking = ({ assignments, capsules, advisors, campaigns }: any) => {
+const Tracking = ({ assignments, capsules, advisors, campaigns, mode }: any) => {
   const [filters, setFilters] = useState({
+    advisor: "",
     campaign: "",
     capsule: "",
     gap: "",
@@ -983,6 +1041,7 @@ const Tracking = ({ assignments, capsules, advisors, campaigns }: any) => {
     setFilters((f) => ({ ...f, [key]: value }));
   const filtered = assignments.filter(
     (a: any) =>
+      (!filters.advisor||(advisors.find((advisor:any)=>advisor.id===a.advisorId)?.name||'').toLowerCase().includes(filters.advisor.toLowerCase()))&&
       (!filters.state || a.status === filters.state) &&
       (!filters.campaign || a.campaignId === filters.campaign) &&
       (!filters.capsule || a.capsuleId === filters.capsule) &&
@@ -993,7 +1052,9 @@ const Tracking = ({ assignments, capsules, advisors, campaigns }: any) => {
   );
   return (
     <section className="cm-card mt-5 overflow-hidden">
-      <div className="grid gap-2 p-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="border-b border-[var(--cm-border)] p-4"><h2 className="font-bold">{mode==='SEGUIMIENTO'?'Seguimiento e impacto':'Asignaciones de aprendizaje'}</h2><p className="text-xs text-[var(--cm-text-secondary)]">{mode==='SEGUIMIENTO'?'Compara el desempeño previo y posterior al desarrollo.':'Consulta el alcance, origen, avance y vencimiento de cada asignación.'}</p></div>
+      <div className="grid gap-2 p-3 md:grid-cols-3 xl:grid-cols-7">
+        <input className="cm-input p-2" placeholder="Buscar asesor" value={filters.advisor} onChange={e=>set("advisor",e.target.value)}/>
         <select
           className="cm-select p-2"
           value={filters.campaign}
@@ -1060,6 +1121,7 @@ const Tracking = ({ assignments, capsules, advisors, campaigns }: any) => {
               <th>Estado</th>
               <th>Avance</th>
               <th>Resultado</th>
+              {mode==='SEGUIMIENTO'&&<><th>Antes</th><th>Después</th><th>Impacto</th></>}
               <th>Vencimiento</th>
             </tr>
           </thead>
@@ -1086,6 +1148,7 @@ const Tracking = ({ assignments, capsules, advisors, campaigns }: any) => {
                 <td>{statusLabel[a.status]}</td>
                 <td>{a.progress}%</td>
                 <td>{a.result ?? "—"}</td>
+                {mode==='SEGUIMIENTO'&&<><td>{a.baselineScore??'—'}</td><td>{a.latestScore??'—'}</td><td className={Number(a.scoreDelta)>0?'text-emerald-400':Number(a.scoreDelta)<0?'text-[var(--cm-danger)]':''}>{a.scoreDelta==null?'Pendiente':`${a.scoreDelta>0?'+':''}${a.scoreDelta} pts`}</td></>}
                 <td>{a.dueAt || "—"}</td>
               </tr>
             ))}
@@ -1107,6 +1170,10 @@ const Tracking = ({ assignments, capsules, advisors, campaigns }: any) => {
               <Info label="Tiempo" value={`${selected.duration || 0} min`} />
               <Info label="Intentos" value={selected.attempts || 0} />
               <Info label="Resultado" value={selected.result ?? "—"} />
+              <Info label="Evaluación previa" value={selected.baselineScore ?? "—"} />
+              <Info label="Evaluación posterior" value={selected.latestScore ?? "Pendiente"} />
+              <Info label="Impacto" value={selected.scoreDelta == null ? "Pendiente" : `${selected.scoreDelta > 0 ? "+" : ""}${selected.scoreDelta} pts`} />
+              <Info label="Dotación" value={selected.advisorActive===false?"Cesado":"Activo"}/>
               <Info label="Participación" value={selected.forumPost || "—"} />
               <Info label="Evidencia" value={selected.evidence || "—"} />
               <Info
