@@ -1572,7 +1572,26 @@ async function startServer() {
     const now = new Date().toISOString(); const capsule = { ...source, id: `cap_${randomBytes(8).toString('hex')}`, title: `${source.title} · Copia`, status: 'BORRADOR', createdByUserId: user.id, createdByName: user.name, createdAt: now, updatedAt: now };
     db.prepare('INSERT INTO development_capsules (id,status,data_json,created_at,updated_at) VALUES (?,?,?,?,?)').run(capsule.id, capsule.status, JSON.stringify(capsule), now, now); await syncDevelopment(); return res.status(201).json({ capsule });
   });
-  app.delete('/api/development/capsules/:id', requireAuth, async (req, res) => { const user=(req as any).authUser as User;if(!['ADMINISTRADOR','MONITOR'].includes(user.role))return res.status(403).json({error:'Acceso denegado.'});const row=db.prepare('SELECT data_json FROM development_capsules WHERE id=?').get(req.params.id) as any;if(!row)return res.status(404).json({error:'Cápsula no encontrada.'});if(user.role==='MONITOR'&&JSON.parse(row.data_json).createdByUserId!==user.id)return res.status(403).json({error:'Esta cápsula pertenece a otro creador.'});db.prepare('DELETE FROM development_assignments WHERE capsule_id=?').run(req.params.id); db.prepare('DELETE FROM development_capsules WHERE id=?').run(req.params.id); await syncDevelopment(); return res.status(204).end(); });
+  app.delete('/api/development/capsules/:id', requireAuth, async (req, res) => {
+    const user=(req as any).authUser as User;
+    if(!['ADMINISTRADOR','MONITOR'].includes(user.role))return res.status(403).json({error:'Acceso denegado.'});
+    const row=db.prepare('SELECT data_json FROM development_capsules WHERE id=?').get(req.params.id) as any;
+    if(!row)return res.status(404).json({error:'Cápsula no encontrada.'});
+    if(user.role==='MONITOR'&&JSON.parse(row.data_json).createdByUserId!==user.id)return res.status(403).json({error:'Esta cápsula pertenece a otro creador.'});
+    try {
+      if(supabaseStorage.enabled){const deleted=await supabaseStorage.deleteDevelopmentCapsule(req.params.id);if(!deleted.capsulesDeleted)return res.status(404).json({error:'La cápsula ya no existe en la base de datos.'});}
+      db.exec('BEGIN IMMEDIATE');
+      db.prepare('DELETE FROM development_assignments WHERE capsule_id=?').run(req.params.id);
+      db.prepare('DELETE FROM development_capsules WHERE id=?').run(req.params.id);
+      db.exec('COMMIT');
+      if(!supabaseStorage.enabled)await syncDevelopment();
+      return res.json({deleted:true,id:req.params.id});
+    } catch(error) {
+      try{db.exec('ROLLBACK');}catch{}
+      console.error('[development] No fue posible eliminar la cápsula.',error instanceof Error?error.message:'');
+      return res.status(502).json({error:'No fue posible eliminar la cápsula. Inténtalo nuevamente.'});
+    }
+  });
   app.get('/api/development/assignments', requireAuth, async (req, res) => {
     const user = (req as any).authUser as User;if(!['ADMINISTRADOR','MONITOR','ASESOR'].includes(user.role))return res.status(403).json({error:'Acceso denegado.'});try{await hydrateDevelopment();}catch{}
     let assignments=assignmentRows().map(item=>item.dueAt&&new Date(item.dueAt)<new Date()&&!['COMPLETADA','VENCIDA'].includes(item.status)?{...item,status:'VENCIDA'}:item);
