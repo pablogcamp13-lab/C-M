@@ -6,6 +6,7 @@ import { filesApi } from '../../api/sharedRepository';
 import { AudioPlayer } from '../common/AudioPlayer';
 import { FiltersBar } from '../common/FiltersBar';
 import type { Evaluation, PlatformEvaluationType } from '../../types';
+import { manualFeedbackCandidates } from './feedbackEligibility';
 
 type Status = 'PENDIENTE' | 'VALIDADO_ASESOR' | 'OBSERVADO_ASESOR' | 'CERRADO_SUPERVISOR';
 type CreateStep = 'focus' | PlatformEvaluationType | null;
@@ -25,7 +26,7 @@ export const FeedbackView: React.FC = () => {
   const scopedRecords = records.filter(record => !isAdvisor || Boolean(currentUser.advisorId) && record.advisor_id === currentUser.advisorId);
   // For advisors the authenticated API is the source of truth. Dashboard filters
   // must never hide feedback already assigned to the signed-in person.
-  const displayed = scopedRecords.filter(record => (status === 'ALL' || record.status === status) && (isAdvisor || filteredEvaluations.some(evaluation => evaluation.id === record.evaluation_id))).sort((a, b) => Number(a.status !== 'PENDIENTE') - Number(b.status !== 'PENDIENTE') || b.updated_at.localeCompare(a.updated_at)); const available = filteredEvaluations.filter(evaluation => !scopedRecords.some(record => record.evaluation_id === evaluation.id));
+  const displayed = scopedRecords.filter(record => (status === 'ALL' || record.status === status) && (isAdvisor || filteredEvaluations.some(evaluation => evaluation.id === record.evaluation_id))).sort((a, b) => Number(a.status !== 'PENDIENTE') - Number(b.status !== 'PENDIENTE') || b.updated_at.localeCompare(a.updated_at)); const available = manualFeedbackCandidates(filteredEvaluations, scopedRecords.map(record => record.evaluation_id));
   const evaluation = selected && evaluations.find(item => item.id === selected.evaluation_id); const advisor = selected && advisors.find(item => item.id === selected.advisor_id); const supervisor = selected && users.find(item => item.id === selected.supervisor_id);
   const open = (record: Feedback) => { setSelected(record); setFeedbackDraft(record.feedback_text || ''); setReply(record.advisor_response || ''); setClosure(record.supervisor_closure_comment || ''); setEvidenceUrl(record.advisor_evidence_url || ''); };
   const create = async () => { if (!creating) return; const response = await fetch('/api/feedbacks', { method: 'POST', headers: { ...auth(), 'Content-Type': 'application/json' }, body: JSON.stringify({ evaluation_id: creating.id, feedback_text: feedbackText.trim() || creating.recommendation || creating.primaryGap || 'Feedback asociado a la evaluación.' }) }); if (!response.ok) return alert((await response.json()).error); const data = await response.json(); setCreating(null); setFeedbackText(''); await load(); window.dispatchEvent(new Event('cm:data-changed')); open(data.feedback); };

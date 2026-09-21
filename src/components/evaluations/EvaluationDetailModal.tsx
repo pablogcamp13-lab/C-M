@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Evaluation, EvaluationItem, QualityGuideline } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { CRITERIA_DEFINITIONS } from '../../data/criteriaData';
@@ -15,7 +16,8 @@ import {
   ListTodo,
   ChevronDown,
   Pencil,
-  Save
+  Save,
+  MessageSquarePlus
 } from 'lucide-react';
 
 interface EvaluationDetailModalProps {
@@ -35,6 +37,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   const [expandedCriterion, setExpandedCriterion] = useState<string | null>(null);
   const [agentDetail,setAgentDetail]=useState<any>(null); const [commitment,setCommitment]=useState(''); const [commitmentDate,setCommitmentDate]=useState(''); const [savingCommitment,setSavingCommitment]=useState(false); const [commitmentError,setCommitmentError]=useState('');
   const [isEditing,setIsEditing]=useState(false); const [savingEdit,setSavingEdit]=useState(false); const [editError,setEditError]=useState(''); const [uploadingAudio,setUploadingAudio]=useState(false); const [audioError,setAudioError]=useState('');
+  const [feedbackModalOpen,setFeedbackModalOpen]=useState(false); const [feedbackText,setFeedbackText]=useState(''); const [creatingFeedback,setCreatingFeedback]=useState(false); const [feedbackError,setFeedbackError]=useState('');
   const [draftItems,setDraftItems]=useState<EvaluationItem[]>([]);
   const [draftMeta,setDraftMeta]=useState({date:'',time:'',callId:'',recordingCode:'',type:'DIAGNOSTICO_INICIAL',product:'',sale:false,saleResult:'NO_VENTA',noSaleReason:'',comments:''});
 
@@ -54,9 +57,10 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   },[evaluation]);
 
   useEffect(()=>{
-    if(!evaluation||currentUser.role!=='ASESOR')return;
+    setAgentDetail(null);setFeedbackModalOpen(false);setFeedbackError('');
+    if(!evaluation||!['ASESOR','ADMINISTRADOR','CONSULTOR','MONITOR','SUPERVISOR'].includes(currentUser.role))return;
     const token=sessionStorage.getItem('CONTACT_CENTER_AUTH_TOKEN');
-    void fetch(`/api/evaluations/${evaluation.id}/agent-detail`,{headers:token?{Authorization:`Bearer ${token}`}:{}}).then(async response=>{if(!response.ok)throw new Error((await response.json()).error);return response.json();}).then(data=>{setAgentDetail(data);setCommitment(data.commitment?.text||'');setCommitmentDate(data.commitment?.date||'');}).catch(error=>setCommitmentError(error.message));
+    void fetch(`/api/evaluations/${evaluation.id}/agent-detail`,{headers:token?{Authorization:`Bearer ${token}`}:{}}).then(async response=>{if(!response.ok)throw new Error((await response.json()).error);return response.json();}).then(data=>{setAgentDetail(data);setCommitment(data.commitment?.text||'');setCommitmentDate(data.commitment?.date||'');}).catch(error=>{if(currentUser.role==='ASESOR')setCommitmentError(error.message);});
   },[evaluation,currentUser.role]);
 
   if (!evaluation) return null;
@@ -81,9 +85,11 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
     finally{setSavingEdit(false);}
   };
   const saveCommitment=async()=>{setSavingCommitment(true);setCommitmentError('');try{const token=sessionStorage.getItem('CONTACT_CENTER_AUTH_TOKEN');const response=await fetch(`/api/evaluations/${evaluation.id}/commitment`,{method:'PATCH',headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify({commitment,commitmentDate})});const data=await response.json();if(!response.ok)throw new Error(data.error);setAgentDetail((value:any)=>({...value,commitment:data.commitment}));}catch(error:any){setCommitmentError(error.message||'No fue posible guardar el compromiso.');}finally{setSavingCommitment(false);}};
+  const createSpeechFeedback=async()=>{if(creatingFeedback||!feedbackText.trim())return;setCreatingFeedback(true);setFeedbackError('');try{const token=sessionStorage.getItem('CONTACT_CENTER_AUTH_TOKEN');const response=await fetch('/api/feedbacks',{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify({evaluation_id:evaluation.id,feedback_text:feedbackText.trim()})});const data=await response.json();if(!response.ok)throw new Error(data.error||'No fue posible crear el feedback.');setAgentDetail((value:any)=>({...value,feedback:data.feedback}));setFeedbackModalOpen(false);window.dispatchEvent(new Event('cm:data-changed'));}catch(error){setFeedbackError(error instanceof Error?error.message:'No fue posible crear el feedback.');}finally{setCreatingFeedback(false);}};
   const attachAudio=async(file:File,_previewUrl:string,duration:number)=>{if(!evaluation||uploadingAudio)return;setUploadingAudio(true);setAudioError('');try{const uploaded=await filesApi.upload(file);const saved=await updateEvaluation(evaluation.id,{audioUrl:uploaded.url,audioFileName:uploaded.name,audioFileSize:Number(uploaded.size)||file.size,audioDurationSeconds:duration,audioMimeType:uploaded.mimeType});onUpdated?.(saved);}catch(error){setAudioError(error instanceof Error?error.message:'No fue posible guardar el audio.');}finally{setUploadingAudio(false);}};
   const isQuality = evaluation.evaluationType === 'QUALITY' || evaluation.items.some(item => QUALITY_ATTRIBUTES.some(attribute => attribute.id === item.criterionId));
   const advisorName = advisor?.name || evaluation.sourceAdvisorName || 'Asesor por relacionar';
+  const canCreateSpeechFeedback = evaluation.origin==='SPEECH_ANALYTICS'&&['ADMINISTRADOR','CONSULTOR','MONITOR','SUPERVISOR'].includes(currentUser.role);
   const qualityScores = isQuality ? ['C1', 'C2', 'C3', 'C4'].map(criterion => {
     const attributes = QUALITY_ATTRIBUTES.filter(attribute => attribute.criterion === criterion);
     const answered = attributes.filter(attribute => {
@@ -98,7 +104,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
     return { criterion, score: denominator ? Math.round((achieved / denominator) * 100) : null };
   }) : [];
 
-  return (
+  return (<>
     <div className="fixed inset-0 z-50 bg-slate-950/65 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
       <div className="cm-modal cm-evaluation-modal max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95">
         
@@ -382,21 +388,14 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
             {isEditing?'Cancelar edición':'Cerrar'}
           </button>
 
-          {isEditing?<button disabled={savingEdit} onClick={()=>void saveEdit()} className="cm-button-primary px-4 py-2 text-xs disabled:opacity-50"><Save className="h-4 w-4"/>{savingEdit?'Guardando…':monitorCanValidate?'Guardar y validar':'Guardar cambios'}</button>:onOpenNewActionPlan && (
-            <button
-              onClick={() => {
-                onOpenNewActionPlan(evaluation);
-                onClose();
-              }}
-              className="cm-button-primary flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-            >
-              <ListTodo className="w-4 h-4" />
-              <span>Crear Plan de Acción a partir de esta Ficha</span>
-            </button>
-          )}
+          {isEditing?<button disabled={savingEdit} onClick={()=>void saveEdit()} className="cm-button-primary px-4 py-2 text-xs disabled:opacity-50"><Save className="h-4 w-4"/>{savingEdit?'Guardando…':monitorCanValidate?'Guardar y validar':'Guardar cambios'}</button>:<div className="flex flex-wrap justify-end gap-2">
+            {canCreateSpeechFeedback&&<button type="button" disabled={Boolean(agentDetail?.feedback)||evaluation.advisorResolutionStatus==='PENDING'} onClick={()=>{setFeedbackText(evaluation.recommendation||evaluation.primaryGap||'');setFeedbackError('');setFeedbackModalOpen(true);}} className="cm-button-secondary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-55"><MessageSquarePlus className="h-4 w-4"/>{agentDetail?.feedback?'Feedback ya creado':evaluation.advisorResolutionStatus==='PENDING'?'Relaciona primero al asesor':'Generar feedback'}</button>}
+            {onOpenNewActionPlan&&<button onClick={()=>{onOpenNewActionPlan(evaluation);onClose();}} className="cm-button-primary flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer"><ListTodo className="w-4 h-4"/><span>Crear Plan de Acción a partir de esta Ficha</span></button>}
+          </div>}
         </div>
 
       </div>
     </div>
-  );
+    {feedbackModalOpen&&createPortal(<div className="fixed inset-0 z-[350] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="speech-feedback-title"><div className="cm-modal w-full max-w-xl overflow-hidden"><header className="flex items-start justify-between border-b border-[var(--cm-border)] px-5 py-4"><div><p className="cm-eyebrow">SPEECH ANALYTICS</p><h3 id="speech-feedback-title" className="font-bold">Generar feedback manual</h3><p className="mt-1 text-xs text-[var(--cm-text-secondary)]">{advisorName} · {evaluation.callId}</p></div><button type="button" onClick={()=>setFeedbackModalOpen(false)} aria-label="Cerrar"><X className="h-5 w-5"/></button></header><div className="p-5"><label className="text-xs font-bold">Feedback<textarea autoFocus rows={6} value={feedbackText} onChange={event=>setFeedbackText(event.target.value)} placeholder="Registra la retroalimentación entregada al asesor..." className="cm-input mt-2 p-3 font-normal leading-6"/></label>{feedbackError&&<p role="alert" className="mt-3 rounded-lg border border-[var(--cm-danger)] bg-[rgba(255,77,79,.09)] p-3 text-xs text-[var(--cm-danger)]">{feedbackError}</p>}</div><footer className="flex justify-end gap-2 border-t border-[var(--cm-border)] px-5 py-4"><button type="button" disabled={creatingFeedback} onClick={()=>setFeedbackModalOpen(false)} className="cm-button-secondary px-3 py-2 text-xs">Cancelar</button><button type="button" disabled={creatingFeedback||!feedbackText.trim()} onClick={()=>void createSpeechFeedback()} className="cm-button-primary px-4 py-2 text-xs disabled:opacity-50"><MessageSquarePlus className="h-4 w-4"/>{creatingFeedback?'Generando…':'Crear feedback'}</button></footer></div></div>,document.body)}
+  </>);
 };

@@ -1198,7 +1198,8 @@ async function startServer() {
   app.get('/api/feedbacks', requireAuth, async (req, res) => {
     const user = (req as any).authUser as User;
     const directory=await readRepository(),supervisorAdvisorIds=new Set(directory.advisors.filter(item=>item.supervisorId===user.id||(user.teamId&&item.teamId===user.teamId)).map(item=>item.id));
-    const onlyOwn = (feedbacks: any[]) => user.role === 'ASESOR' ? feedbacks.filter(feedback => feedback.advisor_id === user.advisorId) : user.role === 'SUPERVISOR' ? feedbacks.filter(feedback => supervisorAdvisorIds.has(feedback.advisor_id)) : user.role === 'MONITOR' ? feedbacks.filter(feedback => feedback.evaluator_id === user.id) : feedbacks;
+    const evaluationIds=new Set((await adminEvaluationRows()).map((evaluation:any)=>evaluation.id));
+    const onlyOwn = (feedbacks: any[]) => {const existing=feedbacks.filter(feedback=>evaluationIds.has(feedback.evaluation_id));return user.role === 'ASESOR' ? existing.filter(feedback => feedback.advisor_id === user.advisorId) : user.role === 'SUPERVISOR' ? existing.filter(feedback => supervisorAdvisorIds.has(feedback.advisor_id)) : user.role === 'MONITOR' ? existing.filter(feedback => feedback.evaluator_id === user.id) : existing;};
     try { const remote = googleStorage.enabled ? await googleStorage.loadFeedbacks() : null; if (remote) return res.json({ feedbacks: onlyOwn(remote) }); }
     catch (error) { console.error('[google-storage] No fue posible leer feedbacks.', error instanceof Error ? error.message : ''); }
     res.json({ feedbacks: onlyOwn(db.prepare('SELECT * FROM feedbacks ORDER BY updated_at DESC').all() as any[]) });
@@ -1213,9 +1214,10 @@ async function startServer() {
       catch (error) { console.error('[google-storage] No fue posible recuperar la evaluación origen.', error instanceof Error ? error.message : ''); }
     }
     if (!ev) return res.status(400).json({ error: 'La evaluación origen no existe.' });
-    if (authUser.role === 'MONITOR' && ev.evaluatorId !== authUser.id) return res.status(403).json({ error: 'Solo puedes crear feedback de evaluaciones propias.' });
+    if (authUser.role === 'MONITOR' && ev.evaluatorId !== authUser.id && ev.origin !== 'SPEECH_ANALYTICS') return res.status(403).json({ error: 'Solo puedes crear feedback de evaluaciones manuales propias o de Speech Analytics.' });
     if (authUser.role === 'SUPERVISOR') { const directory=await readRepository(),team=new Set(directory.advisors.filter(item=>item.supervisorId===authUser.id||(authUser.teamId&&item.teamId===authUser.teamId)).map(item=>item.id));if(!team.has(ev.advisorId))return res.status(403).json({error:'Solo puedes crear feedback para asesores de tu equipo.'}); }
-    const now = new Date().toISOString(); const feedback = { feedback_id: `fb_${randomBytes(8).toString('hex')}`, evaluation_id: ev.id, advisor_id: ev.advisorId, supervisor_id: ev.supervisorId, evaluator_id: ev.evaluatorId, evaluation_type: ev.evaluationType, feedback_text: String(body.feedback_text || ''), advisor_response: null, advisor_evidence_url: null, supervisor_closure_comment: null, status: 'PENDIENTE', created_at: now, advisor_action_at: null, closed_at: null, updated_at: now };
+    const feedbackText=String(body.feedback_text||'').trim();if(!feedbackText)return res.status(400).json({error:'Registra el contenido del feedback.'});
+    const now = new Date().toISOString(); const feedback = { feedback_id: `fb_${randomBytes(8).toString('hex')}`, evaluation_id: ev.id, advisor_id: ev.advisorId, supervisor_id: ev.supervisorId, evaluator_id: ev.origin==='SPEECH_ANALYTICS'?authUser.id:ev.evaluatorId, evaluation_type: ev.evaluationType, feedback_text: feedbackText, advisor_response: null, advisor_evidence_url: null, supervisor_closure_comment: null, status: 'PENDIENTE', created_at: now, advisor_action_at: null, closed_at: null, updated_at: now };
     try {
       if (googleStorage.enabled) {
         const existing = (await googleStorage.loadFeedbacks()).find((item: any) => item.evaluation_id === ev.id);
