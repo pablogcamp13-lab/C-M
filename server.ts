@@ -1174,7 +1174,7 @@ async function startServer() {
     if (!evaluation || !canReadEvaluation(user, evaluation) || (user.role === 'ASESOR' && normalizedValidationStatus(evaluation) !== 'VALIDATED')) return res.status(404).json({ error:'Evaluación no encontrada.' });
     let feedback = db.prepare('SELECT * FROM feedbacks WHERE evaluation_id=?').get(evaluation.id) as any;
     if (!feedback && googleStorage.enabled) try { feedback = (await googleStorage.loadFeedbacks()).find((item: any) => item.evaluation_id === evaluation.id); } catch {}
-    const savedCommitment = db.prepare('SELECT * FROM evaluation_commitments WHERE evaluation_id=?').get(evaluation.id) as any;
+    const savedCommitment = supabaseStorage.enabled ? await supabaseStorage.loadEvaluationCommitment(evaluation.id) : db.prepare('SELECT * FROM evaluation_commitments WHERE evaluation_id=?').get(evaluation.id) as any;
     const commitment = savedCommitment ? { text:savedCommitment.commitment, date:savedCommitment.commitment_date, updatedAt:savedCommitment.updated_at } : evaluation.agentCommitment ? { text:evaluation.agentCommitment, date:evaluation.agentCommitmentDate, updatedAt:evaluation.agentCommitmentUpdatedAt } : null;
     return res.json({ evaluation, feedback: feedback || null, commitment, signature: feedback?.status === 'VALIDADO_ASESOR' || feedback?.status === 'CERRADO_SUPERVISOR' ? { status:'SIGNED', signedAt:feedback.advisor_action_at } : null });
   });
@@ -1184,10 +1184,17 @@ async function startServer() {
     const commitment = String(req.body?.commitment || '').trim(); const commitmentDate = String(req.body?.commitmentDate || '');
     if (commitment.length < 3 || commitment.length > 2000 || !/^\d{4}-\d{2}-\d{2}$/.test(commitmentDate) || Number.isNaN(Date.parse(`${commitmentDate}T00:00:00Z`))) return res.status(400).json({ error:'Registra un compromiso válido y su fecha.' });
     const now = new Date().toISOString(); const updated = { ...evaluation, agentCommitment:commitment, agentCommitmentDate:commitmentDate, agentCommitmentUpdatedAt:now };
-    db.prepare(`INSERT INTO evaluation_commitments (evaluation_id,advisor_id,commitment,commitment_date,created_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(evaluation_id) DO UPDATE SET commitment=excluded.commitment,commitment_date=excluded.commitment_date,updated_at=excluded.updated_at`).run(evaluation.id,user.advisorId,commitment,commitmentDate,now,now);
-    db.prepare('UPDATE evaluations SET payload_json=? WHERE id=?').run(JSON.stringify(updated),evaluation.id);
-    if (googleStorage.enabled) await googleStorage.saveEvaluation(updated);
-    return res.json({ commitment:{ text:commitment, date:commitmentDate, updatedAt:now } });
+    try {
+      if(supabaseStorage.enabled)await supabaseStorage.saveEvaluationCommitment({evaluationId:evaluation.id,advisorId:user.advisorId,commitment,commitmentDate,createdAt:now,updatedAt:now});
+      else if(googleStorage.enabled)await googleStorage.saveEvaluation(updated);
+      try{
+        db.exec('BEGIN IMMEDIATE');
+        db.prepare(`INSERT INTO evaluations (id,advisor_id,evaluator_id,evaluation_type,evaluated_at,payload_json,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET advisor_id=excluded.advisor_id,evaluated_at=excluded.evaluated_at,payload_json=excluded.payload_json`).run(evaluation.id,evaluation.advisorId,evaluation.evaluatorId,evaluation.evaluationType,`${evaluation.date}T${evaluation.time||'00:00'}:00`,JSON.stringify(updated),evaluation.createdAt||now);
+        db.prepare(`INSERT INTO evaluation_commitments (evaluation_id,advisor_id,commitment,commitment_date,created_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(evaluation_id) DO UPDATE SET advisor_id=excluded.advisor_id,commitment=excluded.commitment,commitment_date=excluded.commitment_date,updated_at=excluded.updated_at`).run(evaluation.id,user.advisorId,commitment,commitmentDate,now,now);
+        db.exec('COMMIT');
+      }catch(cacheError){db.exec('ROLLBACK');if(!googleStorage.enabled)throw cacheError;console.error('[commitments] El compromiso se guardó, pero no pudo actualizarse la caché local.',cacheError instanceof Error?cacheError.message:'');}
+      return res.json({ commitment:{ text:commitment, date:commitmentDate, updatedAt:now } });
+    }catch(error){console.error('[commitments] No fue posible guardar el compromiso.',error instanceof Error?error.message:'');return res.status(502).json({error:'No fue posible guardar el compromiso. Intenta nuevamente.'});}
   });
   app.get('/api/evaluations/:id/audio', requireAuth, async (req, res) => {
     const user = (req as any).authUser as User; const evaluation = await loadEvaluationById(req.params.id);
