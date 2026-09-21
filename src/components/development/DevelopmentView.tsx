@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Archive, BookOpen, CheckCircle2, Clock3, Copy, Eye, Filter, Play, Plus, Send, Target, TrendingUp, Trash2, Users, X } from "lucide-react";
+import { AlertTriangle, Archive, BookOpen, CheckCircle2, Clock3, Copy, Eye, Filter, Maximize2, Minimize2, Play, Plus, Send, Target, TrendingUp, Trash2, Users, X } from "lucide-react";
 import {
   developmentApi,
   sharedRepositoryApi,
@@ -163,7 +163,8 @@ const trustedInteractiveHost = (url: string) => {
 const ContentFrame: React.FC<{
   capsule: Capsule;
   onEvent?: (data: any) => void;
-}> = ({ capsule, onEvent }) => {
+  fullscreen?: boolean;
+}> = ({ capsule, onEvent, fullscreen = false }) => {
   const embedded = containsEmbed(capsule.content.value);
   const url = embedUrl(capsule.content.value);
   const trusted = trustedInteractiveHost(url);
@@ -210,7 +211,7 @@ const ContentFrame: React.FC<{
       allow="fullscreen; autoplay; clipboard-read; clipboard-write; encrypted-media"
       allowFullScreen
       referrerPolicy="strict-origin-when-cross-origin"
-      className="aspect-video min-h-[420px] w-full rounded-xl border border-[var(--cm-border)] bg-black"
+      className={`${fullscreen ? "h-full min-h-0" : "aspect-video min-h-[420px]"} w-full rounded-xl border border-[var(--cm-border)] bg-black`}
     />
   );
 };
@@ -1194,6 +1195,8 @@ const Info = ({ label, value }: { label: string; value: any }) => (
   </div>
 );
 const Player = ({ assignment, capsule, onClose, onSave }: any) => {
+  const playerRef = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
   const [phase, setPhase] = useState(
     assignment.contentViewed ? "EVALUACION" : "CONTENIDO",
   );
@@ -1212,6 +1215,19 @@ const Player = ({ assignment, capsule, onClose, onSave }: any) => {
     }
   };
   useEffect(() => { void loadForum(); }, [capsule.id, isForum]);
+  useEffect(() => {
+    const updateFullscreen = () => setFullscreen(document.fullscreenElement === playerRef.current);
+    document.addEventListener("fullscreenchange", updateFullscreen);
+    return () => document.removeEventListener("fullscreenchange", updateFullscreen);
+  }, []);
+  const toggleFullscreen = async () => {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else await playerRef.current?.requestFullscreen();
+  };
+  const closePlayer = async () => {
+    if (document.fullscreenElement === playerRef.current) await document.exitFullscreen().catch(() => undefined);
+    onClose();
+  };
   const multiple = capsule.evaluation.questionType === "MULTIPLE";
   const selected = answer
     .split(",")
@@ -1228,7 +1244,7 @@ const Player = ({ assignment, capsule, onClose, onSave }: any) => {
     );
   return (
     <Overlay>
-      <div className="cm-modal my-auto flex max-h-[92vh] w-full max-w-6xl flex-col">
+      <div ref={playerRef} className={`cm-modal cm-learning-player flex w-full flex-col ${fullscreen ? "h-screen max-h-none max-w-none rounded-none" : "my-auto max-h-[92vh] max-w-6xl"}`}>
         <header className="flex items-center justify-between border-b border-[var(--cm-border)] p-4">
           <div>
             <h2 className="font-bold">{capsule.title}</h2>
@@ -1237,14 +1253,20 @@ const Player = ({ assignment, capsule, onClose, onSave }: any) => {
               {assignment.progress}%
             </p>
           </div>
-          <button onClick={onClose}>
-            <X />
-          </button>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => void toggleFullscreen()} className="cm-button-secondary grid h-10 w-10 place-items-center p-0" title={fullscreen ? "Salir de pantalla completa" : "Ver en pantalla completa"} aria-label={fullscreen ? "Salir de pantalla completa" : "Ver en pantalla completa"}>
+              {fullscreen ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
+            </button>
+            <button type="button" onClick={() => void closePlayer()} className="grid h-10 w-10 place-items-center" title="Cerrar" aria-label="Cerrar">
+              <X />
+            </button>
+          </div>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {phase === "CONTENIDO" ? (
             <ContentFrame
               capsule={capsule}
+              fullscreen={fullscreen}
               onEvent={(event: any) =>
                 void onSave(
                   event.type === "CONTENT_COMPLETED"
