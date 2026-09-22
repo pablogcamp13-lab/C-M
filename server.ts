@@ -1669,6 +1669,7 @@ async function startServer() {
       process.exitCode = 1;
     });
   };
+  if(supabaseStorage.enabled){try{await supabaseStorage.deleteExpiredSessions();}catch(error){console.error('[sessions] No fue posible depurar sesiones vencidas.',error instanceof Error?error.message:'');}const sessionCleanup=setInterval(()=>void supabaseStorage.deleteExpiredSessions().catch((error:any)=>console.error('[sessions] No fue posible depurar sesiones vencidas.',error?.message||'')),60*60*1000);sessionCleanup.unref();}
   listen(PORT);
 }
 
