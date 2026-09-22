@@ -777,7 +777,9 @@ export const ImportAdvisorsModal: React.FC<ImportAdvisorsModalProps> = ({
                           {row.name || <span className="text-rose-600 italic">Vacío</span>}
                         </td>
 
-                        <td className="py-2 px-3 text-[#031E3C] font-semibold">{row.campaignName}</td>
+                        <td className="py-2 px-3 text-[#031E3C] font-semibold">
+                          {validationResult.usesSheetCampaigns ? row.campaignName : selectedCampaign?.name || row.campaignName || '—'}
+                        </td>
 
                         <td className="py-2 px-3 text-[#667085] truncate max-w-[120px]">
                           {row.supervisorRaw || '-'}

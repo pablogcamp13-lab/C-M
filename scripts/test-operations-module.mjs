@@ -71,7 +71,8 @@ try{
     {advisor:{...duplicatedAdvisor,id:'client_id_must_not_replace_existing',name:'Asesor Retenciones Actualizado',operationId:retainedOperations[0].id,campaignId:retainedOperations[0].campaignId,supervisorId:'usr_admin',quartile:'Q4'}},
     {advisor:{id:'adv_imported_roster',dni:'90000003',employeeCode:'IMP1',name:'Asesor Nuevo Importado',operationId:retainedOperations[0].id,campaignId:retainedOperations[0].campaignId,teamId:'',supervisorId:'usr_admin',quartile:'Q2',status:'ACTIVO',active:true,hireDate:'2026-01-01'}}
   ];
-  const imported=await api('/api/staffing/import',{token:admin,method:'POST',body:{operationId:retainedOperations[0].id,effectiveAt:effectiveDate,rows:importRows}});
+  const importRequestId='roster-import-idempotency-test';
+  const imported=await api('/api/staffing/import',{token:admin,method:'POST',body:{requestId:importRequestId,operationId:retainedOperations[0].id,effectiveAt:effectiveDate,rows:importRows}});
   assert.equal(imported.response.status,200);assert.equal(imported.data.saved,true);assert.match(imported.data.message,/guardada y verificada/i);assert.equal(imported.data.verification.verified,2);assert.equal(imported.data.summary.created,1);assert.equal(imported.data.summary.updated,1);
   const importedExisting=imported.data.repository.advisors.find(advisor=>advisor.dni==='90000000');
   assert.equal(importedExisting.id,'adv_duplicate_retentions','Import by DNI preserves the advisor identity and its historical references');
@@ -79,6 +80,9 @@ try{
   const importedNew=imported.data.repository.advisors.find(advisor=>advisor.dni==='90000003');assert.ok(importedNew);assert.equal(importedNew.operationId,retainedOperations[0].id);
   assert.ok(imported.data.repository.users.some(user=>user.advisorId===importedNew.id),'New advisors receive an account');
   const movementsAfterFirstImport=imported.data.repository.staffingMovements.length;
+  const importStatus=await api(`/api/staffing/import-status/${importRequestId}`,{token:admin});assert.equal(importStatus.response.status,200);assert.equal(importStatus.data.status,'COMPLETE');assert.equal(importStatus.data.result.verification.verified,2);
+  const idempotentConfirmation=await api('/api/staffing/import',{token:admin,method:'POST',body:{requestId:importRequestId,operationId:retainedOperations[0].id,effectiveAt:effectiveDate,rows:importRows}});assert.equal(idempotentConfirmation.response.status,200);assert.equal(idempotentConfirmation.data.requestId,importRequestId);
+  assert.equal(idempotentConfirmation.data.repository.staffingMovements.length,movementsAfterFirstImport,'The same request id returns its prior confirmation without writing again');
   const repeatedImport=await api('/api/staffing/import',{token:admin,method:'POST',body:{operationId:retainedOperations[0].id,effectiveAt:effectiveDate,rows:importRows}});
   assert.equal(repeatedImport.response.status,200);assert.equal(repeatedImport.data.verification.verified,2);assert.equal(repeatedImport.data.summary.created,0);assert.equal(repeatedImport.data.summary.updated,2);assert.equal(repeatedImport.data.summary.assignmentsCreated,0);assert.equal(repeatedImport.data.summary.alreadyAssigned,2);
   assert.equal(repeatedImport.data.repository.staffingMovements.length,movementsAfterFirstImport,'Repeating the same roster does not duplicate assignments or movements');

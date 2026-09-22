@@ -202,16 +202,30 @@ export const organizationApi = {
   removeSupervisor(id:string,supervisorId:string,body:any) { return mutate<any>(`/api/operations/${id}/supervisors/${supervisorId}`,'DELETE',body); },
   async staffing(query:Record<string,unknown>={}) { return json<any>(await fetch(`/api/staffing?${queryString(query)}`,{headers:headers()})); },
   async importRoster(body:any) {
+    const requestId=String(body?.requestId||crypto.randomUUID());
+    const waitForConfirmation=async()=>{
+      for(let attempt=0;attempt<60;attempt++){
+        await new Promise(resolve=>setTimeout(resolve,2_000));
+        try{
+          const status=await json<any>(await fetch(`/api/staffing/import-status/${encodeURIComponent(requestId)}`,{headers:headers(),signal:AbortSignal.timeout(15_000)}));
+          if(status.status==='COMPLETE')return status.result;
+        }catch(error){
+          if(error instanceof Error&&!/conectar con el servidor/i.test(error.message))throw error;
+        }
+      }
+      throw new Error('El servidor sigue procesando la carga. No la repitas: actualiza Dotación en unos minutos para comprobarla.');
+    };
     try {
-      return await json<any>(await fetch('/api/staffing/import', {
+      const result=await json<any>(await fetch('/api/staffing/import', {
         method:'POST',
         headers:{'Content-Type':'application/json',...headers()},
-        body:JSON.stringify(body),
+        body:JSON.stringify({...body,requestId}),
         signal:AbortSignal.timeout(90_000)
       }));
+      return result.status==='RUNNING'?await waitForConfirmation():result;
     } catch (error) {
       if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
-        throw new Error('La confirmación tardó demasiado. Revisa la dotación antes de reintentar; el guardado podría haberse completado.');
+        return await waitForConfirmation();
       }
       throw error;
     }

@@ -112,6 +112,11 @@ export function registerOperationsModule({app,db,requireAuth,repository,sync,rem
     return {valid:errors.length===0,advisorIds,total:advisorIds.length,effectiveAt,errors:[...new Set(errors)],warnings:[...new Set(warnings)],origins,distribution};
   };
   const commitSynced=async(res:express.Response,payload:any,status=200,scope?:Parameters<Dependencies['sync']>[0])=>{try{await sync(scope);db.exec('COMMIT');return res.status(status).json(payload);}catch(error){try{db.exec('ROLLBACK');}catch{}console.error('[operations] PostgreSQL no confirmó la transacción.',error);return res.status(502).json({error:'No se guardaron los cambios porque el repositorio principal no confirmó la operación.',code:'PRIMARY_STORAGE_SYNC_FAILED'});}};
+  const importJobs=new Map<string,{actorId:string;status:'RUNNING'|'COMPLETE'|'FAILED';result?:any;error?:string}>();
+  const rememberImport=(requestId:string,value:{actorId:string;status:'RUNNING'|'COMPLETE'|'FAILED';result?:any;error?:string})=>{
+    importJobs.set(requestId,value);
+    while(importJobs.size>50)importJobs.delete(importJobs.keys().next().value as string);
+  };
 
   app.post('/api/staffing/advisors',requireAuth,async(req,res)=>{
     const user=guardWrite(req,res);if(!user)return;
@@ -162,9 +167,20 @@ export function registerOperationsModule({app,db,requireAuth,repository,sync,rem
   const bulkMove = async(req:express.Request,res:express.Response,supervisorOnly=false) => {const user=guardWrite(req,res);if(!user)return;const b=req.body||{},targetId=String(b.operationId||''),preview=dryMove(b,user,targetId);if(b.dryRun)return res.json({preview});if(!preview.valid)return res.status(400).json({error:'La validación previa encontró errores.',preview});db.exec('BEGIN IMMEDIATE');const results:any[]=[];try{for(let index=0;index<preview.advisorIds.length;index++){const current=context(preview.advisorIds[index]);const operationId=supervisorOnly?current.operation_id:targetId;let supervisorId=String(b.supervisorId||'')||null;if(b.supervisorMode==='KEEP')supervisorId=current.supervisor_id||null;if(b.supervisorMode==='BALANCED'){const ids=(b.supervisorIds||[]).map(String);supervisorId=ids[index%ids.length]||null;}results.push(moveOne(preview.advisorIds[index],operationId,supervisorId,preview.effectiveAt,user.id,String(b.reason||'Actualización masiva de dotación.'),supervisorOnly?'CAMBIO_SUPERVISOR':undefined));}const modified=results.filter(row=>row.changed).length;return await commitSynced(res,{saved:true,message:`Corrección aplicada: ${modified} de ${preview.total} personas actualizadas.`,processed:preview.total,modified,warnings:preview.warnings,results},200,{advisorIds:preview.advisorIds,operationIds:[targetId].filter(Boolean)});}catch(error){try{db.exec('ROLLBACK');}catch{}return res.status(409).json({error:error instanceof Error?error.message:'La operación masiva fue revertida.',processed:0});}};
   app.get('/api/staffing',requireAuth,(req,res)=>{const user=guardRead(req,res);if(!user)return;const operationId=String(req.query.operationId||'');if(operationId&&!canSeeOperation(user,operationId))return res.status(403).json({error:'La operación está fuera de tu alcance.'});res.json(staffingRows(req.query,user));});
   app.get('/api/staffing/export',requireAuth,(req,res)=>{const user=guardRead(req,res);if(!user)return;const operationId=String(req.query.operationId||'');if(operationId&&!canSeeOperation(user,operationId))return res.status(403).json({error:'La operación está fuera de tu alcance.'});const result=staffingRows(req.query,user,true);res.json({rows:result.rows,total:result.total});});
+  app.get('/api/staffing/import-status/:requestId',requireAuth,(req,res)=>{
+    const actor=guardWrite(req,res);if(!actor)return;
+    const job=importJobs.get(String(req.params.requestId||''));
+    if(!job||job.actorId!==actor.id)return res.status(404).json({status:'UNKNOWN'});
+    if(job.status==='FAILED')return res.status(409).json({status:job.status,error:job.error});
+    return res.json(job.status==='COMPLETE'?{status:job.status,result:job.result}:{status:job.status});
+  });
   app.post('/api/staffing/import',requireAuth,async(req,res)=>{
     const actor=guardWrite(req,res);if(!actor)return;
-    const body=req.body||{},operationId=String(body.operationId||''),target=operation(operationId),effectiveAt=isoDate(body.effectiveAt)||new Date().toISOString().slice(0,10),sourceRows=Array.isArray(body.rows)?body.rows:[];
+    const body=req.body||{},requestId=String(body.requestId||id('roster_import')).replace(/[^a-zA-Z0-9_-]/g,'').slice(0,100),previousJob=importJobs.get(requestId);
+    if(previousJob&&previousJob.actorId!==actor.id)return res.status(409).json({error:'El identificador de esta carga ya está en uso.'});
+    if(previousJob?.status==='COMPLETE')return res.json(previousJob.result);
+    if(previousJob?.status==='RUNNING')return res.status(202).json({status:'RUNNING',requestId});
+    const operationId=String(body.operationId||''),target=operation(operationId),effectiveAt=isoDate(body.effectiveAt)||new Date().toISOString().slice(0,10),sourceRows=Array.isArray(body.rows)?body.rows:[];
     if(!target||target.status!=='ACTIVA'||target.company_status!=='ACTIVA'||target.legacy)return res.status(400).json({error:'Selecciona una empresa y campaña activas.'});
     if(!canSeeOperation(actor,target.id))return res.status(403).json({error:'La operación está fuera de tu alcance.'});
     if(!sourceRows.length||sourceRows.length>5000)return res.status(400).json({error:'La importación debe contener entre 1 y 5000 personas.'});
@@ -191,6 +207,7 @@ export function registerOperationsModule({app,db,requireAuth,repository,sync,rem
     }catch(error){return res.status(400).json({error:error instanceof Error?error.message:'La validación de la dotación falló.'});}
 
     const now=new Date().toISOString(),summary={rows:prepared.length,created:0,updated:0,reassigned:0,alreadyAssigned:0,assignmentsCreated:0},importedAdvisorIds:string[]=[];
+    rememberImport(requestId,{actorId:actor.id,status:'RUNNING'});
     db.exec('BEGIN IMMEDIATE');
     try{
       for(const row of prepared){
@@ -243,18 +260,23 @@ export function registerOperationsModule({app,db,requireAuth,repository,sync,rem
       if(verified!==prepared.length)throw new Error(`La verificación sólo confirmó ${verified} de ${prepared.length} personas.`);
       await sync({advisorIds:importedAdvisorIds,operationIds:[operationId],campaignIds:[target.campaign_id]});
       db.exec('COMMIT');
-      return res.json({
+      const result={
         saved:true,
+        requestId,
         message:`Dotación guardada y verificada: ${verified} de ${prepared.length} personas.`,
         persistedAt:new Date().toISOString(),
         summary,
         verification:{expected:prepared.length,verified},
         repository:repository()
-      });
+      };
+      rememberImport(requestId,{actorId:actor.id,status:'COMPLETE',result});
+      return res.json(result);
     }catch(error){
       db.exec('ROLLBACK');
       console.error('[staffing-import] La carga fue revertida:',error);
-      return res.status(409).json({error:error instanceof Error?error.message:'La importación fue revertida; no se aplicaron cambios.'});
+      const message=error instanceof Error?error.message:'La importación fue revertida; no se aplicaron cambios.';
+      rememberImport(requestId,{actorId:actor.id,status:'FAILED',error:message});
+      return res.status(409).json({error:message,requestId});
     }
   });
   app.patch('/api/staffing/:personId/assignment',requireAuth,async(req,res)=>{const user=guardWrite(req,res);if(!user)return;const b=req.body||{},advisor=db.prepare('SELECT data_json FROM advisors WHERE id=?').get(req.params.personId) as any;if(!advisor)return res.status(404).json({error:'Colaborador no encontrado.'});const preview=dryMove({...b,selection:{advisorIds:[req.params.personId]}},user,String(b.operationId||''));if(!preview.valid)return res.status(400).json({error:preview.errors[0],preview});const supervisorId=String(b.supervisorId||'')||null;if(supervisorId&&!db.prepare(`SELECT 1 FROM users WHERE id=? AND status='ACTIVO' AND role IN ('SUPERVISOR','FORMADOR','ADMINISTRADOR','CONSULTOR')`).get(supervisorId))return res.status(400).json({error:'Selecciona un supervisor activo válido.'});db.exec('BEGIN IMMEDIATE');let result;try{const data=parse(advisor.data_json,{}),name=[String(b.firstName??'').trim(),String(b.lastName??'').trim()].filter(Boolean).join(' ')||data.name;if(!name)throw new Error('El nombre es obligatorio.');if(supervisorId&&!supervisorValid(String(b.operationId),supervisorId))db.prepare(`INSERT INTO operation_supervisors (operation_id,supervisor_id,active,start_at,end_at) VALUES (?,?,1,?,NULL) ON CONFLICT(operation_id,supervisor_id,start_at) DO UPDATE SET active=1,end_at=NULL`).run(String(b.operationId),supervisorId,preview.effectiveAt);db.prepare('UPDATE advisors SET name=? WHERE id=?').run(name,req.params.personId);result=moveOne(req.params.personId,String(b.operationId),supervisorId,preview.effectiveAt,user.id,String(b.reason||'Edición de persona y asignación.'));const fresh=db.prepare('SELECT data_json FROM advisors WHERE id=?').get(req.params.personId) as any;db.prepare('UPDATE advisors SET data_json=? WHERE id=?').run(JSON.stringify({...parse(fresh.data_json,{}),name}),req.params.personId);return await commitSynced(res,{result},200,{advisorIds:[req.params.personId],operationIds:[String(b.operationId||'')].filter(Boolean),userIds:[supervisorId||''].filter(Boolean)});}catch(error){try{db.exec('ROLLBACK');}catch{}return res.status(409).json({error:error instanceof Error?error.message:'No se pudo actualizar.'});}});

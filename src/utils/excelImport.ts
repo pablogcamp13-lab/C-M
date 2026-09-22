@@ -350,11 +350,11 @@ export async function parseAndValidateExcel(
     const schedule = rowObj.schedule ? String(rowObj.schedule).trim() : undefined;
     const importedTenureLabel = rowObj.tenureLabel ? String(rowObj.tenureLabel).trim() : undefined;
     // A real multi-sheet file uses each sheet name as its campaign. A single
-    // dotación sheet uses the row campaign (when present) and later requires an
-    // explicit destination campaign in the UI.
+    // dotación sheet uses only an explicit campaign column; its sheet name may
+    // be the company and must never override the destination selected in the UI.
     const campaignName = usesSheetCampaigns
       ? sheetName.trim()
-      : cleanAdvisorName(rowObj.campaign) || sheetName.trim();
+      : cleanAdvisorName(rowObj.campaign) || undefined;
 
     const hireDateParsed = parseExcelDate(rowObj.hireDate);
     const campaignDateParsed = parseExcelDate(rowObj.campaignStartDate);
@@ -514,7 +514,9 @@ export async function parseAndValidateExcel(
     duplicateCount,
     invalidCount,
     usesSheetCampaigns,
-    detectedCampaigns: [...new Set(normalizedRows.map(row => row.campaignName || row.sheetName))],
+    detectedCampaigns: [...new Set(normalizedRows
+      .map(row => usesSheetCampaigns ? row.sheetName : row.campaignName)
+      .filter((name): name is string => Boolean(name)))],
     rows: normalizedRows,
     detectedSupervisors,
     columnMappingSummary

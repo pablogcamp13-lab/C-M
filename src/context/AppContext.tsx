@@ -903,7 +903,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           name: row.name,
           campaignId,
           operationId: destinationOperation?.id,
-          sourceCampaignName: row.campaignName || row.sheetName,
+          sourceCampaignName: campaignName,
           teamId: campaignTeam.id,
           supervisorId,
           supervisor: row.supervisorRaw || supervisor.name,

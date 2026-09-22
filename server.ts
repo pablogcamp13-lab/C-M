@@ -530,14 +530,14 @@ async function syncRosterImportSnapshot(advisorIds:string[]){
   const current=repository();
   const snapshot=rosterImportSnapshot(current,advisorIds);
   if(snapshot.advisors.length!==new Set(advisorIds).size)throw new Error('La sincronización no encontró todos los asesores importados.');
-  await supabaseStorage.saveRepository(snapshot,passwordHashes());
+  await supabaseStorage.saveRepositoryBatch(snapshot,passwordHashes());
   structuredRepositoryCache={value:current,expiresAt:Date.now()+15_000};
 }
 async function syncRepositoryDelta(scope:RepositoryDeltaScope={}){
   if(!supabaseStorage.enabled)return syncRepositorySnapshot().then(()=>undefined);
   if(!scope.advisorIds?.length&&!scope.operationIds?.length&&!scope.campaignIds?.length&&!scope.userIds?.length)throw new Error('La mutación no declaró su alcance de persistencia.');
   const current=repository(),snapshot=repositoryDeltaSnapshot(current,scope);
-  await supabaseStorage.saveRepository(snapshot,passwordHashes());
+  await supabaseStorage.saveRepositoryBatch(snapshot,passwordHashes());
   structuredRepositoryCache={value:current,expiresAt:Date.now()+15_000};
 }
 
