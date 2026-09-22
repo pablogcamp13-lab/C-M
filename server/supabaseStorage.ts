@@ -95,6 +95,17 @@ class SupabaseStorage {
     }
   });}
 
+  async deleteOperation(operationId:string,campaignId:string){
+    if(!this.enabled)return;
+    await this.transaction(async client=>{
+      await client.query('DELETE FROM operation_supervisors WHERE operation_id=$1',[operationId]);
+      const removed=await client.query('DELETE FROM operations WHERE id=$1 RETURNING id',[operationId]);
+      if(!removed.rowCount)throw new Error('La operación ya no existe en PostgreSQL.');
+      const remaining=await client.query('SELECT 1 FROM operations WHERE source_campaign_id=$1 LIMIT 1',[campaignId]);
+      if(!remaining.rowCount)await client.query('DELETE FROM campaign_definitions WHERE id=$1',[campaignId]);
+    });
+  }
+
   async saveUser(user:User,passwordHash:string){
     if(!this.enabled)return;
     await this.transaction(async client=>{await client.query(`INSERT INTO users(id,person_id,source_advisor_id,name,email,username,role,status,source_team_id,avatar,created_at,must_change_password,access_scope,company_ids_json,operation_ids_json) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT(id) DO UPDATE SET person_id=EXCLUDED.person_id,source_advisor_id=EXCLUDED.source_advisor_id,name=EXCLUDED.name,email=EXCLUDED.email,username=EXCLUDED.username,role=EXCLUDED.role,status=EXCLUDED.status,source_team_id=EXCLUDED.source_team_id,avatar=EXCLUDED.avatar,must_change_password=EXCLUDED.must_change_password,access_scope=EXCLUDED.access_scope,company_ids_json=EXCLUDED.company_ids_json,operation_ids_json=EXCLUDED.operation_ids_json`,[
@@ -136,6 +147,7 @@ class SupabaseStorage {
   async saveFeedback(f:any){await this.db().query(`INSERT INTO feedback(id,evaluation_id,person_id,supervisor_user_id,evaluator_user_id,evaluation_type,feedback_text,advisor_response,advisor_evidence_url,supervisor_closure_comment,status,created_at,advisor_action_at,closed_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT(id) DO UPDATE SET feedback_text=EXCLUDED.feedback_text,advisor_response=EXCLUDED.advisor_response,advisor_evidence_url=EXCLUDED.advisor_evidence_url,supervisor_closure_comment=EXCLUDED.supervisor_closure_comment,status=EXCLUDED.status,advisor_action_at=EXCLUDED.advisor_action_at,closed_at=EXCLUDED.closed_at,updated_at=EXCLUDED.updated_at`,[f.feedback_id,f.evaluation_id,f.advisor_id,f.supervisor_id,f.evaluator_id,f.evaluation_type,f.feedback_text||'',f.advisor_response||null,f.advisor_evidence_url||null,f.supervisor_closure_comment||null,f.status,f.created_at||new Date().toISOString(),f.advisor_action_at||null,f.closed_at||null,f.updated_at||new Date().toISOString()]);}
   async loadPlatformState(){const state=json<any>((await this.db().query(`SELECT payload_json FROM runtime_state WHERE id='global'`)).rows[0]?.payload_json,{});return{...state,evaluations:await this.loadEvaluations()};}
   async savePlatformState(state:any){const {evaluations,...rest}=state||{};await this.db().query(`INSERT INTO runtime_state(id,payload_json,updated_at) VALUES('global',$1,now()) ON CONFLICT(id) DO UPDATE SET payload_json=EXCLUDED.payload_json,updated_at=now()`,[JSON.stringify(rest)]);if(Array.isArray(evaluations))for(const evaluation of evaluations)await this.saveEvaluation(evaluation);}
+  async patchPlatformState(patch:any){return this.transaction(async client=>{const result=await client.query(`SELECT payload_json FROM runtime_state WHERE id='global' FOR UPDATE`),current=json<any>(result.rows[0]?.payload_json,{}),next={...current,...patch};await client.query(`INSERT INTO runtime_state(id,payload_json,updated_at) VALUES('global',$1,now()) ON CONFLICT(id) DO UPDATE SET payload_json=EXCLUDED.payload_json,updated_at=now()`,[JSON.stringify(next)]);return next;});}
   async loadActionPlans(){const state=json<any>((await this.db().query(`SELECT payload_json FROM runtime_state WHERE id='global'`)).rows[0]?.payload_json,{});return Array.isArray(state.actionPlans)?state.actionPlans:[];}
   private async mutateActionPlans(run:(plans:any[])=>any[]){return this.transaction(async client=>{const result=await client.query(`SELECT payload_json FROM runtime_state WHERE id='global' FOR UPDATE`),state=json<any>(result.rows[0]?.payload_json,{}),actionPlans=run(Array.isArray(state.actionPlans)?state.actionPlans:[]);await client.query(`INSERT INTO runtime_state(id,payload_json,updated_at) VALUES('global',$1,now()) ON CONFLICT(id) DO UPDATE SET payload_json=EXCLUDED.payload_json,updated_at=now()`,[JSON.stringify({...state,actionPlans})]);return actionPlans;});}
   async createActionPlan(plan:any){await this.mutateActionPlans(plans=>[plan,...plans.filter(item=>item.id!==plan.id)]);return plan;}

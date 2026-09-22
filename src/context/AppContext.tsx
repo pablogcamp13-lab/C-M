@@ -240,6 +240,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const rosterSyncQueue = useRef<Promise<unknown>>(Promise.resolve());
   const platformStateHydrated = useRef(false);
   const skipHydrationSave = useRef(false);
+  const platformStateSyncQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const lastPlatformCollections = useRef<Record<string, unknown>>({});
   const [platformLoadError, setPlatformLoadError] = useState('');
   const recentEvaluation = useRef<{ key: string; evaluation: Evaluation; createdAt: number } | null>(null);
 
@@ -278,6 +280,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (state) {
           setEvaluations(Array.isArray(state.evaluations) ? uniqueEvaluations(state.evaluations) : []); setActionPlans(state.actionPlans || []); setInterventions(state.interventions || []);
           setAdvisorInterventions(state.advisorInterventions || []); setOperationalMeasurements(state.operationalMeasurements || []); setImportHistory(state.importHistory || []); setConfig(state.config || DEFAULT_METHODOLOGY_CONFIG);
+          lastPlatformCollections.current = { interventions: state.interventions || [], advisorInterventions: state.advisorInterventions || [], operationalMeasurements: state.operationalMeasurements || [], importHistory: state.importHistory || [], config: state.config || DEFAULT_METHODOLOGY_CONFIG };
         }
         skipHydrationSave.current = true;
         setPlatformLoadError('');
@@ -312,8 +315,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     if (!isAuthenticated || ['ASESOR', 'SUPERVISOR', 'MONITOR'].includes(currentUser.role) || !platformStateHydrated.current) return;
     if (skipHydrationSave.current) { skipHydrationSave.current = false; return; }
-    void platformStateApi.save({ evaluations, actionPlans, interventions, advisorInterventions, operationalMeasurements, importHistory, config }).catch(error => console.error('No fue posible sincronizar el estado de plataforma', error));
-  }, [evaluations, actionPlans, interventions, advisorInterventions, operationalMeasurements, importHistory, config, isAuthenticated, currentUser.role]);
+    const next = { interventions, advisorInterventions, operationalMeasurements, importHistory, config };
+    const patch = Object.fromEntries(Object.entries(next).filter(([key, value]) => JSON.stringify(lastPlatformCollections.current[key]) !== JSON.stringify(value)));
+    if (!Object.keys(patch).length) return;
+    lastPlatformCollections.current = { ...lastPlatformCollections.current, ...patch };
+    platformStateSyncQueue.current = platformStateSyncQueue.current
+      .catch(() => undefined)
+      .then(() => platformStateApi.save(patch))
+      .catch(error => { setPlatformLoadError(error instanceof Error ? error.message : 'No fue posible guardar los cambios.'); console.error('No fue posible sincronizar el estado de plataforma', error); });
+  }, [interventions, advisorInterventions, operationalMeasurements, importHistory, config, isAuthenticated, currentUser.role]);
 
   const login = async (identity: string, password: string) => {
     const user = await authApi.login(identity, password);

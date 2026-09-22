@@ -1,7 +1,7 @@
 import express from "express";
 import { mergeEvaluationSources } from "./server/platformStateRecovery";
 import { registerOperationsModule } from "./server/operationsModule";
-import { rosterImportSnapshot } from "./server/rosterSync";
+import { repositoryDeltaSnapshot, rosterImportSnapshot, type RepositoryDeltaScope } from "./server/rosterSync";
 import { speechAdvisorIdentityFromFile, speechFileIdentityMatches } from "./server/speechFileIdentity";
 import path from "path";
 import { googleStorage as googleDriveStorage } from "./server/googleStorage";
@@ -510,11 +510,11 @@ async function readRepository() {
 }
 
 async function saveRepository(input: SharedRepository) {
-  const persisted = persistRepository(input);
   if (googleStorage.enabled) {
-    try { await googleStorage.saveRepository(persisted, passwordHashes()); }
+    try { const hashes=passwordHashes();for(const user of input.users||[])if(!hashes.has(user.id)&&user.password)hashes.set(user.id,hashPassword(user.password));await googleStorage.saveRepository(input,hashes); }
     catch (error) { console.error('[structured-storage] No fue posible guardar la dotación.', error instanceof Error ? error.message : ''); throw new Error('No fue posible sincronizar la información con el repositorio principal.'); }
   }
+  const persisted = persistRepository(input);
   structuredRepositoryCache={value:persisted,expiresAt:Date.now()+15_000};
   return persisted;
 }
@@ -530,6 +530,13 @@ async function syncRosterImportSnapshot(advisorIds:string[]){
   const current=repository();
   const snapshot=rosterImportSnapshot(current,advisorIds);
   if(snapshot.advisors.length!==new Set(advisorIds).size)throw new Error('La sincronización no encontró todos los asesores importados.');
+  await supabaseStorage.saveRepository(snapshot,passwordHashes());
+  structuredRepositoryCache={value:current,expiresAt:Date.now()+15_000};
+}
+async function syncRepositoryDelta(scope:RepositoryDeltaScope={}){
+  if(!supabaseStorage.enabled)return syncRepositorySnapshot().then(()=>undefined);
+  if(!scope.advisorIds?.length&&!scope.operationIds?.length&&!scope.campaignIds?.length&&!scope.userIds?.length)throw new Error('La mutación no declaró su alcance de persistencia.');
+  const current=repository(),snapshot=repositoryDeltaSnapshot(current,scope);
   await supabaseStorage.saveRepository(snapshot,passwordHashes());
   structuredRepositoryCache={value:current,expiresAt:Date.now()+15_000};
 }
@@ -619,10 +626,7 @@ async function startServer() {
       return res.status(400).json({ error: 'No fue posible leer el archivo enviado.' });
     });
   };
-  registerOperationsModule({app,db,requireAuth,repository,sync:async(advisorIds)=>{
-    if(advisorIds?.length&&supabaseStorage.enabled)await syncRosterImportSnapshot(advisorIds);
-    else await syncRepositorySnapshot();
-  }});
+  registerOperationsModule({app,db,requireAuth,repository,sync:syncRepositoryDelta,removeOperation:async(operationId,campaignId)=>{if(supabaseStorage.enabled)await supabaseStorage.deleteOperation(operationId,campaignId);else await syncRepositorySnapshot();structuredRepositoryCache=null;}});
 
   app.post('/api/auth/login', async (req, res) => {
     const { identity, password } = req.body || {};
@@ -1324,15 +1328,14 @@ async function startServer() {
     const actor=(req as any).authUser as User;
     if (!['ADMINISTRADOR','CONSULTOR'].includes(actor.role) || !isGlobalActor(actor)) return res.status(403).json({ error: 'Sólo un administrador global puede sobrescribir el estado global.' });
     const now = new Date().toISOString();
-    let canonicalEvaluations = (db.prepare('SELECT payload_json FROM evaluations ORDER BY created_at DESC').all() as any[]).flatMap(row=>{try{return[JSON.parse(row.payload_json)]}catch{return[]}});
-    try { if (googleStorage.enabled) canonicalEvaluations = await googleStorage.loadEvaluations(); }
-    catch (error) { console.error('[google-storage] No fue posible validar EVALUATIONS antes de guardar el estado.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No se pudo validar el historial de evaluaciones; no se modificó el estado.' }); }
-    const normalizedState = normalizePlatformState({ ...(req.body || {}), evaluations: canonicalEvaluations });
-    try { if (googleStorage.enabled) await googleStorage.savePlatformState(normalizedState); }
+    const allowedKeys=['interventions','advisorInterventions','operationalMeasurements','importHistory','config'];
+    const patch=Object.fromEntries(allowedKeys.filter(key=>Object.prototype.hasOwnProperty.call(req.body||{},key)).map(key=>[key,req.body[key]]));
+    if(!Object.keys(patch).length)return res.status(400).json({error:'No hay cambios válidos para guardar.'});
+    let normalizedState:any;
+    try { if(supabaseStorage.enabled)normalizedState=await supabaseStorage.patchPlatformState(patch);else{normalizedState={...localRuntimeState(),...patch};if(googleStorage.enabled)await googleStorage.savePlatformState(normalizedState);} }
     catch (error) { console.error('[structured-storage] No fue posible guardar el estado de plataforma.', error instanceof Error ? error.message : ''); return res.status(502).json({ error: 'No fue posible sincronizar el estado con el repositorio principal.' }); }
     db.prepare(`INSERT INTO app_state (id,payload_json,updated_at) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,updated_at=excluded.updated_at`).run('global', JSON.stringify(normalizedState), now);
-    for (const evaluation of (normalizedState?.evaluations || [])) { if (!evaluation?.id || !evaluation?.advisorId || !evaluation?.evaluatorId || !['QUALITY','D3C'].includes(evaluation?.evaluationType)) continue; try { db.prepare(`INSERT OR IGNORE INTO evaluations (id,advisor_id,evaluator_id,evaluation_type,evaluated_at,payload_json,created_at) VALUES (?,?,?,?,?,?,?)`).run(evaluation.id, evaluation.advisorId, evaluation.evaluatorId, evaluation.evaluationType, `${evaluation.date}T${evaluation.time || '00:00'}:00`, JSON.stringify(evaluation), evaluation.createdAt || now); } catch {} }
-    res.json({ ok: true });
+    res.json({ok:true,updated:Object.keys(patch)});
   });
 
   app.post('/api/files/upload', requireAuth, parseRawFile, async (req, res) => {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { rosterImportSnapshot } from '../server/rosterSync';
+import { repositoryDeltaSnapshot, rosterImportSnapshot } from '../server/rosterSync';
 import { movementAssignmentLink } from '../server/supabaseStorage';
 import type { SharedRepository } from '../server/googleStorage';
 
@@ -28,4 +28,11 @@ const owners = new Map([['assignment-1','advisor-1']]);
 assert.equal(movementAssignmentLink('assignment-1','advisor-1',owners),'assignment-1');
 assert.equal(movementAssignmentLink('missing','advisor-1',owners),null);
 assert.equal(movementAssignmentLink('assignment-1','advisor-2',owners),null);
+
+const operationDelta = repositoryDeltaSnapshot(repository,{operationIds:['operation-1']});
+assert.deepEqual(operationDelta.operations?.map(item=>item.id),['operation-1']);
+assert.deepEqual(operationDelta.advisors.map(item=>item.id),['advisor-1']);
+assert.deepEqual(operationDelta.campaigns.map(item=>item.id),['campaign-1']);
+assert.deepEqual(operationDelta.users.map(item=>item.id).sort(),['supervisor-1','user-1']);
+assert.equal(operationDelta.operations?.some(item=>item.id==='operation-2'),false);
 console.log('Sincronización de dotación: alcance y movimientos históricos correctos.');
