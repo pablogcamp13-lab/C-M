@@ -9,6 +9,7 @@ import { speechImportApi } from '../../api/sharedRepository';
 import { FiltersBar } from '../common/FiltersBar';
 import { ThreeScore } from '../common/ThreeScore';
 import { StatusBadge } from '../common/StatusBadge';
+import { SPEECH_TYPIFICATIONS } from '../../utils/speechTypification';
 import { 
   Eye, 
   Trash2, 
@@ -176,6 +177,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
               <tbody className="divide-y divide-[#E5E8EC]">
                 {sortedEvaluations.length > 0 ? (
                   sortedEvaluations.map((ev) => {
+                    const nonEvaluable = ev.origin === 'SPEECH_ANALYTICS' && ev.speechTypification === 'CORTA_LLAMADA';
                     const advisor = advisors.find(a => a.id === ev.advisorId);
                     const supervisor = users.find(u => u.id === ev.supervisorId);
                     const rawScore = ev.evaluationType === 'QUALITY' ? (ev.technicalScore ?? ev.scoreTotal) : ev.scoreTotal;
@@ -210,14 +212,14 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                           </div>
                         </td>
 
-                        <td className="py-3 px-3"><div className="flex flex-wrap gap-1"><span className="cm-badge">{ev.evaluationType === 'QUALITY' ? 'Calidad' : 'Mejora Continua'}</span>{ev.origin==='SPEECH_ANALYTICS'&&<span className="cm-badge cm-badge--info" title="Speech Analytics">SA</span>}</div></td>
+                        <td className="py-3 px-3"><div className="flex flex-wrap gap-1"><span className="cm-badge">{ev.evaluationType === 'QUALITY' ? 'Calidad' : 'Mejora Continua'}</span>{ev.origin==='SPEECH_ANALYTICS'&&<><span className="cm-badge cm-badge--info" title="Speech Analytics">SA</span><span className="cm-badge">{SPEECH_TYPIFICATIONS.find(item=>item.value===ev.speechTypification)?.label||'Sin tipificación'}</span></>}</div></td>
 
                         {/* 3. Score 3C (Numeric Badge) */}
                         <td className="py-3 px-3 text-center">
-                          <span className={`inline-block text-xs font-bold font-kpi px-2.5 py-1 rounded-md border ${displayedScore === null ? 'bg-slate-50 text-slate-600 border-slate-200' : getScoreBadgeClass(displayedScore)}`}>
-                            {displayedScore === null ? 'N/A' : `${displayedScore}%`}
+                          <span className={`inline-block text-xs font-bold font-kpi px-2.5 py-1 rounded-md border ${nonEvaluable || displayedScore === null ? 'bg-slate-50 text-slate-600 border-slate-200' : getScoreBadgeClass(displayedScore)}`}>
+                            {nonEvaluable ? 'No evaluable' : displayedScore === null ? 'N/A' : `${displayedScore}%`}
                           </span>
-                          {ev.qualityResult && <div className={`mt-1 text-[9px] font-bold ${ev.qualityResult === 'REPROBADA' ? 'text-red-600' : 'text-emerald-600'}`}>{ev.qualityResult}</div>}
+                          {ev.qualityResult && !nonEvaluable && <div className={`mt-1 text-[9px] font-bold ${ev.qualityResult === 'REPROBADA' ? 'text-red-600' : 'text-emerald-600'}`}>{ev.qualityResult}</div>}
                         </td>
 
                         {/* 4. Desempeño 3C (ThreeScore Component in one cell) */}

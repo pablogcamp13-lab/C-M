@@ -4,6 +4,7 @@ import { QUALITY_ATTRIBUTES } from '../../data/qualityPueData';
 import type { ActionPlan, Advisor, Campaign, Company, Evaluation, Operation, PlatformEvaluationType, User } from '../../types';
 import { calculatePareto } from '../../utils/calculations';
 import type { EvaluationOriginFilterValue } from './EvaluationOriginFilter';
+import { isQualityEvaluable, matchesSpeechTypification, type SpeechTypificationFilter } from '../../utils/speechTypification';
 
 export type ExecutiveMode = PlatformEvaluationType;
 
@@ -74,7 +75,7 @@ const validationLabel = (status?: Evaluation['validationStatus']) => {
   return { id: 'unregistered', label: 'Sin estado registrado', tone: 'neutral' as const };
 };
 
-export const useExecutiveHome = (mode: ExecutiveMode, originFilter: EvaluationOriginFilterValue = 'ALL') => {
+export const useExecutiveHome = (mode: ExecutiveMode, originFilter: EvaluationOriginFilterValue = 'ALL', speechTypification: SpeechTypificationFilter = 'ALL') => {
   const app = useApp();
   const {
     filteredEvaluations, filteredAdvisors, filteredOperationalMeasurements,
@@ -82,7 +83,7 @@ export const useExecutiveHome = (mode: ExecutiveMode, originFilter: EvaluationOr
   } = app;
 
   return useMemo(() => {
-    const scopedEvaluations = filteredEvaluations.filter(evaluation => (evaluation.evaluationType === 'QUALITY' ? 'QUALITY' : 'D3C') === mode && (mode !== 'QUALITY' || originFilter === 'ALL' || (originFilter === 'SPEECH_ANALYTICS' ? evaluation.origin === 'SPEECH_ANALYTICS' : evaluation.origin !== 'SPEECH_ANALYTICS')));
+    const scopedEvaluations = filteredEvaluations.filter(evaluation => (evaluation.evaluationType === 'QUALITY' ? 'QUALITY' : 'D3C') === mode && (mode !== 'QUALITY' || (isQualityEvaluable(evaluation) && (originFilter === 'ALL' || (originFilter === 'SPEECH_ANALYTICS' ? evaluation.origin === 'SPEECH_ANALYTICS' : evaluation.origin !== 'SPEECH_ANALYTICS')) && (originFilter !== 'SPEECH_ANALYTICS' || matchesSpeechTypification(evaluation,speechTypification)))));
     const scores = scopedEvaluations.map(evaluation => scoredValue(evaluation, mode));
     const scoreAverage = average(scores);
     const criticalThreshold = config.priorityThresholds.highGapMax;
@@ -255,7 +256,7 @@ export const useExecutiveHome = (mode: ExecutiveMode, originFilter: EvaluationOr
     const advisorsWithoutCompany = filteredAdvisors.filter(advisor => !operationById.get(advisor.operationId || '')?.companyId).length;
     const totalByMode = filteredEvaluations.reduce((counts, evaluation) => {
       const key: ExecutiveMode = evaluation.evaluationType === 'QUALITY' ? 'QUALITY' : 'D3C';
-      counts[key] += 1;
+      if (key !== 'QUALITY' || isQualityEvaluable(evaluation)) counts[key] += 1;
       return counts;
     }, { D3C: 0, QUALITY: 0 });
 
@@ -283,5 +284,5 @@ export const useExecutiveHome = (mode: ExecutiveMode, originFilter: EvaluationOr
       operationalMeasurementCount: filteredOperationalMeasurements.length,
       totalByMode,
     };
-  }, [actionPlans, advisors, campaigns, companies, config, filteredAdvisors, filteredEvaluations, filteredOperationalMeasurements, filters, mode, originFilter, operations, users]);
+  }, [actionPlans, advisors, campaigns, companies, config, filteredAdvisors, filteredEvaluations, filteredOperationalMeasurements, filters, mode, originFilter, operations, speechTypification, users]);
 };

@@ -9,6 +9,7 @@ import { ThreeScore } from '../common/ThreeScore';
 import { AudioPlayer } from '../common/AudioPlayer';
 import { getItemCompliance } from '../../utils/calculations';
 import { filesApi } from '../../api/sharedRepository';
+import { SPEECH_TYPIFICATIONS } from '../../utils/speechTypification';
 import { 
   X, 
   FileAudio, 
@@ -121,6 +122,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
                 </h3>
                 <span className="cm-badge text-[var(--cm-primary)]">{isQuality ? 'CALIDAD' : 'MEJORA CONTINUA'}</span>
                 {evaluation.origin==='SPEECH_ANALYTICS'&&<span className="cm-badge cm-badge--info" title="Speech Analytics">SA</span>}
+                {evaluation.origin==='SPEECH_ANALYTICS'&&<span className="cm-badge" title={evaluation.speechTypification==='CORTA_LLAMADA'?'No evaluable para Calidad':'Tipificación de la llamada'}>{SPEECH_TYPIFICATIONS.find(item=>item.value===evaluation.speechTypification)?.label||'Sin tipificación'}</span>}
               </div>
               <p className="text-xs text-[var(--cm-text-secondary)] mt-0.5">
                 {advisorName} · {evaluation.callId} · {evaluation.date}
@@ -136,6 +138,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
 
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5 bg-[var(--cm-bg-secondary)] text-[var(--cm-text)]">
+          {evaluation.origin==='SPEECH_ANALYTICS'&&evaluation.speechTypification==='CORTA_LLAMADA'&&<p role="status" className="rounded-xl border border-amber-400/40 bg-amber-400/10 p-3 text-xs text-amber-200">Corta llamada: no evaluable para Calidad. La nota de Speech Analytics se conserva solo como referencia y no entra en los promedios.</p>}
           {evaluation.importAlert&&<div role="alert" className="rounded-xl border border-amber-400/45 bg-amber-400/10 px-4 py-3 text-xs text-amber-200"><b className="block">Asesor pendiente de relación</b><span>{evaluation.importAlert}</span></div>}
           {isEditing&&<div className="cm-card rounded-xl p-4 sm:p-5 space-y-4">
             <div><h4 className="text-sm font-bold">Editar datos de la evaluación</h4><p className="mt-1 text-xs text-[var(--cm-text-secondary)]">Se conserva el ID, el asesor, la campaña, el audio, el feedback y todo el histórico relacionado.</p></div>

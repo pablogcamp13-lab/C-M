@@ -4,13 +4,14 @@ import { useApp } from '../../context/AppContext';
 import { QUALITY_ATTRIBUTES } from '../../data/qualityPueData';
 import { FiltersBar } from '../common/FiltersBar';
 import { EvaluationOriginFilter, type EvaluationOriginFilterValue } from './EvaluationOriginFilter';
+import { isQualityEvaluable } from '../../utils/speechTypification';
 
 const value = (number: number | null, suffix = '%') => number === null ? 'Sin datos' : `${number}${suffix}`;
 export const QualityDashboardView: React.FC = () => {
   const { filteredEvaluations, advisors, users, campaigns, filters, actionPlans, setCurrentSection, setFilters } = useApp();
   const [originFilter, setOriginFilter] = useState<EvaluationOriginFilterValue>('ALL');
   useEffect(() => { setFilters(previous => ({ ...previous, evaluationType: 'QUALITY' })); return () => setFilters(previous => previous.evaluationType === 'QUALITY' ? { ...previous, evaluationType: '' } : previous); }, [setFilters]);
-  const quality = filteredEvaluations.filter(e => e.evaluationType === 'QUALITY' && (originFilter === 'ALL' || (originFilter === 'SPEECH_ANALYTICS' ? e.origin === 'SPEECH_ANALYTICS' : e.origin !== 'SPEECH_ANALYTICS')));
+  const quality = filteredEvaluations.filter(e => e.evaluationType === 'QUALITY' && isQualityEvaluable(e) && (originFilter === 'ALL' || (originFilter === 'SPEECH_ANALYTICS' ? e.origin === 'SPEECH_ANALYTICS' : e.origin !== 'SPEECH_ANALYTICS')));
   const scores = quality.map(e => e.scoreTotal).filter((score): score is number => score !== null);
   const average = scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : null;
   const coverage = quality.length ? new Set(quality.map(e => e.advisorId)).size : null;

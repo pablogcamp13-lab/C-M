@@ -6,6 +6,8 @@ import { CompanyDistributionCard, EvaluationStatusCard, QualityTrendCard } from 
 import { ExecutiveFilters, useExecutiveFilterSummary } from './ExecutiveFilters';
 import { type CampaignRank, type ExecutiveMode, useExecutiveHome } from './useExecutiveHome';
 import { EvaluationOriginFilter, type EvaluationOriginFilterValue } from './EvaluationOriginFilter';
+import { SpeechTypificationFilter } from './SpeechTypificationFilter';
+import { isQualityEvaluable, matchesSpeechTypification, type SpeechTypificationFilter as SpeechFilterValue } from '../../utils/speechTypification';
 
 const scoreLabel = (value: number | null | undefined) => value === null || value === undefined ? 'Sin datos' : `${value}%`;
 const detailInfo = (text: string, definition: string) => <span className="cm-metric-detail">{text}<Tooltip content={definition}><button aria-label="Definición de la métrica"><Info /></button></Tooltip></span>;
@@ -14,9 +16,10 @@ export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpe
   const { currentUser, isAuthReady, setCurrentSection, platformLoadError, filteredEvaluations } = useApp();
   const [mode, setMode] = useState<ExecutiveMode>('D3C');
   const [originFilter, setOriginFilter] = useState<EvaluationOriginFilterValue>('ALL');
+  const [speechTypification, setSpeechTypification] = useState<SpeechFilterValue>('ALL');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filterSummary = useExecutiveFilterSummary();
-  const data = useExecutiveHome(mode, originFilter);
+  const data = useExecutiveHome(mode, originFilter, speechTypification);
   const canCreateEvaluation = Boolean(onOpenNewEvaluation) && ['ADMINISTRADOR', 'CONSULTOR', 'MONITOR'].includes(currentUser.role);
   const firstName = currentUser.name.trim().split(/\s+/)[0] || currentUser.role;
   const hardError = Boolean(platformLoadError && !data.scopedEvaluations.length);
@@ -26,24 +29,26 @@ export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpe
   // Keep both comparison cards visible even when the dashboard's origin filter is active.
   const comparableEvaluations = filteredEvaluations.filter(item => (item.evaluationType === 'QUALITY' ? 'QUALITY' : 'D3C') === mode);
   const originAverage = (speech: boolean) => {
-    const scores = comparableEvaluations.filter(item => (item.origin === 'SPEECH_ANALYTICS') === speech)
+    const scores = comparableEvaluations.filter(item => (item.origin === 'SPEECH_ANALYTICS') === speech && isQualityEvaluable(item) && (!speech || originFilter !== 'SPEECH_ANALYTICS' || matchesSpeechTypification(item,speechTypification)))
       .map(item => mode === 'QUALITY' ? item.technicalScore ?? item.scoreTotal : item.scoreTotal)
       .filter((score): score is number => typeof score === 'number' && Number.isFinite(score));
     return { average: scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : null, count: scores.length };
   };
   const manual = originAverage(false);
   const speech = originAverage(true);
+  const shortCalls = filteredEvaluations.filter(item=>item.evaluationType==='QUALITY'&&item.origin==='SPEECH_ANALYTICS'&&item.speechTypification==='CORTA_LLAMADA').length;
   const kpis = [
     { label: `Resultado global ${methodologyName}`, value: scoreLabel(data.scoreAverage), detail: detailInfo(data.scoreAverage === null ? 'Sin evaluaciones con score' : `${scoreCount} evaluaciones con score`, `Promedio calculado sobre evaluaciones ${methodologyName} con score del periodo seleccionado.`), icon: <Activity />, className: data.scoreAverage === null ? undefined : data.scoreAverage < data.criticalThreshold ? 'is-danger' : 'is-success' },
     { label: 'Evaluaciones realizadas', value: String(data.scopedEvaluations.length), detail: detailInfo('Registros del periodo', `Cantidad de evaluaciones ${methodologyName} dentro de los filtros actuales.`), icon: <CheckSquare /> },
     { label: 'Asesores críticos', value: data.scopedEvaluations.length ? String(data.criticalAdvisorCount) : 'Sin datos', detail: detailInfo(data.scopedEvaluations.length ? `Resultado bajo ${data.criticalThreshold}%` : 'Sin evaluaciones para clasificar', 'Asesores únicos con al menos una evaluación bajo el umbral crítico configurado.'), icon: <UsersRound />, className: data.criticalAdvisorCount ? 'is-danger' : undefined },
     { label: 'Nota evaluaciones manuales', value: scoreLabel(manual.average), detail: detailInfo(`${manual.count} evaluaciones con nota`, `Promedio ${methodologyName} de evaluaciones manuales dentro de los filtros generales.`), icon: <CheckSquare /> },
-    { label: 'Nota Speech Analytics', value: scoreLabel(speech.average), detail: detailInfo(`${speech.count} evaluaciones con nota`, `Promedio ${methodologyName} de evaluaciones importadas de Speech Analytics dentro de los filtros generales.`), icon: <BarChart3 /> },
+    { label: 'Nota Speech Analytics', value: originFilter==='SPEECH_ANALYTICS'&&speechTypification==='CORTA_LLAMADA'?'No evaluable':scoreLabel(speech.average), detail: detailInfo(`${speech.count} evaluaciones con nota`, `Promedio ${methodologyName} de evaluaciones importadas de Speech Analytics dentro de los filtros generales. Las llamadas tipificadas como Corta llamada no se incluyen.`), icon: <BarChart3 /> },
   ];
 
   return <div className="cm-page cm-home-executive">
     <PageHeader breadcrumbs={['Inicio']} title={`Hola, ${firstName}`} description={`Resumen ejecutivo de Calidad y Mejora Continua · ${currentUser.role.toLocaleLowerCase('es-PE')}.`} actions={canCreateEvaluation ? <Button leadingIcon={<Plus />} onClick={onOpenNewEvaluation}>Nueva evaluación</Button> : undefined} context={<div className="cm-home-dashboard-controls"><Tabs value={mode} onChange={value => setMode(value as ExecutiveMode)} items={[{ value: 'D3C', label: 'Mejora Continua', count: data.totalByMode.D3C }, { value: 'QUALITY', label: 'Calidad', count: data.totalByMode.QUALITY }]} /><Button type="button" variant="secondary" size="sm" leadingIcon={<Filter />} className="cm-exec-filters-toggle" aria-expanded={filtersOpen} aria-controls="home-executive-filters" aria-label={`${filtersOpen ? 'Ocultar' : 'Mostrar'} filtros${filterSummary.activeCount > 0 ? `, ${filterSummary.activeCount} activos` : ''}`} onClick={() => setFiltersOpen(open => !open)}>{`Filtros${filterSummary.activeCount > 0 ? ` · ${filterSummary.activeCount}` : ''}`}</Button></div>} />
-    {mode === 'QUALITY' && <div className="px-5 pb-2 sm:px-7"><EvaluationOriginFilter value={originFilter} onChange={setOriginFilter}/></div>}
+    {mode === 'QUALITY' && <div className="flex flex-wrap items-center gap-3 px-5 pb-2 sm:px-7"><EvaluationOriginFilter value={originFilter} onChange={setOriginFilter}/>{originFilter==='SPEECH_ANALYTICS'&&<SpeechTypificationFilter value={speechTypification} onChange={setSpeechTypification}/>}</div>}
+    {mode==='QUALITY'&&originFilter==='SPEECH_ANALYTICS'&&shortCalls>0&&<p className="px-5 pb-2 text-xs text-[var(--cm-text-secondary)] sm:px-7">{shortCalls} llamadas cortas conservadas como registro, excluidas de las notas de Calidad.</p>}
     <section className="cm-exec-filters-region" aria-label="Controles de filtrado">
       <div id="home-executive-filters" className={`cm-exec-filters-collapse ${filtersOpen ? 'is-open' : ''}`} aria-hidden={!filtersOpen} inert={!filtersOpen}>
         <div><ExecutiveFilters activeCount={filterSummary.activeCount} /></div>

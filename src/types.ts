@@ -267,6 +267,7 @@ export interface Evaluation {
   importAlert?: string;
   speechScore?: number | null;
   speechApproved?: string;
+  speechTypification?: 'CORTA_LLAMADA' | 'PREFIERE_PREPAGO' | 'NO_ES_TITULAR';
   linkedAdvisorAt?: string;
   linkedAdvisorBy?: string;
   agentCommitment?: string;
