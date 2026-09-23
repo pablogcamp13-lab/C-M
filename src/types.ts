@@ -347,6 +347,7 @@ export interface Memorandum {
   alertTitle:string; alertDetail:string; subject:string; content:string; actionRequired:string;
   status:'EMITIDO'|'ANULADO'; issuedBy:string; issuerName:string; createdAt:string; updatedAt:string;
   annulledBy?:string; annulledAt?:string; annulReason?:string;
+  attachments?: {id:string;name:string;mimeType:string;size:number;uploadedAt:string;uploadedBy:string}[];
 }
 export interface QualityAlert {
   id: string;

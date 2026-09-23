@@ -165,7 +165,13 @@ export const qualityAlertsApi = {
 export const memorandumsApi = {
   async list(advisorId?:string) { const query=advisorId?`?advisorId=${encodeURIComponent(advisorId)}`:'';return json<{memorandums:Memorandum[]}>(await fetch(`/api/memorandums${query}`,{headers:headers()})); },
   async create(alertId:string,data:{subject:string;content:string;actionRequired:string}) { return json<{memorandum:Memorandum}>(await fetch(`/api/quality-alerts/${encodeURIComponent(alertId)}/memorandums`,{method:'POST',headers:{'Content-Type':'application/json',...headers()},body:JSON.stringify(data)})); },
-  async annul(id:string,reason:string) { return json<{memorandum:Memorandum}>(await fetch(`/api/memorandums/${encodeURIComponent(id)}/annul`,{method:'PATCH',headers:{'Content-Type':'application/json',...headers()},body:JSON.stringify({reason})})); }
+  async annul(id:string,reason:string) { return json<{memorandum:Memorandum}>(await fetch(`/api/memorandums/${encodeURIComponent(id)}/annul`,{method:'PATCH',headers:{'Content-Type':'application/json',...headers()},body:JSON.stringify({reason})})); },
+  async uploadAttachment(id:string,file:File) { return json<{memorandum:Memorandum}>(await fetch(`/api/memorandums/${encodeURIComponent(id)}/attachments`,{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream','X-File-Name':encodeURIComponent(file.name),...headers()},body:file})); },
+  async downloadAttachment(id:string,attachment:NonNullable<Memorandum['attachments']>[number]) {
+    const response=await fetch(`/api/memorandums/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachment.id)}`,{headers:headers()});
+    if(!response.ok)await json(response);
+    const url=URL.createObjectURL(await response.blob()),anchor=document.createElement('a');anchor.href=url;anchor.download=attachment.name;document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+  }
 };
 
 export const calibrationsApi = {
