@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Advisor, Evaluation } from '../../types';
+import React, { useEffect, useState } from 'react';
+import { Advisor, Evaluation, Memorandum } from '../../types';
+import { memorandumsApi } from '../../api/sharedRepository';
 import { useApp } from '../../context/AppContext';
 import { 
   classifyPriority, 
@@ -70,6 +71,9 @@ export const AdvisorProfileModal: React.FC<AdvisorProfileModalProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showEditAdvisor, setShowEditAdvisor] = useState(false);
   const [editDraft, setEditDraft] = useState<Partial<Advisor>>({});
+  const [memorandums, setMemorandums] = useState<Memorandum[]>([]);
+  const [memoError, setMemoError] = useState('');
+  useEffect(() => { let live=true;memorandumsApi.list(advisorId).then(data=>{if(live)setMemorandums(data.memorandums);}).catch(()=>{if(live)setMemoError('No se pudo cargar el historial de memorándums.');});return()=>{live=false;}; }, [advisorId]);
 
   // New Measurement Form State
   const [newPeriodName, setNewPeriodName] = useState('');
@@ -499,6 +503,13 @@ export const AdvisorProfileModal: React.FC<AdvisorProfileModalProps> = ({
                     </div>
                   ))}
                 </div>
+              </div>
+
+              <div>
+                <h4 className="mb-3 border-b border-slate-200 pb-2 text-xs font-bold uppercase text-slate-800">Historial de memorándums ({memorandums.length})</h4>
+                {memoError&&<p className="text-xs text-rose-600">{memoError}</p>}
+                {memorandums.map(memo=><details key={memo.id} className="mb-2 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-800"><summary className="cursor-pointer font-bold">{memo.number} · {memo.createdAt.slice(0,10)} · {memo.subject} · {memo.status==='ANULADO'?'Anulado':'Emitido'}</summary><div className="mt-3 space-y-2"><p><b>Alerta:</b> {memo.alertTitle}</p><p className="whitespace-pre-wrap"><b>Hechos:</b> {memo.content}</p><p className="whitespace-pre-wrap"><b>Acción requerida:</b> {memo.actionRequired}</p><p><b>Emitido por:</b> {memo.issuerName}</p>{memo.status==='ANULADO'&&<p className="text-rose-600"><b>Motivo de anulación:</b> {memo.annulReason}</p>}</div></details>)}
+                {!memorandums.length&&!memoError&&<p className="text-xs text-slate-500">Sin memorándums registrados.</p>}
               </div>
 
               {/* Action Plans for this Advisor */}

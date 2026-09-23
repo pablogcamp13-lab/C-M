@@ -1,5 +1,5 @@
 import type { Advisor, Campaign, Company, Operation, Team, User } from '../types';
-import type { ActionPlan, Calibration, Evaluation, QualityAlert } from '../types';
+import type { ActionPlan, Calibration, Evaluation, QualityAlert, Memorandum } from '../types';
 
 const TOKEN_KEY = 'CONTACT_CENTER_AUTH_TOKEN';
 
@@ -161,6 +161,11 @@ export const qualityAlertsApi = {
   async create(data: Partial<QualityAlert>) { return json<{ alert: QualityAlert }>(await fetch('/api/quality-alerts', { method:'POST', headers:{'Content-Type':'application/json',...headers()}, body:JSON.stringify(data) })); },
   async update(id: string, data: Partial<QualityAlert>) { return json<{ alert: QualityAlert }>(await fetch(`/api/quality-alerts/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json',...headers()}, body:JSON.stringify(data) })); },
   async remove(id: string) { return json<{ ok:boolean }>(await fetch(`/api/quality-alerts/${id}`, { method:'DELETE', headers:headers() })); }
+};
+export const memorandumsApi = {
+  async list(advisorId?:string) { const query=advisorId?`?advisorId=${encodeURIComponent(advisorId)}`:'';return json<{memorandums:Memorandum[]}>(await fetch(`/api/memorandums${query}`,{headers:headers()})); },
+  async create(alertId:string,data:{subject:string;content:string;actionRequired:string}) { return json<{memorandum:Memorandum}>(await fetch(`/api/quality-alerts/${encodeURIComponent(alertId)}/memorandums`,{method:'POST',headers:{'Content-Type':'application/json',...headers()},body:JSON.stringify(data)})); },
+  async annul(id:string,reason:string) { return json<{memorandum:Memorandum}>(await fetch(`/api/memorandums/${encodeURIComponent(id)}/annul`,{method:'PATCH',headers:{'Content-Type':'application/json',...headers()},body:JSON.stringify({reason})})); }
 };
 
 export const calibrationsApi = {

@@ -341,6 +341,13 @@ export interface ActionPlan {
 }
 
 export type QualityAlertStatus = 'NUEVA' | 'PENDIENTE_GESTION' | 'GESTIONADA' | 'CERRADA';
+export interface Memorandum {
+  id:string; number:string; alertId:string; advisorId:string; advisorName:string; advisorDni:string;
+  campaignId:string; campaignName:string; companyId?:string; companyName:string; operationId?:string;
+  alertTitle:string; alertDetail:string; subject:string; content:string; actionRequired:string;
+  status:'EMITIDO'|'ANULADO'; issuedBy:string; issuerName:string; createdAt:string; updatedAt:string;
+  annulledBy?:string; annulledAt?:string; annulReason?:string;
+}
 export interface QualityAlert {
   id: string;
   title: string;
