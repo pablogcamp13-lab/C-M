@@ -10,6 +10,7 @@ import { ForcePasswordChange } from './components/auth/ForcePasswordChange';
 import { ChevronRight, ShieldCheck, TrendingUp, X } from 'lucide-react';
 
 const DashboardView=lazy(()=>import('./components/dashboard/DashboardView').then(module=>({default:module.DashboardView})));
+const PublicDashboardView=lazy(()=>import('./components/dashboard/PublicDashboardView').then(module=>({default:module.PublicDashboardView})));
 const EvaluationsList=lazy(()=>import('./components/evaluations/EvaluationsList').then(module=>({default:module.EvaluationsList})));
 const NewEvaluationModal=lazy(()=>import('./components/evaluations/NewEvaluationModal').then(module=>({default:module.NewEvaluationModal})));
 const QualityEvaluationModal=lazy(()=>import('./components/evaluations/QualityEvaluationModal').then(module=>({default:module.QualityEvaluationModal})));
@@ -255,6 +256,7 @@ const EvaluationModulePicker: React.FC<{ campaign?: Campaign; onSelect: (module:
 };
 
 export default function App() {
+  if (window.location.pathname.startsWith('/share/dashboard/')) return <Suspense fallback={<div className="min-h-screen bg-[#0b1727] p-8 text-slate-100">Cargando dashboard…</div>}><PublicDashboardView/></Suspense>;
   return (
     <AppProvider>
       <ToastProvider><AuthenticatedApplication /></ToastProvider>

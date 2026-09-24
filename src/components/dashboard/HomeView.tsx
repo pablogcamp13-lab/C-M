@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Activity, ArrowDown, ArrowRight, ArrowUp, BarChart3, CheckSquare, Filter, Info, Plus, ShieldCheck, TrendingUp, UsersRound } from 'lucide-react';
+import { Activity, ArrowDown, ArrowRight, ArrowUp, BarChart3, CheckSquare, Filter, Info, Link2, Plus, ShieldCheck, TrendingUp, UsersRound } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, KpiCard, PageHeader, Select, TableSkeleton, Tabs, Tooltip } from '../ui';
 import { CompanyDistributionCard, EvaluationStatusCard, QualityTrendCard } from './ExecutiveCharts';
@@ -8,6 +8,7 @@ import { type CampaignRank, type ExecutiveMode, useExecutiveHome } from './useEx
 import { EvaluationOriginFilter, type EvaluationOriginFilterValue } from './EvaluationOriginFilter';
 import { SpeechTypificationFilter } from './SpeechTypificationFilter';
 import { isQualityEvaluable, matchesSpeechTypification, type SpeechTypificationFilter as SpeechFilterValue } from '../../utils/speechTypification';
+import { PublicDashboardLinksModal } from './PublicDashboardLinksModal';
 
 const scoreLabel = (value: number | null | undefined) => value === null || value === undefined ? 'Sin datos' : `${value}%`;
 const detailInfo = (text: string, definition: string) => <span className="cm-metric-detail">{text}<Tooltip content={definition}><button aria-label="Definición de la métrica"><Info /></button></Tooltip></span>;
@@ -18,6 +19,7 @@ export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpe
   const [originFilter, setOriginFilter] = useState<EvaluationOriginFilterValue>('ALL');
   const [speechTypification, setSpeechTypification] = useState<SpeechFilterValue>('ALL');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [sharingOpen, setSharingOpen] = useState(false);
   const filterSummary = useExecutiveFilterSummary();
   const data = useExecutiveHome(mode, originFilter, speechTypification);
   const canCreateEvaluation = Boolean(onOpenNewEvaluation) && ['ADMINISTRADOR', 'CONSULTOR', 'MONITOR'].includes(currentUser.role);
@@ -46,7 +48,8 @@ export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpe
   ];
 
   return <div className="cm-page cm-home-executive">
-    <PageHeader breadcrumbs={['Inicio']} title={`Hola, ${firstName}`} description={`Resumen ejecutivo de Calidad y Mejora Continua · ${currentUser.role.toLocaleLowerCase('es-PE')}.`} actions={canCreateEvaluation ? <Button leadingIcon={<Plus />} onClick={onOpenNewEvaluation}>Nueva evaluación</Button> : undefined} context={<div className="cm-home-dashboard-controls"><Tabs value={mode} onChange={value => setMode(value as ExecutiveMode)} items={[{ value: 'D3C', label: 'Mejora Continua', count: data.totalByMode.D3C }, { value: 'QUALITY', label: 'Calidad', count: data.totalByMode.QUALITY }]} /><Button type="button" variant="secondary" size="sm" leadingIcon={<Filter />} className="cm-exec-filters-toggle" aria-expanded={filtersOpen} aria-controls="home-executive-filters" aria-label={`${filtersOpen ? 'Ocultar' : 'Mostrar'} filtros${filterSummary.activeCount > 0 ? `, ${filterSummary.activeCount} activos` : ''}`} onClick={() => setFiltersOpen(open => !open)}>{`Filtros${filterSummary.activeCount > 0 ? ` · ${filterSummary.activeCount}` : ''}`}</Button></div>} />
+    <PageHeader breadcrumbs={['Inicio']} title={`Hola, ${firstName}`} description={`Resumen ejecutivo de Calidad y Mejora Continua · ${currentUser.role.toLocaleLowerCase('es-PE')}.`} actions={<>{currentUser.role==='ADMINISTRADOR'&&<Button variant="secondary" leadingIcon={<Link2/>} onClick={()=>setSharingOpen(true)}>Compartir dashboard</Button>}{canCreateEvaluation&&<Button leadingIcon={<Plus />} onClick={onOpenNewEvaluation}>Nueva evaluación</Button>}</>} context={<div className="cm-home-dashboard-controls"><Tabs value={mode} onChange={value => setMode(value as ExecutiveMode)} items={[{ value: 'D3C', label: 'Mejora Continua', count: data.totalByMode.D3C }, { value: 'QUALITY', label: 'Calidad', count: data.totalByMode.QUALITY }]} /><Button type="button" variant="secondary" size="sm" leadingIcon={<Filter />} className="cm-exec-filters-toggle" aria-expanded={filtersOpen} aria-controls="home-executive-filters" aria-label={`${filtersOpen ? 'Ocultar' : 'Mostrar'} filtros${filterSummary.activeCount > 0 ? `, ${filterSummary.activeCount} activos` : ''}`} onClick={() => setFiltersOpen(open => !open)}>{`Filtros${filterSummary.activeCount > 0 ? ` · ${filterSummary.activeCount}` : ''}`}</Button></div>} />
+    {sharingOpen&&<PublicDashboardLinksModal onClose={()=>setSharingOpen(false)}/>}
     {mode === 'QUALITY' && <div className="flex flex-wrap items-center gap-3 px-5 pb-2 sm:px-7"><EvaluationOriginFilter value={originFilter} onChange={setOriginFilter}/>{originFilter==='SPEECH_ANALYTICS'&&<SpeechTypificationFilter value={speechTypification} onChange={setSpeechTypification}/>}</div>}
     {mode==='QUALITY'&&originFilter==='SPEECH_ANALYTICS'&&shortCalls>0&&<p className="px-5 pb-2 text-xs text-[var(--cm-text-secondary)] sm:px-7">{shortCalls} llamadas cortas conservadas como registro, excluidas de las notas de Calidad.</p>}
     <section className="cm-exec-filters-region" aria-label="Controles de filtrado">
