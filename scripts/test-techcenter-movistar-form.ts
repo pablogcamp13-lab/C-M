@@ -4,7 +4,11 @@ import { TECHCENTER_MOVISTAR_FIELDS, TECHCENTER_MOVISTAR_FLOWS, isTechcenterCrit
 assert.equal(TECHCENTER_MOVISTAR_FIELDS.length,110);
 assert.equal(TECHCENTER_MOVISTAR_FIELDS.filter(isTechcenterCriterion).length,75);
 assert.equal(isTechcenterMovistarCampaign('TECHCENTER','Movistar Portabilidad Out'),true);
+assert.equal(isTechcenterMovistarCampaign('TECHCENTER','Movistar Portabilida Out'),true);
+assert.equal(isTechcenterMovistarCampaign('Tech Center S.A.C.','Movistar Portabilidad Out'),true);
+assert.equal(isTechcenterMovistarCampaign('','Movistar Portabilidad Out','company_techcenter'),true);
 assert.equal(isTechcenterMovistarCampaign('TALENT UP','Movistar Portabilidad Out'),false);
+assert.equal(isTechcenterMovistarCampaign('TALENT UP','Movistar Portabilida Out'),false);
 assert.equal(isTechcenterMovistarCampaign('TECHCENTER','Portabilidad Bitel'),false);
 for(const flow of TECHCENTER_MOVISTAR_FLOWS){
   const fields=techcenterFieldsForFlow(flow);

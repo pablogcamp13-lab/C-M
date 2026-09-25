@@ -558,7 +558,7 @@ async function ensureTechcenterMovistarCampaign(){
   const directory=await readRepository();
   const company=directory.companies?.find(item=>item.name.trim().toLowerCase()==='techcenter');
   if(!company)return;
-  let campaign=directory.campaigns.find(item=>item.name.trim().toLowerCase()==='movistar portabilidad out');
+  let campaign=directory.campaigns.find(item=>isTechcenterMovistarCampaign(company.name,item.name,company.id));
   const linked=campaign&&directory.operations?.some(item=>item.companyId===company.id&&item.campaignId===campaign!.id&&!item.legacy);
   if(linked)return;
   if(!campaign){
@@ -904,9 +904,9 @@ async function startServer() {
       const campaign=directory.campaigns.find(item=>item.id===advisor.campaignId);
       if (!operation || operation.legacy || operation.status !== 'ACTIVA' || operation.campaignId !== advisor.campaignId || !campaign || campaign.status !== 'ACTIVA') return res.status(400).json({ error: 'La campaña del asesor ya no está activa. Selecciona una campaña vigente.' });
       const company=directory.companies?.find(item=>item.id===operation.companyId);
-      if(evaluation.evaluationType==='QUALITY'&&isTechcenterMovistarCampaign(company?.name||'',campaign.name)&&evaluation.qualityForm?.id!==TECHCENTER_MOVISTAR_FORM_ID)return res.status(400).json({error:'Esta campaña requiere la ficha Techcenter Movistar.'});
+      if(evaluation.evaluationType==='QUALITY'&&isTechcenterMovistarCampaign(company?.name||'',campaign.name,operation.companyId)&&evaluation.qualityForm?.id!==TECHCENTER_MOVISTAR_FORM_ID)return res.status(400).json({error:'Esta campaña requiere la ficha Techcenter Movistar.'});
       if(evaluation.qualityForm?.id===TECHCENTER_MOVISTAR_FORM_ID){
-        if(evaluation.evaluationType!=='QUALITY'||!isTechcenterMovistarCampaign(company?.name||'',campaign.name))return res.status(400).json({error:'Esta ficha sólo corresponde a Techcenter / Movistar Portabilidad Out.'});
+        if(evaluation.evaluationType!=='QUALITY'||!isTechcenterMovistarCampaign(company?.name||'',campaign.name,operation.companyId))return res.status(400).json({error:'Esta ficha sólo corresponde a Techcenter / Movistar Portabilidad Out.'});
         if(!TECHCENTER_MOVISTAR_FLOWS.includes(evaluation.qualityForm.flow))return res.status(400).json({error:'Tipo de encuesta inválido.'});
         const criteria=techcenterFieldsForFlow(evaluation.qualityForm.flow).filter(isTechcenterCriterion);
         const byId=new Map(answeredItems.map((item:any)=>[String(item.criterionId),item]));

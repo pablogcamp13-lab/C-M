@@ -23,6 +23,9 @@ import type {
 } from "../../types";
 import { AudioPlayer } from "../common/AudioPlayer";
 import { filesApi } from "../../api/sharedRepository";
+import { isTechcenterMovistarCampaign } from '../../data/techcenterMovistarScope';
+
+const TechcenterMovistarQualityModal=React.lazy(()=>import('./TechcenterMovistarQualityModal').then(module=>({default:module.TechcenterMovistarQualityModal})));
 
 type Result = ComplianceStatus | undefined;
 const migrationGuidelines: QualityGuideline[] = QUALITY_ATTRIBUTES.map(
@@ -42,7 +45,7 @@ export const QualityEvaluationModal: React.FC<{
 }> = ({ onClose, onSuccess, campaignId, operationId }) => {
   const savingRef = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
-  const { advisors, campaigns, users, teams, currentUser, addEvaluation } =
+  const { advisors, campaigns, companies, operations, users, teams, currentUser, addEvaluation } =
     useApp();
   const selectableAdvisors = advisors.filter(
     (advisor) => advisor.status === "ACTIVO" && (!campaignId || advisor.campaignId === campaignId) && (!operationId || advisor.operationId === operationId) && campaigns.some((campaign) => campaign.id === advisor.campaignId && campaign.status === "ACTIVA"),
@@ -227,6 +230,11 @@ export const QualityEvaluationModal: React.FC<{
       setIsSaving(false);
     }
   };
+  const selectedOperation=operations.find(item=>item.id===(operationId||advisor?.operationId));
+  const selectedCampaign=campaign||campaigns.find(item=>item.id===(campaignId||selectedOperation?.campaignId));
+  const selectedCompany=companies.find(item=>item.id===selectedOperation?.companyId);
+  if(selectedOperation&&selectedCampaign&&isTechcenterMovistarCampaign(selectedCompany?.name||'',selectedCampaign.name,selectedOperation.companyId))return <React.Suspense fallback={<div className="cm-route-loading" role="status">Cargando ficha Techcenter…</div>}><TechcenterMovistarQualityModal campaignId={selectedCampaign.id} operationId={selectedOperation.id} onClose={onClose} onSuccess={onSuccess}/></React.Suspense>;
+  if(selectedCampaign&&!guidelines.length)return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4" role="dialog" aria-modal="true"><div className="cm-modal w-full max-w-lg p-6"><h2 className="text-lg font-bold">Ficha de Calidad no configurada</h2><p className="mt-2 text-sm text-[var(--cm-text-secondary)]">{selectedCampaign.name} aún no tiene criterios de evaluación. No es posible guardar una ficha vacía.</p><button type="button" onClick={onClose} className="cm-button-primary mt-5 px-4 py-2">Cerrar</button></div></div>;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/65 p-2 sm:p-4 backdrop-blur-sm">
       <div className="cm-modal cm-evaluation-modal flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden">

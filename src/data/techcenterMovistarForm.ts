@@ -1,14 +1,11 @@
 import sourceFields from './techcenterMovistarFields.json';
+export { TECHCENTER_MOVISTAR_FORM_ID, TECHCENTER_MOVISTAR_CAMPAIGN, isTechcenterMovistarCampaign } from './techcenterMovistarScope';
 
-export const TECHCENTER_MOVISTAR_FORM_ID = 'TECHCENTER_MOVISTAR_OUT_V1';
-export const TECHCENTER_MOVISTAR_CAMPAIGN = 'Movistar Portabilidad Out';
 export const TECHCENTER_MOVISTAR_FLOWS = ['No Venta Movil Out', 'No Venta Fija Out', 'Venta Movil Out', 'Venta Fija Out'] as const;
 export type TechcenterMovistarFlow = typeof TECHCENTER_MOVISTAR_FLOWS[number];
 export type TechcenterMovistarField = { id:number; section:string; flow:string; label:string; sourceField:string; kind:string; options:string[]; required:string };
 export const TECHCENTER_MOVISTAR_FIELDS:TechcenterMovistarField[] = sourceFields;
 
-const normalize = (value:string) => value.trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').toLocaleLowerCase('es-PE');
-export const isTechcenterMovistarCampaign = (companyName:string,campaignName:string) => normalize(companyName)==='techcenter' && normalize(campaignName)===normalize(TECHCENTER_MOVISTAR_CAMPAIGN);
 export const isTechcenterCriterion = (field:TechcenterMovistarField) => field.kind==='Criterio de auditoría';
 const reverseCriterionIds = new Set([57,59,60,61,83,84]);
 export const isReverseTechcenterCriterion = (id:number) => reverseCriterionIds.has(id);

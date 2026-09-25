@@ -8,7 +8,7 @@ import { Evaluation, Advisor, Campaign, Company, Operation } from './types';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { ForcePasswordChange } from './components/auth/ForcePasswordChange';
 import { ChevronRight, ShieldCheck, TrendingUp, X } from 'lucide-react';
-import { isTechcenterMovistarCampaign } from './data/techcenterMovistarForm';
+import { isTechcenterMovistarCampaign } from './data/techcenterMovistarScope';
 
 const DashboardView=lazy(()=>import('./components/dashboard/DashboardView').then(module=>({default:module.DashboardView})));
 const PublicDashboardView=lazy(()=>import('./components/dashboard/PublicDashboardView').then(module=>({default:module.PublicDashboardView})));
@@ -98,9 +98,10 @@ const MainLayout: React.FC = () => {
   const reevalCount = evaluations.filter(e => e.evaluationType === 'REEVALUACION' || e.evaluationType === 'SEGUIMIENTO').length;
   const reevalRate = evaluations.length > 0 ? Math.round((reevalCount / evaluations.length) * 100) : 0;
   const activeAdvisorsCount = advisors.filter(a => a.active).length;
-  const selectedCompany=companies.find(item=>item.id===newEvaluationCompanyId);
-  const selectedCampaign=campaigns.find(item=>item.id===newEvaluationCampaignId);
-  const movistarQuality=isTechcenterMovistarCampaign(selectedCompany?.name||'',selectedCampaign?.name||'');
+  const selectedOperation=operations.find(item=>item.id===newEvaluationOperationId);
+  const selectedCompany=companies.find(item=>item.id===selectedOperation?.companyId);
+  const selectedCampaign=campaigns.find(item=>item.id===(selectedOperation?.campaignId||newEvaluationCampaignId));
+  const movistarQuality=Boolean(selectedOperation&&selectedCampaign&&isTechcenterMovistarCampaign(selectedCompany?.name||'',selectedCampaign.name,selectedOperation.companyId));
   const closeEvaluation=()=>{setIsNewEvalModalOpen(false);setNewEvaluationCompanyId(null);setNewEvaluationOperationId(null);setNewEvaluationCampaignId(null);setNewEvaluationModule(null);setPreselectedAdvisorForEval(null);};
 
   return (
