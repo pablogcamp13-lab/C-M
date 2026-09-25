@@ -10,6 +10,7 @@ import { AudioPlayer } from '../common/AudioPlayer';
 import { getItemCompliance } from '../../utils/calculations';
 import { filesApi } from '../../api/sharedRepository';
 import { SPEECH_TYPIFICATIONS } from '../../utils/speechTypification';
+import { TECHCENTER_MOVISTAR_FORM_ID, TECHCENTER_MOVISTAR_FIELDS } from '../../data/techcenterMovistarForm';
 import { 
   X, 
   FileAudio, 
@@ -202,9 +203,9 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
                     </span>
                     <span className="block text-[10px] uppercase font-semibold text-[var(--cm-text-secondary)]">{isQuality ? 'Calidad técnica' : 'Puntaje Calidad'}</span>
                   </div>
-                  {isQuality && <div className={`rounded-xl border px-3 py-2 text-center ${evaluation.qualityResult === 'REPROBADA' ? 'border-[var(--cm-danger)] text-[var(--cm-danger)]' : 'border-[var(--cm-success)] text-[var(--cm-success)]'}`}><b className="block text-sm">{evaluation.qualityResult || (evaluation.scoreTotal === 0 && evaluation.qualityCriticalErrorIds?.length ? 'REPROBADA' : 'APROBADA')}</b><span className="text-[10px]">{evaluation.criticalReason || 'Resultado final'}</span></div>}
+                  {isQuality && (evaluation.qualityForm?.id===TECHCENTER_MOVISTAR_FORM_ID ? <div className="rounded-xl border border-[var(--cm-border)] px-3 py-2 text-center"><b className="block text-sm">{evaluation.qualityForm.earned} de {evaluation.qualityForm.possible}</b><span className="text-[10px]">Sin umbral aprobatorio definido</span></div> : <div className={`rounded-xl border px-3 py-2 text-center ${evaluation.qualityResult === 'REPROBADA' ? 'border-[var(--cm-danger)] text-[var(--cm-danger)]' : 'border-[var(--cm-success)] text-[var(--cm-success)]'}`}><b className="block text-sm">{evaluation.qualityResult || (evaluation.scoreTotal === 0 && evaluation.qualityCriticalErrorIds?.length ? 'REPROBADA' : 'APROBADA')}</b><span className="text-[10px]">{evaluation.criticalReason || 'Resultado final'}</span></div>)}
                   <div className="flex-1">
-                    {isQuality ? (
+                    {isQuality && evaluation.qualityForm?.id===TECHCENTER_MOVISTAR_FORM_ID ? <div className="text-xs"><b>{evaluation.qualityForm.flow}</b><span className="block text-[var(--cm-text-secondary)]">Cada criterio aplicable vale lo mismo; No aplica se excluye.</span></div> : isQuality ? (
                       <div className="grid grid-cols-4 gap-2">
                         {qualityScores.map(({ criterion, score }) => (
                           <div key={criterion} className="text-center">
@@ -236,6 +237,8 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
             <div className="cm-card p-4"><span className="text-[10px] font-bold uppercase text-[var(--cm-warning)]">Oportunidades</span><p className="mt-2 text-xs">{evaluation.primaryGap || evaluation.secondaryGap || 'Sin oportunidades registradas.'}</p></div>
             <div className="cm-card p-4"><span className="text-[10px] font-bold uppercase text-[var(--cm-primary)]">Observaciones</span><p className="mt-2 text-xs">{evaluation.comments || 'Sin observaciones registradas.'}</p></div>
           </div>
+
+          {evaluation.qualityForm?.id===TECHCENTER_MOVISTAR_FORM_ID&&<div className="cm-card rounded-xl p-4"><h4 className="text-xs font-bold uppercase">Datos de la ficha Techcenter</h4><div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">{[8,9,11,14,15,16,107,108,109,110].map(id=>{const field=TECHCENTER_MOVISTAR_FIELDS.find(item=>item.id===id);const value=evaluation.qualityForm?.fields[String(id)];return field&&value?<div key={id}><span className="text-[var(--cm-text-secondary)]">{field.label}: </span><b>{value}</b></div>:null;})}</div></div>}
 
           {/* Grabación de Audio (si existe) */}
           {evaluation.audioUrl && (

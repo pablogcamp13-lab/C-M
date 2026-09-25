@@ -8,12 +8,14 @@ import { Evaluation, Advisor, Campaign, Company, Operation } from './types';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { ForcePasswordChange } from './components/auth/ForcePasswordChange';
 import { ChevronRight, ShieldCheck, TrendingUp, X } from 'lucide-react';
+import { isTechcenterMovistarCampaign } from './data/techcenterMovistarForm';
 
 const DashboardView=lazy(()=>import('./components/dashboard/DashboardView').then(module=>({default:module.DashboardView})));
 const PublicDashboardView=lazy(()=>import('./components/dashboard/PublicDashboardView').then(module=>({default:module.PublicDashboardView})));
 const EvaluationsList=lazy(()=>import('./components/evaluations/EvaluationsList').then(module=>({default:module.EvaluationsList})));
 const NewEvaluationModal=lazy(()=>import('./components/evaluations/NewEvaluationModal').then(module=>({default:module.NewEvaluationModal})));
 const QualityEvaluationModal=lazy(()=>import('./components/evaluations/QualityEvaluationModal').then(module=>({default:module.QualityEvaluationModal})));
+const TechcenterMovistarQualityModal=lazy(()=>import('./components/evaluations/TechcenterMovistarQualityModal').then(module=>({default:module.TechcenterMovistarQualityModal})));
 const QualityDashboardView=lazy(()=>import('./components/dashboard/QualityDashboardView').then(module=>({default:module.QualityDashboardView})));
 const HomeView=lazy(()=>import('./components/dashboard/HomeView').then(module=>({default:module.HomeView})));
 const AdvisorHomeView=lazy(()=>import('./components/dashboard/AdvisorHomeView').then(module=>({default:module.AdvisorHomeView})));
@@ -96,6 +98,10 @@ const MainLayout: React.FC = () => {
   const reevalCount = evaluations.filter(e => e.evaluationType === 'REEVALUACION' || e.evaluationType === 'SEGUIMIENTO').length;
   const reevalRate = evaluations.length > 0 ? Math.round((reevalCount / evaluations.length) * 100) : 0;
   const activeAdvisorsCount = advisors.filter(a => a.active).length;
+  const selectedCompany=companies.find(item=>item.id===newEvaluationCompanyId);
+  const selectedCampaign=campaigns.find(item=>item.id===newEvaluationCampaignId);
+  const movistarQuality=isTechcenterMovistarCampaign(selectedCompany?.name||'',selectedCampaign?.name||'');
+  const closeEvaluation=()=>{setIsNewEvalModalOpen(false);setNewEvaluationCompanyId(null);setNewEvaluationOperationId(null);setNewEvaluationCampaignId(null);setNewEvaluationModule(null);setPreselectedAdvisorForEval(null);};
 
   return (
     <Suspense fallback={<div className="cm-route-loading" role="status">Cargando módulo…</div>}><div className="cm-app-shell antialiased">
@@ -177,7 +183,7 @@ const MainLayout: React.FC = () => {
 
       {/* Global Modals */}
       {isNewEvalModalOpen && (
-        newEvaluationCompanyId === null ? <CompanyPicker companies={companies} onSelect={setNewEvaluationCompanyId} onClose={() => setIsNewEvalModalOpen(false)} /> : newEvaluationOperationId === null ? <CampaignPicker companyId={newEvaluationCompanyId} operations={operations} onSelect={(operationId) => { const operation=operations.find(item=>item.id===operationId);setNewEvaluationOperationId(operationId);setNewEvaluationCampaignId(operation?.campaignId||null); }} onBack={() => setNewEvaluationCompanyId(null)} onClose={() => setIsNewEvalModalOpen(false)} /> : newEvaluationModule === null ? <EvaluationModulePicker campaign={campaigns.find(item => item.id === newEvaluationCampaignId)} onBack={() => {setNewEvaluationOperationId(null);setNewEvaluationCampaignId(null);}} onSelect={setNewEvaluationModule} onClose={() => setIsNewEvalModalOpen(false)} /> : newEvaluationModule === 'QUALITY' ? <QualityEvaluationModal campaignId={newEvaluationCampaignId} operationId={newEvaluationOperationId} onClose={() => { setIsNewEvalModalOpen(false); setNewEvaluationCompanyId(null);setNewEvaluationOperationId(null);setNewEvaluationCampaignId(null); setNewEvaluationModule(null); }} onSuccess={(evaluation) => setSelectedEvaluationForDetail(evaluation)} /> : <NewEvaluationModal
+        newEvaluationCompanyId === null ? <CompanyPicker companies={companies} onSelect={setNewEvaluationCompanyId} onClose={closeEvaluation} /> : newEvaluationOperationId === null ? <CampaignPicker companyId={newEvaluationCompanyId} operations={operations} onSelect={(operationId) => { const operation=operations.find(item=>item.id===operationId);setNewEvaluationOperationId(operationId);setNewEvaluationCampaignId(operation?.campaignId||null); }} onBack={() => setNewEvaluationCompanyId(null)} onClose={closeEvaluation} /> : newEvaluationModule === null ? <EvaluationModulePicker campaign={selectedCampaign} onBack={() => {setNewEvaluationOperationId(null);setNewEvaluationCampaignId(null);}} onSelect={setNewEvaluationModule} onClose={closeEvaluation} /> : newEvaluationModule === 'QUALITY' ? (movistarQuality && newEvaluationCampaignId && newEvaluationOperationId ? <TechcenterMovistarQualityModal campaignId={newEvaluationCampaignId} operationId={newEvaluationOperationId} onClose={closeEvaluation} onSuccess={(evaluation)=>setSelectedEvaluationForDetail(evaluation)}/> : <QualityEvaluationModal campaignId={newEvaluationCampaignId} operationId={newEvaluationOperationId} onClose={closeEvaluation} onSuccess={(evaluation) => setSelectedEvaluationForDetail(evaluation)} />) : <NewEvaluationModal
           onClose={() => {
             setIsNewEvalModalOpen(false);
           setNewEvaluationCampaignId(null);

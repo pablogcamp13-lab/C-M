@@ -19,6 +19,7 @@ import { DatabaseSync } from "node:sqlite";
 import * as XLSX from 'xlsx';
 import { calculateEvaluationSummary, getItemCompliance } from './src/utils/calculations';
 import { QUALITY_ATTRIBUTES } from './src/data/qualityPueData';
+import { TECHCENTER_MOVISTAR_FORM_ID, TECHCENTER_MOVISTAR_FLOWS, isTechcenterMovistarCampaign, isTechcenterCriterion, isReverseTechcenterCriterion, techcenterFieldsForFlow, type TechcenterMovistarFlow } from './src/data/techcenterMovistarForm';
 
 // Keep the existing Sheets repository available during the Supabase cutover.
 // An explicit "false" disables it; an unset variable must never leave
@@ -151,6 +152,15 @@ const correctMigracionesQualityEvaluation = (evaluation: any, campaigns: Campaig
 };
 const recalculateEditedEvaluation = (evaluation: any, campaigns: Campaign[]) => {
   const items = Array.isArray(evaluation.items) ? evaluation.items : [];
+  if(evaluation.qualityForm?.id===TECHCENTER_MOVISTAR_FORM_ID){
+    const applicable=techcenterFieldsForFlow(evaluation.qualityForm.flow as TechcenterMovistarFlow).filter(isTechcenterCriterion);
+    const itemById=new Map(items.map((item:any)=>[String(item.criterionId),item]));
+    const responses:Record<string,string>={},comments:Record<string,string>={};let earned=0,possible=0;
+    for(const field of applicable){const item:any=itemById.get(`tc_mov_${field.id}`);if(!item)continue;const compliance=item.compliance;if(item.finding)comments[field.id]=String(item.finding);if(compliance==='CUMPLE'||compliance==='NO_CUMPLE'){possible++;if(compliance==='CUMPLE')earned++;responses[field.id]=compliance==='CUMPLE'?(isReverseTechcenterCriterion(field.id)?'No':'Sí'):(isReverseTechcenterCriterion(field.id)?'Sí':'No');}else if(compliance==='NO_APLICA')responses[field.id]='No aplica';}
+    const score=possible?Math.round(earned/possible*100):null;
+    const gaps=items.filter((item:any)=>item.compliance==='NO_CUMPLE');
+    return {...evaluation,qualityForm:{...evaluation.qualityForm,responses,comments,earned,possible,fields:{...evaluation.qualityForm.fields,'6':String(earned)}},scoreConnect:null,scoreClarify:null,scoreConvert:null,scoreTotal:score,technicalScore:score,qualityResult:undefined,criticalReason:undefined,primaryGap:gaps[0]?.attribute||'',secondaryGap:gaps[1]?.attribute||'',strongestPillar:'',recommendation:gaps.length?'Revisar los criterios no cumplidos.':'Mantener el estándar alcanzado.'};
+  }
   if (evaluation.evaluationType !== 'QUALITY') {
     const summary = calculateEvaluationSummary(items);
     return { ...evaluation, ...summary };
@@ -304,11 +314,12 @@ function seedOrganization() {
   const now=new Date().toISOString();
   const companies=[['company_techcenter','TECHCENTER'],['company_talent_up','TALENT UP'],['company_konectados','KONECTADOS']] as const;
   for(const [id,name] of companies) db.prepare('INSERT OR IGNORE INTO companies (id,name,status,created_at) VALUES (?,?,?,?)').run(id,name,'ACTIVA',now);
-  const matrix:{companyId:string;name:string}[]=[
+  const matrix:{companyId:string;name:string;client?:string}[]=[
     {companyId:'company_techcenter',name:'Migraciones Bitel'},{companyId:'company_techcenter',name:'Retenciones Bitel'},{companyId:'company_techcenter',name:'Portabilidad Bitel'},
+    {companyId:'company_techcenter',name:'Movistar Portabilidad Out',client:'Movistar'},
     {companyId:'company_talent_up',name:'Migra'},{companyId:'company_talent_up',name:'Migraciones Bitel'},{companyId:'company_talent_up',name:'Portabilidad Bitel'},{companyId:'company_talent_up',name:'WIN'},{companyId:'company_talent_up',name:'Carsa'},{companyId:'company_talent_up',name:'Prosegur'},
     {companyId:'company_konectados',name:'Migraciones Bitel'},{companyId:'company_konectados',name:'Portabilidad Bitel'}];
-  for(const row of matrix){let campaign=db.prepare('SELECT id FROM campaigns WHERE lower(name)=lower(?)').get(row.name) as any;if(!campaign){const id=`service_${row.name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')}`;db.prepare('INSERT OR IGNORE INTO campaigns (id,name,client,status,products_json,description) VALUES (?,?,?,?,?,?)').run(id,row.name,'Bitel','ACTIVA','[]','Servicio normalizado para operación multiempresa.');campaign=db.prepare('SELECT id FROM campaigns WHERE id=?').get(id) as any;}const operationId=`op_${row.companyId.replace('company_','')}_${campaign.id.replace(/^service_|^camp_/,'')}`;db.prepare('INSERT OR IGNORE INTO operations (id,company_id,campaign_id,name,status,legacy) VALUES (?,?,?,?,?,0)').run(operationId,row.companyId,campaign.id,`${companies.find(item=>item[0]===row.companyId)?.[1]} / ${row.name}`,'ACTIVA');}
+  for(const row of matrix){let campaign=db.prepare('SELECT id FROM campaigns WHERE lower(name)=lower(?)').get(row.name) as any;if(!campaign){const id=`service_${row.name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')}`;db.prepare('INSERT OR IGNORE INTO campaigns (id,name,client,status,products_json,description) VALUES (?,?,?,?,?,?)').run(id,row.name,row.client||'Bitel','ACTIVA','[]','Servicio normalizado para operación multiempresa.');campaign=db.prepare('SELECT id FROM campaigns WHERE id=?').get(id) as any;}const operationId=`op_${row.companyId.replace('company_','')}_${campaign.id.replace(/^service_|^camp_/,'')}`;db.prepare('INSERT OR IGNORE INTO operations (id,company_id,campaign_id,name,status,legacy) VALUES (?,?,?,?,?,0)').run(operationId,row.companyId,campaign.id,`${companies.find(item=>item[0]===row.companyId)?.[1]} / ${row.name}`,'ACTIVA');}
   const legacyCompany='company_legacy';db.prepare('INSERT OR IGNORE INTO companies (id,name,status,created_at) VALUES (?,?,?,?)').run(legacyCompany,'LEGACY','INACTIVA',now);
   for(const c of db.prepare('SELECT id,name FROM campaigns').all() as any[]) db.prepare('INSERT OR IGNORE INTO operations (id,company_id,campaign_id,name,status,legacy) VALUES (?,?,?,?,?,1)').run(`op_legacy_${c.id}`,legacyCompany,c.id,`LEGACY / ${c.name}`,'ACTIVA');
 }
@@ -541,6 +552,22 @@ async function syncRepositoryDelta(scope:RepositoryDeltaScope={}){
   const current=repository(),snapshot=repositoryDeltaSnapshot(current,scope);
   await supabaseStorage.saveRepositoryBatch(snapshot,passwordHashes());
   structuredRepositoryCache={value:current,expiresAt:Date.now()+15_000};
+}
+
+async function ensureTechcenterMovistarCampaign(){
+  const directory=await readRepository();
+  const company=directory.companies?.find(item=>item.name.trim().toLowerCase()==='techcenter');
+  if(!company)return;
+  let campaign=directory.campaigns.find(item=>item.name.trim().toLowerCase()==='movistar portabilidad out');
+  const linked=campaign&&directory.operations?.some(item=>item.companyId===company.id&&item.campaignId===campaign!.id&&!item.legacy);
+  if(linked)return;
+  if(!campaign){
+    db.prepare('INSERT OR IGNORE INTO campaigns (id,name,client,status,products_json,description) VALUES (?,?,?,?,?,?)').run('service_movistar_portabilidad_out','Movistar Portabilidad Out','Movistar','ACTIVA','[]','Ficha de Calidad exclusiva para Techcenter.');
+    campaign=(repository().campaigns.find(item=>item.id==='service_movistar_portabilidad_out'))!;
+  }
+  const operationId=`op_${company.id.replace('company_','')}_${campaign.id.replace(/^service_|^camp_/,'')}`;
+  db.prepare('INSERT OR IGNORE INTO operations (id,company_id,campaign_id,name,status,legacy) VALUES (?,?,?,?,?,0)').run(operationId,company.id,campaign.id,`${company.name} / ${campaign.name}`,'ACTIVA');
+  await syncRepositoryDelta({campaignIds:[campaign.id],operationIds:[operationId]});
 }
 
 async function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -876,6 +903,20 @@ async function startServer() {
       const operation=directory.operations?.find(item=>item.id===(advisor.operationId||`op_legacy_${advisor.campaignId}`));
       const campaign=directory.campaigns.find(item=>item.id===advisor.campaignId);
       if (!operation || operation.legacy || operation.status !== 'ACTIVA' || operation.campaignId !== advisor.campaignId || !campaign || campaign.status !== 'ACTIVA') return res.status(400).json({ error: 'La campaña del asesor ya no está activa. Selecciona una campaña vigente.' });
+      const company=directory.companies?.find(item=>item.id===operation.companyId);
+      if(evaluation.evaluationType==='QUALITY'&&isTechcenterMovistarCampaign(company?.name||'',campaign.name)&&evaluation.qualityForm?.id!==TECHCENTER_MOVISTAR_FORM_ID)return res.status(400).json({error:'Esta campaña requiere la ficha Techcenter Movistar.'});
+      if(evaluation.qualityForm?.id===TECHCENTER_MOVISTAR_FORM_ID){
+        if(evaluation.evaluationType!=='QUALITY'||!isTechcenterMovistarCampaign(company?.name||'',campaign.name))return res.status(400).json({error:'Esta ficha sólo corresponde a Techcenter / Movistar Portabilidad Out.'});
+        if(!TECHCENTER_MOVISTAR_FLOWS.includes(evaluation.qualityForm.flow))return res.status(400).json({error:'Tipo de encuesta inválido.'});
+        const criteria=techcenterFieldsForFlow(evaluation.qualityForm.flow).filter(isTechcenterCriterion);
+        const byId=new Map(answeredItems.map((item:any)=>[String(item.criterionId),item]));
+        if(criteria.some(field=>!byId.has(`tc_mov_${field.id}`))||byId.size!==criteria.length)return res.status(400).json({error:'La ficha tiene criterios faltantes o ajenos a la encuesta.'});
+        const possible=criteria.filter(field=>(byId.get(`tc_mov_${field.id}`) as any)?.compliance!=='NO_APLICA').length;
+        const earned=criteria.filter(field=>(byId.get(`tc_mov_${field.id}`) as any)?.compliance==='CUMPLE').length;
+        if(!possible)return res.status(400).json({error:'Debe existir al menos un criterio evaluable.'});
+        const score=Math.round(earned/possible*100);
+        evaluation={...evaluation,technicalScore:score,scoreTotal:score,scoreConnect:null,scoreClarify:null,scoreConvert:null,qualityResult:undefined,criticalReason:undefined,qualityForm:{...evaluation.qualityForm,earned,possible}};
+      }
       evaluation = { ...evaluation, campaignId:advisor.campaignId, teamId:advisor.teamId, supervisorId:advisor.supervisorId, operationId:operation.id, companyId:operation.companyId, supervisorAtEvaluation:advisor.supervisorId, validationStatus: 'VALIDATED' };
       if(!scopedRecord(authUser,evaluation))return res.status(404).json({error:'Asesor no encontrado en tu alcance.'});
       evaluation = correctMigracionesQualityEvaluation(evaluation, directory.campaigns);
@@ -1755,6 +1796,7 @@ async function startServer() {
   };
   if(supabaseStorage.enabled){try{await supabaseStorage.deleteExpiredSessions();}catch(error){console.error('[sessions] No fue posible depurar sesiones vencidas.',error instanceof Error?error.message:'');}const sessionCleanup=setInterval(()=>void supabaseStorage.deleteExpiredSessions().catch((error:any)=>console.error('[sessions] No fue posible depurar sesiones vencidas.',error?.message||'')),60*60*1000);sessionCleanup.unref();}
   listen(PORT);
+  void ensureTechcenterMovistarCampaign().catch(error=>console.error('[techcenter] No fue posible preparar Movistar Portabilidad Out.',error instanceof Error?error.message:''));
 }
 
 startServer();

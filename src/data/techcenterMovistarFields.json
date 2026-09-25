@@ -1,0 +1,1439 @@
+[
+  {
+    "id": 1,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "ID",
+    "sourceField": "ID",
+    "kind": "Autonumérico",
+    "options": [],
+    "required": "Sí"
+  },
+  {
+    "id": 2,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "Hora de inicio",
+    "sourceField": "Hora de inicio",
+    "kind": "Fecha y hora",
+    "options": [],
+    "required": "Sí"
+  },
+  {
+    "id": 3,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "Hora de finalización",
+    "sourceField": "Hora de finalización",
+    "kind": "Fecha y hora",
+    "options": [],
+    "required": "Sí"
+  },
+  {
+    "id": 4,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "Correo electrónico",
+    "sourceField": "Correo electrónico",
+    "kind": "Texto / correo",
+    "options": [],
+    "required": "Sí"
+  },
+  {
+    "id": 5,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "Nombre",
+    "sourceField": "Nombre",
+    "kind": "Texto / usuario",
+    "options": [],
+    "required": "Sí"
+  },
+  {
+    "id": 6,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "Total de puntos",
+    "sourceField": "Total de puntos",
+    "kind": "Número calculado",
+    "options": [],
+    "required": "Sí"
+  },
+  {
+    "id": 7,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "Comentarios del cuestionario",
+    "sourceField": "Comentarios del cuestionario",
+    "kind": "Área de texto",
+    "options": [],
+    "required": "No"
+  },
+  {
+    "id": 8,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "Codigo audio",
+    "sourceField": "Codigo_audio",
+    "kind": "Texto",
+    "options": [],
+    "required": "Sí"
+  },
+  {
+    "id": 9,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "Cuartil",
+    "sourceField": "Cuartil",
+    "kind": "Lista",
+    "options": [
+      "Cuartil I",
+      "Cuartil II",
+      "Cuartil III",
+      "Cuartil IV",
+      "No se identifica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 10,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "Socio",
+    "sourceField": "Socio",
+    "kind": "Valor fijo",
+    "options": [],
+    "required": "Sí"
+  },
+  {
+    "id": 11,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "Tipo Gestor",
+    "sourceField": "Tipo_Gestor",
+    "kind": "Lista",
+    "options": [
+      "TDP",
+      "Socio"
+    ],
+    "required": "Sí"
+  },
+  {
+    "id": 12,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "Gestor audio",
+    "sourceField": "Gestor_audio",
+    "kind": "Lista / catálogo interno",
+    "options": [],
+    "required": "Sí"
+  },
+  {
+    "id": 13,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "Agente Socio",
+    "sourceField": "Agente_Socio",
+    "kind": "Lista / catálogo interno",
+    "options": [],
+    "required": "Sí"
+  },
+  {
+    "id": 14,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "Tipo audio",
+    "sourceField": "Tipo_audio",
+    "kind": "Lista",
+    "options": [
+      "Venta",
+      "No venta"
+    ],
+    "required": "Sí"
+  },
+  {
+    "id": 15,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "¿Audio es Rellamada? Si la respuesta es Si favor en el campo observaciones precisar que informacion llega en el audio",
+    "sourceField": "¿Audio_es_Rellamada?_Si_la_respuesta_es_Si_favor_en_el_campo_observaciones_precisar_que_informacion_llega_en_el_audio",
+    "kind": "Lista",
+    "options": [
+      "Sí",
+      "No"
+    ],
+    "required": "Sí"
+  },
+  {
+    "id": 16,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "¿Audio de Fija es un reingreso?",
+    "sourceField": "¿Audio_de_Fija_es_un_reingreso?",
+    "kind": "Lista",
+    "options": [
+      "Sí",
+      "No"
+    ],
+    "required": "Sí"
+  },
+  {
+    "id": 17,
+    "section": "Datos generales",
+    "flow": "Todos",
+    "label": "Tipo Encuesta",
+    "sourceField": "Tipo_Encuesta",
+    "kind": "Lista",
+    "options": [
+      "No Venta Movil Out",
+      "No Venta Fija Out",
+      "Venta Movil Out",
+      "Venta Fija Out"
+    ],
+    "required": "Sí"
+  },
+  {
+    "id": 18,
+    "section": "No Venta Out",
+    "flow": "No Venta Movil Out / No Venta Fija Out",
+    "label": "Solo Movil Out En el saludo segun speech asesor no debe identificarse como Movistar sino solo con su nombre para mejorar la oportunidad de contacto cliente",
+    "sourceField": "Solo_Movil_Out_En_el_saludo_segun_speech_asesor_no_debe_identificarse_como_Movistar_sino_solo_con_su_nombre_para_mejorar_la_oportunidad_de_contacto_cliente",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 19,
+    "section": "No Venta Out",
+    "flow": "No Venta Movil Out / No Venta Fija Out",
+    "label": "Gestion regular Asesor informa promoción vigente del plan 39.90 para siempre 125gb. más 100gb por 6 meses y ofrece por 10 soles mas plan de 49.90 con TVApp L1max 1 suscripcion gratis ...",
+    "sourceField": "Gestion_regular_Asesor_informa_promoción_vigente_del_plan_39.90_para siempre_125gb. más_100gb_ por_ 6_ meses_ y_ ofrece_ por_10_ soles_ mas_ plan_ de_ 49.90_ con_ TVApp_L1max_1_suscripcion_gratis_...",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 20,
+    "section": "No Venta Out",
+    "flow": "No Venta Movil Out / No Venta Fija Out",
+    "label": "Asesor realiza pregunta ¿Eres el titular de la linea? En movil 2m 30s",
+    "sourceField": "Asesor_realiza_pregunta_¿Eres_el_titular_de_la_linea?_En_movil_2m_30s",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 21,
+    "section": "No Venta Out",
+    "flow": "No Venta Movil Out / No Venta Fija Out",
+    "label": "¿Asesor solicita DNI para evaluar al cliente?",
+    "sourceField": "¿Asesor_solicita_DNI_para_evaluar_al_cliente?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 22,
+    "section": "No Venta Out",
+    "flow": "No Venta Movil Out / No Venta Fija Out",
+    "label": "Escucha Activa atento a lo que dice el cliente identificar las necesidades del cliente",
+    "sourceField": "Escucha_Activa_atento_a_lo_que_dice_el_cliente_identificar_las_necesidades_del_cliente",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 23,
+    "section": "No Venta Out",
+    "flow": "No Venta Movil Out / No Venta Fija Out",
+    "label": "Segun base ¿Asesor ofrece Movistar Total?",
+    "sourceField": "Segun_base_¿Asesor_ofrece_Movistar_Total?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 24,
+    "section": "No Venta Out",
+    "flow": "No Venta Movil Out / No Venta Fija Out",
+    "label": "Sonrisa Telefonica Modulacion de voz correcta amable",
+    "sourceField": "Sonrisa_Telefonica_Modulacion_de_voz_correcta_amable",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 25,
+    "section": "No Venta Out",
+    "flow": "No Venta Movil Out / No Venta Fija Out",
+    "label": "Da informacion correcta sobre Producto y Promociones Conocimiento de Producto y Promociones.Argumentacion de la tarifa ofrecida caracteristicas beneficios",
+    "sourceField": "Da_informacion_correcta_sobre_Producto_y_Promociones_Conocimiento_de_Producto_y_Promociones.Argumentacion_de_la_tarifa_ofrecida_caracteristicas_beneficios",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 26,
+    "section": "No Venta Out",
+    "flow": "No Venta Movil Out / No Venta Fija Out",
+    "label": "Rebate de Objeciones beneficios diferencia versus competencia Club Movistar etc",
+    "sourceField": "Rebate_de_Objeciones_beneficios_diferencia_versus_competencia_Club_Movistar_etc",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 27,
+    "section": "No Venta Out",
+    "flow": "No Venta Movil Out / No Venta Fija Out",
+    "label": "Solo Movil En caso el cliente indica que la señal de Movistar es deficiente o no hay señal en su zona de indicar el rebate correspondiente En Movistar estamos trabajando dia a dia para tener una m...",
+    "sourceField": "Solo_Movil_En_caso_el_cliente_indica_que_la_señal_de_Movistar_es_deficiente_o_no_hay_señal_en_su_zona_de_indicar_el_rebate_correspondiente_En_Movistar_estamos_trabajando_dia_a_dia_para_tener_una_m...",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 28,
+    "section": "No Venta Out",
+    "flow": "No Venta Movil Out / No Venta Fija Out",
+    "label": "Base Mejora de cobertura de RED Asesor cumple con informar la glosa Hemos migrando a la Nueva Red Movil de Movistar que te brindara MAS velocidad y una MEJOR cobertura para brindarte una mejor exp...",
+    "sourceField": "Base_Mejora_de_cobertura_de_RED_Asesor_cumple_con_informar_la_glosa_Hemos_migrando_a_la_Nueva_Red_Movil_de_Movistar_que_te_brindara_MAS_velocidad_y_una_MEJOR_cobertura_para_brindarte_una_mejor_exp...",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 29,
+    "section": "No Venta Out",
+    "flow": "No Venta Movil Out / No Venta Fija Out",
+    "label": "¿La tipificacion es correcta?",
+    "sourceField": "¿La_tipificacion_es_correcta?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 30,
+    "section": "No Venta Out",
+    "flow": "No Venta Movil Out / No Venta Fija Out",
+    "label": "¿En caso de ser audio de movil que tipificacion es?",
+    "sourceField": "¿En_caso_de_ser_audio_ de_movil_ que_tipificacion_es?",
+    "kind": "Lista",
+    "options": [
+      "SE CORTA LLAMADA/AGENDA/NO ES TITULAR",
+      "SEÑAL ES DEFICIENTE/NO HAY SEÑAL",
+      "NO HAY DELIVERY",
+      "CLIENTE NO ACEPTA OFERTA/CONFORME CON SU",
+      "NO APLICA",
+      "CLIENTE MALA EXPERIENCIA CON MOVISTAR",
+      "NO CALIFICA SCORING (EQUIPO/CHIP/EQUIPO)",
+      "CLIENTE NO PERMITE ARGUMENTAR"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 31,
+    "section": "No Venta Out",
+    "flow": "No Venta Movil Out / No Venta Fija Out",
+    "label": "¿En caso de ser audio de fija que tipificacion es?",
+    "sourceField": "¿En_caso_de_ser_audio_de_fija_que_tipificacion_es?",
+    "kind": "Lista",
+    "options": [
+      "NO APLICA",
+      "NO HAY COBERTURA (FACILIDADES TÉCNICAS)",
+      "CLIENTE NO ACEPTA OFERTA/MUY CARO",
+      "CLIENTE CORTA LLAMADA",
+      "CLIENTE CONSULTA/AGENDA/CURSO"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 32,
+    "section": "No Venta Out",
+    "flow": "No Venta Movil Out / No Venta Fija Out",
+    "label": "¿A quien se adjudica motivo de caida?",
+    "sourceField": "¿A_quien_se_adjudica_motivo_de_caida?",
+    "kind": "Lista",
+    "options": [
+      "Cliente",
+      "Negocio",
+      "Asesor"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 33,
+    "section": "No Venta Out",
+    "flow": "No Venta Movil Out / No Venta Fija Out",
+    "label": "En caso de haber un incumplimiento favor detallar minuto y descripcion caso contrario escribir OK",
+    "sourceField": "En_caso_de_haber_un_incumplimiento_favor_detallar_minuto_y_descripcion_caso_contrario_escribir_OK",
+    "kind": "Área de texto",
+    "options": [],
+    "required": "Según flujo"
+  },
+  {
+    "id": 34,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "Solo Movil Out En el saludo segun speech asesor no debe identificarse como Movistar sino solo con su nombre para mejorar la oportunidad de contacto cliente",
+    "sourceField": "Solo_Movil_Out_En_el_saludo_segun_speech_asesor_no_debe_identificarse_como_Movistar_sino_solo_con_su_nombre_para_mejorar_la_oportunidad_de_contacto_cliente2",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 35,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "Gestion regular Asesor informa promoción vigente del plan 39.90 para siempre 125gb. más 100gb por 6 meses y ofrece por 10 soles mas plan de 49.90 con TVApp L1max 1 suscripcion gratis ...2",
+    "sourceField": "Gestion_regular_Asesor_informa_promoción_vigente_del_plan_39.90_para siempre_125gb. más_100gb_ por_ 6_ meses_ y_ ofrece_ por_10_ soles_ mas_ plan_ de_ 49.90_ con_ TVApp_L1max_1_suscripcion_gratis_...2",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 36,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "Asesor realiza pregunta ¿Eres el titular de la linea? En movil 2m 30s",
+    "sourceField": "Asesor_realiza_pregunta_¿Eres_el_titular_de_la_linea?_En_movil_2m_30s2",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 37,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Asesor solicita DNI para evaluar al cliente?",
+    "sourceField": "¿Asesor_solicita_DNI_para_evaluar_al_cliente?2",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 38,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "Escucha Activa atento a lo que dice el cliente identificar las necesidades del cliente",
+    "sourceField": "Escucha_Activa_atento_a_lo_que_dice_el_cliente_identificar_las_necesidades_del_cliente2",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 39,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Asesor valida cobertura en la herramienta?",
+    "sourceField": "¿Asesor_valida_cobertura_en_la_herramienta?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 40,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Asesor valida origen de linea a portar?",
+    "sourceField": "¿Asesor_valida_origen_de_linea_a_portar?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 41,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Asesor informa todos los beneficios del plan contratado?",
+    "sourceField": "¿Asesor_informa_todos_los_beneficios_del_plan_contratado?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 42,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "Rebate de Objeciones beneficios diferencia versus competencia Club Movistar delivery en 3 horas sin costo etc",
+    "sourceField": "Rebate_de_Objeciones_beneficios_diferencia_versus_competencia_Club_Movistar_delivery_en_3_horas_sin_costo_etc",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 43,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "Solo Movil En caso el cliente indica que la señal de Movistar es deficiente o no hay señal en su zona de indicar el rebate correspondiente En Movistar estamos trabajando dia a dia para tener una m...2",
+    "sourceField": "Solo_Movil_En_caso_el_cliente_indica_que_la_señal_de_Movistar_es_deficiente_o_no_hay_señal_en_su_zona_de_indicar_el_rebate_correspondiente_En_Movistar_estamos_trabajando_dia_a_dia_para_tener_una_m...2",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 44,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "Base Mejora de cobertura de RED Asesor cumple con informar la glosa Hemos migrando a la Nueva Red Movil de Movistar que te brindara MAS velocidad y una MEJOR cobertura para brindarte una mejor exp...2",
+    "sourceField": "Base_Mejora_de_cobertura_de_RED_Asesor_cumple_con_informar_la_glosa_Hemos_migrando_a_la_Nueva_Red_Movil_de_Movistar_que_te_brindara_MAS_velocidad_y_una_MEJOR_cobertura_para_brindarte_una_mejor_exp...2",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 45,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿El asesor utilizo todas las tecnicas adecuadas para concretar la venta?",
+    "sourceField": "¿El_asesor_utilizo_todas_las_tecnicas_adecuadas_para_concretar_la_venta?",
+    "kind": "Criterio de auditoría",
+    "options": [],
+    "required": "Según flujo"
+  },
+  {
+    "id": 46,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Menciono Club Movistar? 3 beneficios y o 3 marcas",
+    "sourceField": "¿Menciono_Club_Movistar?_3_beneficios_y_o_3_marcas",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 47,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Informo correctamente ciclo de facturacion fecha de vencimiento?",
+    "sourceField": "¿Informo_correctamente_ciclo_de_facturacion_fecha_de_vencimiento?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 48,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Informo correctamente el monto a pagar? fraccion plan dscto cuotas de equipo",
+    "sourceField": "¿Informo_correctamente_el_monto_a_pagar?_fraccion_plan_dscto_cuotas_de_equipo",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 49,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Solicita 2 telefonos de contacto?",
+    "sourceField": "¿Solicita_2_telefonos_de_contacto?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 50,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Asesor solicita Direccion exacta? Distrito Prov Dpto",
+    "sourceField": "¿Asesor_solicita_Direccion_exacta?_Distrito_Prov_Dpto",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 51,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Solicita referencias exactas?",
+    "sourceField": "¿Solicita_referencias_exactas?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 52,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Lee contrato de manera COMPLETA CLARA y PAUSADA? DITO",
+    "sourceField": "¿Lee_contrato_de_manera_COMPLETA_CLARA_y_PAUSADA?_DITO",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 53,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Ofrecen linea adicional? Porta",
+    "sourceField": "¿Ofrecen_linea_adicional?_Porta",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 54,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Ofrecen equipo? Porta",
+    "sourceField": "¿Ofrecen_equipo?_Porta",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 55,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Ofrece delivery express?",
+    "sourceField": "¿Ofrece_delivery_express?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 56,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Asesor informa correctamente el rango horario?",
+    "sourceField": "¿Asesor_informa_correctamente_el_rango_horario?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 57,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Asesor ofrece punto de encuentro? se penaliza si es SI Es valido si el cliente fideliza la entrega en Super mercados malls hospitales comisarias colegios y el cliente tiene que salir a la puerta ...",
+    "sourceField": "¿Asesor_ofrece_punto_de_encuentro?_se_penaliza_si_es_SI_Es_valido_si_el_cliente_fideliza_la_entrega_en_Super_mercados_malls_hospitales_comisarias_colegios_y_el_cliente_tiene_que_salir_a_la_puerta_...",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 58,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Asesor fideliza al cliente? Leer completo glosa de fidelizacion",
+    "sourceField": "¿Asesor_fideliza_al_cliente?_Leer_completo_glosa_de_fidelizacion",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 59,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Asesor Ofrece Chip prepago de regalo , campaña no vigente? (Marca SI, colocar observacion)",
+    "sourceField": "¿Asesor_Ofrece_Chip_prepago_de_regalo , campaña no vigente? (Marca SI, colocar observacion)",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 60,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "Asesor traslada voluntariamente adrede informacion incorrecta se penaliza si es SI",
+    "sourceField": "Asesor_traslada_voluntariamente_adrede_informacion_incorrecta_se_penaliza_si_es_SI",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 61,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "Asesor induce a la baja de forma proactiva al cliente se penaliza si es SI",
+    "sourceField": "Asesor_induce_a_la_baja_de_forma_proactiva_al_cliente_se_penaliza_si_es_SI",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 62,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "¿Que ofrecieron como mala venta?",
+    "sourceField": "¿Que_ofrecieron_como_mala_venta?",
+    "kind": "Área de texto / catálogo",
+    "options": [],
+    "required": "Según flujo"
+  },
+  {
+    "id": 63,
+    "section": "Venta Móvil Out",
+    "flow": "Venta Movil Out",
+    "label": "En caso de haber un incumplimiento favor detallar Minuto y descripcion caso contrario escribir OK",
+    "sourceField": "En_caso_de_haber_un_incumplimiento_favor_detallar_Minuto_y_descripcion_caso_contrario_escribir_OK2",
+    "kind": "Área de texto",
+    "options": [],
+    "required": "Según flujo"
+  },
+  {
+    "id": 64,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "En el saludo segun speech asesor brinda el gancho comercial",
+    "sourceField": "En_el_saludo_segun_speech_asesor_brinda_el_gancho_comercial",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 65,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "Asesor realiza pregunta Eres el titular de la linea? Capta y o alta no se valida a base bajas competencia out",
+    "sourceField": "Asesor_realiza_pregunta_Eres_el_titular_de_la_linea?_Capta_y_o_alta_no_se_valida_a_base_bajas_competencia_out",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 66,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "¿Asesor solicita DNI para evaluar al cliente?",
+    "sourceField": "¿Asesor_solicita_DNI_para_evaluar_al_cliente?3",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 67,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "Asesor valida FFTT en la zona cobertura",
+    "sourceField": "Asesor_valida_FFTT_en_la_zona_cobertura",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 68,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "¿Asesor ofrecio MT o SA trio duo mono?",
+    "sourceField": "¿Asesor_ofrecio_MT_o_SA_trio_duo_mono?",
+    "kind": "Lista",
+    "options": [
+      "Sí",
+      "Ambos"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 69,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "¿Asesor ofrece correctamente todos los beneficios? (Tres beneficios MovistarTVAPPLite MovistarTVAPP Disney+ Disney+Premiun ModemWiFi 6 DecoHD)",
+    "sourceField": "¿Asesor_ofrece_correctamente_todos_los_beneficios?_(Tres_beneficios_MovistarTVAPPLite_MovistarTVAPP_Disney+_Disney+Premiun_ModemWiFi 6_DecoHD) ",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 70,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "¿El asesor ofrece y comunica correctamente los beneficios del Club Movistar correspondientes al segmento del cliente Black,Platinum, Gold, Blue)?",
+    "sourceField": "¿El_asesor_ofrece_y_comunica_correctamente_los_beneficios_del_Club_Movistar_correspondientes_al_segmento_del_cliente_Black,Platinum, Gold, Blue)?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 71,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "¿Explica correctamente el proceso de activacion de Disney TV App? enfasis que son plataformas digitales no hay nada fisico que instalar",
+    "sourceField": "¿Explica_correctamente_el_proceso_de_activacion_de_Disney_TV_App?_enfasis_que_son_plataformas_digitales_no_hay_nada_fisico_que_instalar",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 72,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "¿El asesor ofrece el componente TV? excepcion cuando sea una base solo Mono BA OUT",
+    "sourceField": "¿El_asesor_ofrece_el_componente_TV?_excepcion_cuando_sea_una_base_solo_Mono_BA_OUT",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 73,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "Menciona glosa de alta por baja y no utiliza futura baja como argumento de venta",
+    "sourceField": "Menciona_glosa_de_alta_por_baja_y_no_utiliza_futura_baja_como_argumento_de_venta",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 74,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "¿Se agoto todas las opciones de rebate MT y TV?",
+    "sourceField": "¿Se_agoto_todas_las_opciones_de_rebate_MT_y_TV?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 75,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "¿Informo correctamente ciclo de facturacion fecha de vencimiento?",
+    "sourceField": "¿Informo_correctamente_ciclo_de_facturacion_fecha_de_vencimiento?2",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 76,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "¿Informo correctamente el monto a pagar? plan dscto otros",
+    "sourceField": "¿Informo_correctamente_el_monto_a_pagar?_plan_dscto_otros",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 77,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "¿Solicita y revalida 02 telefonos de contacto?",
+    "sourceField": "¿Solicita_y_revalida_02_telefonos_de_contacto?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 78,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "Lee contrato de manera COMPLETA CLARA y PAUSADA? Dito",
+    "sourceField": "Lee_contrato_de_manera_COMPLETA_CLARA_y_PAUSADA?_Dito",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 79,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "¿Asesor indica al cliente que recibira un mensaje de Whatsapp Chatbot 969696690 para confirmar su pedido de instalacion?",
+    "sourceField": "¿Asesor_indica_al_cliente_que_recibira_un_mensaje_de_Whatsapp_Chatbot_ 969696690_para_confirmar_su_pedido_de_instalacion?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 80,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "Brinda plazo correcto de instalacion fija Debe siempre decir el plazo maximo ademas del plazo de la agenda",
+    "sourceField": "Brinda_plazo_correcto_de_instalacion_fija_Debe_siempre_decir_el_plazo_maximo_ademas_del_plazo_de_la_agenda",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 81,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "Asesor revalida direccion completa incluyendo distrito provincia departamento",
+    "sourceField": "Asesor_revalida_direccion_completa_incluyendo_distrito_provincia_departamento",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 82,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "¿Asesor cerro la venta sin dejar dudas al cliente? ¿Absolvio dudas y/o consultas del cliente?",
+    "sourceField": "¿Asesor_cerro_la_venta_sin_dejar_dudas_al_cliente?_¿Absolvio dudas_y/o_consultas_del_cliente?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 83,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "Asesor induce a la baja de forma proactiva al cliente? se penaliza si es SI",
+    "sourceField": "Asesor_induce_a_la_baja_de_forma_ proactiva_al_cliente?_se_penaliza_si_es_SI",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 84,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "Se considera audio como mala venta planes dsctos velocidad tecnologia periodos y o ofrecimientos que no corresponden se penaliza si es SI",
+    "sourceField": "Se_considera_audio_como_mala_venta_planes_dsctos_velocidad_tecnologia_periodos_y_o_ofrecimientos_que_no_corresponden_se_penaliza_si_es_SI",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 85,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "¿Que ofrecieron como mala venta?",
+    "sourceField": "¿Que_ofrecieron_como_mala_venta?2",
+    "kind": "Área de texto / catálogo",
+    "options": [],
+    "required": "Según flujo"
+  },
+  {
+    "id": 86,
+    "section": "Venta Fija Out",
+    "flow": "Venta Fija Out",
+    "label": "En caso de haber un incumplimiento favor detallar minuto y descripcion caso contrario escribir OK",
+    "sourceField": "En_caso_de_haber_un_incumplimiento_favor_detallar_minuto_y_descripcion_caso_contrario_escribir_OK3",
+    "kind": "Área de texto",
+    "options": [],
+    "required": "Según flujo"
+  },
+  {
+    "id": 87,
+    "section": "Migración - Validación titularidad",
+    "flow": "Migración / Convertibilidad",
+    "label": "VALIDACION DE TITULARIDAD Consulta si desea escuchar la oferta y solicita permiso para continuar con Oferta",
+    "sourceField": "VALIDACION_DE_TITULARIDAD_Consulta_si_desea_escuchar_la_oferta_y_solicita_permiso_para_continuar_con_Oferta",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 88,
+    "section": "Migración - Validación titularidad",
+    "flow": "Migración / Convertibilidad",
+    "label": "VALIDACION DE TITULARIDAD ¿Realizo las validaciones iniciales Si es titular nombres apellidos y DNI del titular y es usuario parentesco con el titular nombres apellidos del titular y DNI del titular",
+    "sourceField": "VALIDACION_DE_TITULARIDAD_¿Realizo_las_validaciones_iniciales_Si_es_titular_nombres_apellidos_y_DNI_del_titular_y_es_usuario_parentesco_con_el_titular_nombres_apellidos_del_titular_y_DNI_del_titular",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 89,
+    "section": "Migración - Validación sistemas",
+    "flow": "Migración / Convertibilidad",
+    "label": "VALIDACION DE SISTEMAS ¿El asesor valida y revalida la direccion de instalacion del titular del servicio?",
+    "sourceField": "VALIDACION_DE_SISTEMAS_¿El_asesor_valida_y_revalida_la_direccion_de_instalacion_del_titular_del_servicio?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 90,
+    "section": "Migración - Validación sistemas",
+    "flow": "Migración / Convertibilidad",
+    "label": "VALIDACION DE SISTEMAS ¿El asesor solicita correo electronico del titular del servicio?",
+    "sourceField": "VALIDACION_DE_SISTEMAS_¿El_asesor_solicita_correo_electronico_del_titular_del_servicio?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 91,
+    "section": "Migración - Argumento",
+    "flow": "Migración / Convertibilidad",
+    "label": "ARGUMENTO Asesor menciona argumento o sustento del motivo de la migracion",
+    "sourceField": "ARGUMENTO_Asesor_menciona_argumento_o_sustento_del_motivo_de_la_migracion",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 92,
+    "section": "Migración - Ofertas",
+    "flow": "Migración / Convertibilidad",
+    "label": "OFERTAS Asesor ofrece Disney+ si el cliente cuenta con TV?",
+    "sourceField": "OFERTAS_Asesor_ofrece_Disney+_ si_el_cliente_cuenta_con_TV?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 93,
+    "section": "Migración - Ofertas",
+    "flow": "Migración / Convertibilidad",
+    "label": "OFERTAS Asesor informa el aumento de la velocidad en 1000 megabits segun campaña y canal x 12 meses",
+    "sourceField": "OFERTAS_Asesor_informa_el_aumento_de_la_velocidad_en_1000_megabits_segun_campaña_y_canal_x_12_meses",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 94,
+    "section": "Migración - Ofertas",
+    "flow": "Migración / Convertibilidad",
+    "label": "OFERTAS Asesor explica simetria de velocidad subida y bajada al 100%",
+    "sourceField": "OFERTAS_Asesor_explica_simetria_de_velocidad__subida_y_bajada_al_100%",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 95,
+    "section": "Migración - Convertibilidad",
+    "flow": "Migración / Convertibilidad",
+    "label": "CONVERTIBILIDAD ¿El asesor solicita como minimo 2 numeros de referencia?",
+    "sourceField": "CONVERTIBILIDAD_¿El_asesor_solicita_como_minimo_2_numeros_de_referencia?",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 96,
+    "section": "Migración - Convertibilidad",
+    "flow": "Migración / Convertibilidad",
+    "label": "CONVERTIBILIDAD Asesor valida si los numeros de referencia se encuentran activos",
+    "sourceField": "CONVERTIBILIDAD_Asesor_valida_si_los_numeros_de_referencia_se_encuentran_activos",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 97,
+    "section": "Migración - Convertibilidad",
+    "flow": "Migración / Convertibilidad",
+    "label": "CONVERTIBILIDAD El asesor menciona que se tendra visita tecnica en un plazo de 5 dias habiles o 7 dias calendario segun DITO",
+    "sourceField": "CONVERTIBILIDAD_El_asesor_menciona_que_se_tendra_visita_tecnica_en_un_plazo_de_5_dias_habiles_o_7_dias_calendario_segun_DITO",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 98,
+    "section": "Migración - Convertibilidad",
+    "flow": "Migración / Convertibilidad",
+    "label": "CONVERTIBILIDAD Asesor indica al cliente que recibira un mensaje de Whatsapp Chatbot 969696690 para confirmar su pedido de instalacion",
+    "sourceField": "CONVERTIBILIDAD_Asesor_indica_al_cliente_que_recibira_un_mensaje_de_Whatsapp_Chatbot_969696690_para_confirmar_su_pedido_de_instalacion",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 99,
+    "section": "Migración - Lectura de contrato",
+    "flow": "Migración / Convertibilidad",
+    "label": "LECTURA DE CONTRATO Se realiza la validacion previa al cierre de la migracion solicitando los datos nombre de la mama nombre de papa distrito y fecha de nacimiento",
+    "sourceField": "LECTURA_DE_CONTRATO_Se_realiza_la_validacion_previa_al_cierre_de_la_migracion_solicitando_los_ datos_ nombre_de_la_mama_nombre_de_papa_distrito_ y_fecha_de_nacimiento",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 100,
+    "section": "Migración - Lectura de contrato",
+    "flow": "Migración / Convertibilidad",
+    "label": "LECTURA DE CONTRATO Lee contrato de manera COMPLETA CLARA PAUSADA y confirma la aceptacion del pedido de migra? MUY IMPORTANTE",
+    "sourceField": "LECTURA_DE_CONTRATO_Lee_contrato_de_manera_COMPLETA_CLARA_PAUSADA_y_confirma_la_aceptacion_del_pedido_de_migra?_MUY_ IMPORTANTE",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 101,
+    "section": "Migración - Fidelización",
+    "flow": "Migración / Convertibilidad",
+    "label": "FIDELIZACION Informar al cliente que debe permitir el ingreso del tecnico al domicilio el dia de la instalacion",
+    "sourceField": "FIDELIZACION_Informar_al_cliente_que_debe_permitir_el_ingreso_del_tecnico_al_domicilio_el_dia_de_la_ instalacion",
+    "kind": "Criterio de auditoría",
+    "options": [
+      "Sí",
+      "No",
+      "No aplica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 102,
+    "section": "Migración / Convertibilidad",
+    "flow": "Migración / Convertibilidad",
+    "label": "En caso de haber un incumplimiento favor detallar Minuto y descripcion caso contrario escribir OK",
+    "sourceField": "En_caso_de_haber_un_incumplimiento_favor_detallar_Minuto_y_descripcion_caso_contrario_escribir_OK4",
+    "kind": "Área de texto",
+    "options": [],
+    "required": "Según flujo"
+  },
+  {
+    "id": 103,
+    "section": "Datos finales",
+    "flow": "Todos",
+    "label": "DNI Cliente",
+    "sourceField": "DNI_Cliente",
+    "kind": "Texto",
+    "options": [],
+    "required": "Según flujo"
+  },
+  {
+    "id": 104,
+    "section": "Datos finales",
+    "flow": "Todos",
+    "label": "Departamento venta",
+    "sourceField": "Departamento_venta",
+    "kind": "Lista / catálogo",
+    "options": [],
+    "required": "Según flujo"
+  },
+  {
+    "id": 105,
+    "section": "Datos finales",
+    "flow": "Todos",
+    "label": "Distrito",
+    "sourceField": "Distrito",
+    "kind": "Lista / catálogo",
+    "options": [],
+    "required": "Según flujo"
+  },
+  {
+    "id": 106,
+    "section": "Datos finales",
+    "flow": "Todos",
+    "label": "En caso de portabilidad cual es el origen del cliente que plan tenia en la competencia",
+    "sourceField": "En_caso_de_portabilidad_cual_es_el_origen_del_cliente_que_plan_tenia_en_la_competencia",
+    "kind": "Texto / lista",
+    "options": [],
+    "required": "Según flujo"
+  },
+  {
+    "id": 107,
+    "section": "Datos finales",
+    "flow": "Todos",
+    "label": "Producto",
+    "sourceField": "Producto",
+    "kind": "Lista",
+    "options": [
+      "PORTA SIN EQUIPO (SOLO CHIP)",
+      "MOVISTAR TOTAL (MT)",
+      "ALTA MÓVIL CON EQUIPO (CHIP+EQUIPO)",
+      "ALTA SOLO CABLE",
+      "ALTA SOLO TELEFONO",
+      "No se identifica"
+    ],
+    "required": "Según flujo"
+  },
+  {
+    "id": 108,
+    "section": "Datos finales",
+    "flow": "Todos",
+    "label": "Duracion de la grabacion solo ingresar los minutos del audio sin decimales por ejemplo si el audio dura 8 minutos y 32 segundos colocar 8",
+    "sourceField": "Duracion_de_la_grabacion_solo_ingresar_los_minutos_del_audio_sin_decimales_por_ejemplo_si_el_audio_dura_8_minutos_y_32_segundos_colocar_ 8",
+    "kind": "Número entero",
+    "options": [],
+    "required": "Sí"
+  },
+  {
+    "id": 109,
+    "section": "Datos finales",
+    "flow": "Todos",
+    "label": "Fecha grabacion audio",
+    "sourceField": "Fecha_grabacion_audio",
+    "kind": "Fecha",
+    "options": [],
+    "required": "Sí"
+  },
+  {
+    "id": 110,
+    "section": "Datos finales",
+    "flow": "Todos",
+    "label": "Comentario Adicional Indicar el motivo de caida y puntos por mejorar en resumen si todo esta bien colocar OK",
+    "sourceField": "Comentario_Adicional_Indicar_ el_motivo_de_caida_y_puntos_por_mejorar_en_resumen_si_todo_esta_bien_colocar_OK",
+    "kind": "Área de texto",
+    "options": [],
+    "required": "No"
+  }
+]

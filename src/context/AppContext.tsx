@@ -589,6 +589,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const submissionKey = evaluationIdentity(evalData);
     if (recentEvaluation.current?.key === submissionKey && Date.now() - recentEvaluation.current.createdAt < 30000) return recentEvaluation.current.evaluation;
     const quality = evalData.evaluationType === 'QUALITY';
+    const techcenterForm = evalData.qualityForm?.id === 'TECHCENTER_MOVISTAR_OUT_V1';
     const qualityScore = (criterion: string) => {
       const entries = evalData.items.filter(item => item.dimension === criterion && ['CUMPLE', 'NO_CUMPLE'].includes(item.compliance || ''));
       if (!entries.length) return null;
@@ -606,7 +607,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const rawQualityTotal = qualityScores && activeQualityWeight ? Math.round(qualityKeys.reduce((sum, key) => sum + (qualityScores[key] === null ? 0 : Number(qualityScores[key]) * qualityWeights[key]), 0) / activeQualityWeight) : null;
     const qualityCampaign = campaigns.find(campaign => campaign.id === evalData.campaignId);
     const failedByMinimum = Boolean(quality && /(?:migraciones.*bitel|bitel.*migraciones)/i.test(qualityCampaign?.name || '') && (rawQualityTotal ?? 0) < 75);
-    const summary = quality ? { scoreConnect: qualityScores!.C1, scoreClarify: qualityScores!.C2, scoreConvert: qualityScores!.C3, scoreTotal: criticalFailure ? 0 : rawQualityTotal, primaryGap: criticalFailure ? 'Error crítico PUE' : 'PUE', secondaryGap: '', strongestPillar: '', recommendation: criticalFailure ? 'Corregir error crítico antes de nueva evaluación.' : 'Revisar atributos no cumplidos.' } : calculateEvaluationSummary(evalData.items, config);
+    const firstGap=evalData.items.find(item=>item.compliance==='NO_CUMPLE');
+    const summary = quality ? { scoreConnect: techcenterForm?null:qualityScores!.C1, scoreClarify: qualityScores!.C2, scoreConvert: qualityScores!.C3, scoreTotal: criticalFailure ? 0 : rawQualityTotal, primaryGap: techcenterForm ? firstGap?.attribute||firstGap?.qualityGuideline?.name||'' : criticalFailure ? 'Error crítico PUE' : 'PUE', secondaryGap: '', strongestPillar: '', recommendation: criticalFailure ? 'Corregir error crítico antes de nueva evaluación.' : 'Revisar atributos no cumplidos.' } : calculateEvaluationSummary(evalData.items, config);
     const newEval: Evaluation = {
       ...evalData,
       evaluationType: evalData.evaluationType || 'D3C',
@@ -617,7 +619,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       scoreConvert: summary.scoreConvert,
       scoreTotal: summary.scoreTotal,
       technicalScore: quality ? rawQualityTotal : undefined,
-      qualityResult: quality ? (criticalFailure || failedByMinimum ? 'REPROBADA' : 'APROBADA') : undefined,
+      qualityResult: quality && !techcenterForm ? (criticalFailure || failedByMinimum ? 'REPROBADA' : 'APROBADA') : undefined,
       criticalReason: quality && criticalFailure ? (evalData.qualityCriticalErrorSnapshot?.[0]?.name || criticalItem?.classification?.replaceAll('_', ' ') || 'Error crítico') : failedByMinimum ? 'Puntaje menor al mínimo aprobatorio de 75%' : undefined,
       primaryGap: summary.primaryGap,
       secondaryGap: summary.secondaryGap,

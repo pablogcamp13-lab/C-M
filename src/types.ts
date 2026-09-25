@@ -276,6 +276,7 @@ export interface Evaluation {
   technicalScore?: number | null;
   qualityResult?: 'APROBADA' | 'REPROBADA';
   criticalReason?: string;
+  qualityForm?: { id:string; flow:string; startedAt:string; completedAt:string; fields:Record<string,string>; responses:Record<string,string>; comments:Record<string,string>; earned:number; possible:number };
   sale: boolean;
   saleResult: 'VENTA_CONCRETADA' | 'NO_VENTA' | 'VENTA_OBSERVADA' | 'VOLVER_A_LLAMAR';
   noSaleReason?: string;
