@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp } from '../../context/AppContext';
 import { Evaluation } from '../../types';
@@ -10,6 +10,7 @@ import { FiltersBar } from '../common/FiltersBar';
 import { ThreeScore } from '../common/ThreeScore';
 import { StatusBadge } from '../common/StatusBadge';
 import { SPEECH_TYPIFICATIONS } from '../../utils/speechTypification';
+import { buildEvaluationFolders } from './evaluationFolders';
 import { 
   Eye, 
   Trash2, 
@@ -19,7 +20,9 @@ import {
   AlertCircle,
   FileUp,
   Link2,
-  ArrowLeft
+  ArrowLeft,
+  ChevronRight,
+  Folder
 } from 'lucide-react';
 
 interface EvaluationsListProps {
@@ -30,7 +33,7 @@ interface EvaluationsListProps {
 export const EvaluationsList: React.FC<EvaluationsListProps> = ({ 
   onSelectEvaluation, onOpenNewEvaluation
 }) => {
-  const { evaluations, filteredEvaluations, advisors, campaigns, users, currentUser, deleteEvaluation, refreshEvaluations } = useApp();
+  const { evaluations, filteredEvaluations, advisors, campaigns, companies, operations, users, currentUser, deleteEvaluation, refreshEvaluations } = useApp();
   const [sortField, setSortField] = useState<'date' | 'score' | 'advisor'>('date');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -45,19 +48,34 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
   const [stateFilter, setStateFilter] = useState<'ALL' | 'PENDIENTE' | 'FINALIZADA'>('ALL');
   const [importOpen, setImportOpen] = useState(false);
   const [selectedBatchDate, setSelectedBatchDate] = useState<string | null>(null);
+  const [selectedCompanyKey, setSelectedCompanyKey] = useState<string | null>(null);
+  const [selectedCampaignKey, setSelectedCampaignKey] = useState<string | null>(null);
+  const [selectedSection, setSelectedSection] = useState<'manual'|'sa'|null>(null);
   const [linkTarget, setLinkTarget] = useState<Evaluation | null>(null);
   const isAdvisor = currentUser.role === 'ASESOR';
   const isReadOnly = ['ASESOR', 'SUPERVISOR'].includes(currentUser.role);
   const canDelete = ['ADMINISTRADOR', 'CONSULTOR'].includes(currentUser.role);
   const canImport = ['ADMINISTRADOR', 'CONSULTOR', 'MONITOR'].includes(currentUser.role);
-  const batchEvaluations = selectedBatchDate ? filteredEvaluations.filter(ev => ev.origin === 'SPEECH_ANALYTICS' && batchDate(ev) === selectedBatchDate) : [];
-  const visibleEvaluations = filteredEvaluations.filter(ev => {
-    if (selectedBatchDate ? ev.origin !== 'SPEECH_ANALYTICS' || batchDate(ev) !== selectedBatchDate : ev.origin === 'SPEECH_ANALYTICS') return false;
+  const matchingEvaluations = filteredEvaluations.filter(ev => {
     if (typeFilter !== 'ALL' && ev.evaluationType !== typeFilter) return false;
     if (resultFilter !== 'ALL' && (ev.sale ? 'VENTA' : 'NO_VENTA') !== resultFilter) return false;
     const state = ev.validationStatus === 'AUTOMATIC_PENDING' || ev.validationStatus === 'PENDIENTE_AUTOMATICO' ? 'PENDIENTE' : 'FINALIZADA';
     return stateFilter === 'ALL' || state === stateFilter;
   });
+  const folders = useMemo(() => buildEvaluationFolders(matchingEvaluations,companies,campaigns,operations,advisors),[matchingEvaluations,companies,campaigns,operations,advisors]);
+  const selectedCompany=folders.find(item=>item.key===selectedCompanyKey);
+  const selectedCampaign=selectedCompany?.campaigns.find(item=>item.key===selectedCampaignKey);
+  const scopeEvaluations=selectedCampaign?.evaluations||selectedCompany?.evaluations||matchingEvaluations;
+  const batchEvaluations=selectedBatchDate&&selectedCampaign?selectedCampaign.evaluations.filter(ev=>ev.origin==='SPEECH_ANALYTICS'&&batchDate(ev)===selectedBatchDate):[];
+  const showTable=Boolean(selectedCampaign&&(selectedSection==='manual'||selectedSection==='sa'&&selectedBatchDate));
+  const visibleEvaluations=showTable?selectedSection==='manual'?selectedCampaign!.evaluations.filter(ev=>ev.origin!=='SPEECH_ANALYTICS'):batchEvaluations:[];
+  const level=!selectedCompany?'companies':!selectedCampaign?'campaigns':!selectedSection?'sections':selectedSection==='sa'&&!selectedBatchDate?'sa-batches':'table';
+  const visibleCount=showTable?visibleEvaluations.length:level==='sa-batches'?selectedCampaign!.evaluations.filter(ev=>ev.origin==='SPEECH_ANALYTICS').length:scopeEvaluations.length;
+  const openCompany=(key:string)=>{setSelectedCompanyKey(key);setSelectedCampaignKey(null);setSelectedSection(null);setSelectedBatchDate(null);};
+  const openCampaign=(key:string)=>{setSelectedCampaignKey(key);setSelectedSection(null);setSelectedBatchDate(null);};
+  const openSection=(section:'manual'|'sa')=>{setSelectedSection(section);setSelectedBatchDate(null);};
+  const goBack=()=>{if(selectedBatchDate)setSelectedBatchDate(null);else if(selectedSection)setSelectedSection(null);else if(selectedCampaignKey)setSelectedCampaignKey(null);else setSelectedCompanyKey(null);};
+  const pageTitle=level==='companies'?(isAdvisor?'Mis evaluaciones por empresa':'Evaluaciones por empresa'):level==='campaigns'?`Campañas · ${selectedCompany!.name}`:level==='sections'?selectedCampaign!.name:level==='sa-batches'?'Cargas de Speech Analytics':selectedSection==='manual'?(isAdvisor?'Mis evaluaciones manuales':'Evaluaciones manuales'):`Speech Analytics · ${displayBatchDate(selectedBatchDate!)}`;
 
   // Sorting
   const sortedEvaluations = [...visibleEvaluations].sort((a, b) => {
@@ -90,7 +108,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
       
       {/* Global Filter Bar with Progressive Disclosure */}
       <FiltersBar
-        visibleCount={visibleEvaluations.length}
+        visibleCount={visibleCount}
         extraFilterCount={Number(typeFilter !== 'ALL') + Number(resultFilter !== 'ALL') + Number(stateFilter !== 'ALL')}
         onResetExtraFilters={() => { setTypeFilter('ALL'); setResultFilter('ALL'); setStateFilter('ALL'); }}
         extraFilters={<div className="space-y-3">
@@ -101,24 +119,29 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
       />
 
       <div className="max-w-7xl mx-auto w-full p-4 sm:p-6 space-y-4">
-        {selectedBatchDate && <button type="button" onClick={() => setSelectedBatchDate(null)} className="cm-button-secondary px-3 py-2 text-xs font-bold"><ArrowLeft className="h-4 w-4"/>Volver a evaluaciones manuales</button>}
+        {level!=='companies'&&<nav aria-label="Ruta de carpetas de evaluaciones" className="flex flex-wrap items-center gap-1.5 text-xs"><button type="button" onClick={()=>{setSelectedCompanyKey(null);setSelectedCampaignKey(null);setSelectedSection(null);setSelectedBatchDate(null);}} className="font-semibold text-cyan-400 hover:underline">Empresas</button>{selectedCompany&&<><ChevronRight className="h-3.5 w-3.5 text-[var(--cm-text-muted)]"/><button type="button" onClick={()=>openCompany(selectedCompany.key)} className="font-semibold text-cyan-400 hover:underline">{selectedCompany.name}</button></>}{selectedCampaign&&<><ChevronRight className="h-3.5 w-3.5 text-[var(--cm-text-muted)]"/><button type="button" onClick={()=>openCampaign(selectedCampaign.key)} className="font-semibold text-cyan-400 hover:underline">{selectedCampaign.name}</button></>}{selectedSection&&<><ChevronRight className="h-3.5 w-3.5 text-[var(--cm-text-muted)]"/><span>{selectedSection==='manual'?'Evaluaciones manuales':'Cargas SA'}</span></>}{selectedBatchDate&&<><ChevronRight className="h-3.5 w-3.5 text-[var(--cm-text-muted)]"/><span>{displayBatchDate(selectedBatchDate)}</span></>}</nav>}
+        {level!=='companies'&&<button type="button" onClick={goBack} className="cm-button-secondary px-3 py-2 text-xs font-bold"><ArrowLeft className="h-4 w-4"/>Volver</button>}
         
         {/* Compact Page Header (No redundant big cards) */}
         <div className="cm-page-heading flex items-center justify-between pb-1">
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-[#031E3C] tracking-tight font-heading">
-              {selectedBatchDate ? `Speech Analytics · ${displayBatchDate(selectedBatchDate)}` : isAdvisor ? 'Mis evaluaciones manuales' : 'Evaluaciones manuales'}
+              {pageTitle}
             </h2>
             <p className="text-xs text-[#667085] mt-0.5 font-medium">
-              {visibleEvaluations.length} {visibleEvaluations.length === 1 ? 'registro encontrado' : 'registros encontrados'}
+              {visibleCount} {visibleCount===1?'registro encontrado':'registros encontrados'}
             </p>
           </div><div className="flex flex-wrap items-center justify-end gap-2">{canImport&&<button onClick={()=>setImportOpen(true)} className="cm-button-secondary px-3 py-2 text-xs font-bold"><FileUp className="h-4 w-4"/>IMPORTAR</button>}{!isReadOnly && <button onClick={onOpenNewEvaluation} className="inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-[#1FD6FF] to-[#2E7BFF] px-3 py-2 text-xs font-bold text-[#031326]"><Phone className="h-4 w-4" />Nueva evaluación</button>}</div>
         </div>
 
-        {selectedBatchDate ? <SpeechAnalyticsBatchSummary evaluations={batchEvaluations} onDeleteBatch={currentUser.role === 'ADMINISTRADOR' ? batch => { setDeleteBatchError(null); setDeleteBatchTarget({...batch,count:evaluations.filter(item => item.origin === 'SPEECH_ANALYTICS' && item.sourceBatchId === batch.id).length}); } : undefined}/> : <SpeechAnalyticsBatches evaluations={filteredEvaluations} campaigns={campaigns} onOpen={setSelectedBatchDate}/>}
+        {level==='companies'&&<FolderGrid folders={folders.map(folder=>({key:folder.key,name:folder.name,subtitle:`${folder.campaigns.length} ${folder.campaigns.length===1?'campaña':'campañas'}`,count:folder.evaluations.length}))} onOpen={openCompany} empty="No hay evaluaciones para las empresas de este alcance."/>}
+        {level==='campaigns'&&<FolderGrid folders={selectedCompany!.campaigns.map(folder=>({key:folder.key,name:folder.name,subtitle:'Campaña',count:folder.evaluations.length}))} onOpen={openCampaign} empty="No hay campañas con evaluaciones en esta empresa."/>}
+        {level==='sections'&&<FolderGrid folders={[{key:'manual',name:'Evaluaciones manuales',subtitle:'Evaluaciones de Calidad y Mejora Continua',count:selectedCampaign!.evaluations.filter(item=>item.origin!=='SPEECH_ANALYTICS').length},{key:'sa',name:'Cargas de Speech Analytics',subtitle:'Subcarpetas por fecha de carga',count:selectedCampaign!.evaluations.filter(item=>item.origin==='SPEECH_ANALYTICS').length}]} onOpen={key=>openSection(key as 'manual'|'sa')} empty="Esta campaña no tiene evaluaciones."/>}
+        {level==='sa-batches'&&(selectedCampaign!.evaluations.some(item=>item.origin==='SPEECH_ANALYTICS')?<SpeechAnalyticsBatches evaluations={selectedCampaign!.evaluations} campaigns={campaigns} onOpen={setSelectedBatchDate}/>:<p className="rounded-xl border border-[var(--cm-border)] p-5 text-sm text-[var(--cm-text-secondary)]">Esta campaña aún no tiene cargas de Speech Analytics.</p>)}
+        {level==='table'&&selectedSection==='sa'&&<SpeechAnalyticsBatchSummary evaluations={batchEvaluations} onDeleteBatch={currentUser.role === 'ADMINISTRADOR' ? batch => { setDeleteBatchError(null); setDeleteBatchTarget({...batch,count:evaluations.filter(item => item.origin === 'SPEECH_ANALYTICS' && item.sourceBatchId === batch.id).length}); } : undefined}/>}
 
         {/* Evaluations Table */}
-        <div className="bg-white border border-[#E5E8EC] rounded-xl overflow-hidden shadow-2xs">
+        {showTable&&<div className="bg-white border border-[#E5E8EC] rounded-xl overflow-hidden shadow-2xs">
           
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left border-collapse">
@@ -298,7 +321,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
             </span>
           </div>
 
-        </div>
+        </div>}
 
       </div>
 
@@ -314,7 +337,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
               try {
                 const { deleted } = await speechImportApi.deleteBatch(deleteBatchTarget.id);
                 const refreshed = await refreshEvaluations();
-                if (selectedBatchDate && !refreshed.some(item => item.origin === 'SPEECH_ANALYTICS' && batchDate(item) === selectedBatchDate)) setSelectedBatchDate(null);
+                if (selectedBatchDate && !refreshed.some(item => item.origin === 'SPEECH_ANALYTICS' && batchDate(item) === selectedBatchDate && batchEvaluations.some(current=>current.id===item.id))) setSelectedBatchDate(null);
                 setDeleteBatchTarget(null);
                 setDeleteSuccess(`La carga ${deleteBatchTarget.name} fue eliminada correctamente (${deleted} evaluaciones).`);
               } catch (error) { setDeleteBatchError(error instanceof Error ? error.message : 'No fue posible eliminar la carga.'); }
@@ -395,3 +418,5 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
     </div>
   );
 };
+
+const FolderGrid: React.FC<{folders:{key:string;name:string;subtitle:string;count:number}[];onOpen:(key:string)=>void;empty:string}> = ({folders,onOpen,empty}) => folders.length?<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{folders.map(folder=><button key={folder.key} type="button" onClick={()=>onOpen(folder.key)} className="flex min-h-24 items-center gap-3 rounded-xl border border-[var(--cm-border)] bg-[var(--cm-surface-elevated)] p-4 text-left transition-colors hover:border-cyan-500 focus-visible:outline-2 focus-visible:outline-cyan-500"><Folder className="h-7 w-7 shrink-0 text-cyan-400"/><span className="min-w-0 flex-1"><b className="block truncate text-sm">{folder.name}</b><small className="block text-[var(--cm-text-secondary)]">{folder.subtitle}</small><small className="block text-xs text-cyan-400">{folder.count} {folder.count===1?'evaluación':'evaluaciones'}</small></span><ChevronRight className="h-4 w-4 shrink-0 text-cyan-400"/></button>)}</div>:<p className="rounded-xl border border-[var(--cm-border)] p-5 text-sm text-[var(--cm-text-secondary)]">{empty}</p>;
