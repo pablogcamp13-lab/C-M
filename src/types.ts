@@ -280,6 +280,19 @@ export interface Evaluation {
   sale: boolean;
   saleResult: 'VENTA_CONCRETADA' | 'NO_VENTA' | 'VENTA_OBSERVADA' | 'VOLVER_A_LLAMAR';
   noSaleReason?: string;
+  geoAnalysis?: {
+    department: string;
+    province?: string;
+    district?: string;
+    locality?: string;
+    primaryMotive?: string;
+    secondaryMotive?: string;
+    mentionedMotives?: string[];
+    fallResponsibility?: 'CLIENTE' | 'NEGOCIO' | 'ASESOR';
+    currentOperator?: string;
+    outcomeKnown?: boolean;
+    source?: 'STRUCTURED' | 'TRANSCRIPT' | 'MANUAL';
+  };
   comments: string;
   
   // Audio Evidence

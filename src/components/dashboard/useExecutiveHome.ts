@@ -5,6 +5,7 @@ import type { ActionPlan, Advisor, Campaign, Company, Evaluation, Operation, Pla
 import { calculatePareto } from '../../utils/calculations';
 import type { EvaluationOriginFilterValue } from './EvaluationOriginFilter';
 import { isQualityEvaluable, matchesSpeechTypification, type SpeechTypificationFilter } from '../../utils/speechTypification';
+import { normalizeDepartment } from '../../utils/movistarGeo';
 
 export type ExecutiveMode = PlatformEvaluationType;
 
@@ -75,12 +76,13 @@ const validationLabel = (status?: Evaluation['validationStatus']) => {
   return { id: 'unregistered', label: 'Sin estado registrado', tone: 'neutral' as const };
 };
 
-export const useExecutiveHome = (mode: ExecutiveMode, originFilter: EvaluationOriginFilterValue = 'ALL', speechTypification: SpeechTypificationFilter = 'ALL') => {
+export const useExecutiveHome = (mode: ExecutiveMode, originFilter: EvaluationOriginFilterValue = 'ALL', speechTypification: SpeechTypificationFilter = 'ALL', geographicDepartment = '') => {
   const app = useApp();
   const {
-    filteredEvaluations, filteredAdvisors, filteredOperationalMeasurements,
+    filteredEvaluations: baseEvaluations, filteredAdvisors, filteredOperationalMeasurements,
     advisors, operations, companies, campaigns, users, actionPlans, config, filters,
   } = app;
+  const filteredEvaluations = useMemo(() => geographicDepartment ? baseEvaluations.filter(evaluation => normalizeDepartment(evaluation.geoAnalysis?.department) === geographicDepartment) : baseEvaluations, [baseEvaluations, geographicDepartment]);
 
   return useMemo(() => {
     const scopedEvaluations = filteredEvaluations.filter(evaluation => (evaluation.evaluationType === 'QUALITY' ? 'QUALITY' : 'D3C') === mode && (mode !== 'QUALITY' || (isQualityEvaluable(evaluation) && (originFilter === 'ALL' || (originFilter === 'SPEECH_ANALYTICS' ? evaluation.origin === 'SPEECH_ANALYTICS' : evaluation.origin !== 'SPEECH_ANALYTICS')) && (originFilter !== 'SPEECH_ANALYTICS' || matchesSpeechTypification(evaluation,speechTypification)))));

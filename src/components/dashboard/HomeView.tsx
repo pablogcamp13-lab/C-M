@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BarChart3, CheckSquare, Filter, Info, Link2, Plus, ShieldCheck, TrendingUp, UsersRound } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, KpiCard, PageHeader, Select, TableSkeleton, Tabs, Tooltip } from '../ui';
@@ -9,19 +9,34 @@ import { EvaluationOriginFilter, type EvaluationOriginFilterValue } from './Eval
 import { SpeechTypificationFilter } from './SpeechTypificationFilter';
 import { isQualityEvaluable, matchesSpeechTypification, type SpeechTypificationFilter as SpeechFilterValue } from '../../utils/speechTypification';
 import { PublicDashboardLinksModal } from './PublicDashboardLinksModal';
+import { MovistarGeoCard } from './MovistarGeoCard';
+import { isTechcenterMovistarCampaign } from '../../data/techcenterMovistarScope';
+import { MOVISTAR_GEO_DEMO } from '../../data/movistarGeoDemo';
+import { evaluationGeoCall, normalizeDepartment } from '../../utils/movistarGeo';
 
 const scoreLabel = (value: number | null | undefined) => value === null || value === undefined ? 'Sin datos' : `${value}%`;
 const detailInfo = (text: string, definition: string) => <span className="cm-metric-detail">{text}<Tooltip content={definition}><button aria-label="Definición de la métrica"><Info /></button></Tooltip></span>;
 
 export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpenNewEvaluation }) => {
-  const { currentUser, isAuthReady, setCurrentSection, platformLoadError, filteredEvaluations } = useApp();
+  const { currentUser, isAuthReady, setCurrentSection, platformLoadError, filteredEvaluations, evaluations, filters, operations, campaigns, companies, advisors } = useApp();
   const [mode, setMode] = useState<ExecutiveMode>('D3C');
   const [originFilter, setOriginFilter] = useState<EvaluationOriginFilterValue>('ALL');
   const [speechTypification, setSpeechTypification] = useState<SpeechFilterValue>('ALL');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sharingOpen, setSharingOpen] = useState(false);
+  const [geographicDepartment, setGeographicDepartment] = useState('');
+  const selectedOperation = operations.find(item => item.id === filters.operationId);
+  const selectedCampaign = campaigns.find(item => item.id === selectedOperation?.campaignId);
+  const selectedCompany = companies.find(item => item.id === selectedOperation?.companyId);
+  const showMovistarGeo = Boolean(selectedOperation && selectedCampaign && isTechcenterMovistarCampaign(selectedCompany?.name || '', selectedCampaign.name, selectedCompany?.id));
+  useEffect(() => setGeographicDepartment(''), [filters.operationId]);
+  const hasMovistarSpeech = showMovistarGeo && evaluations.some(item => item.origin === 'SPEECH_ANALYTICS' && item.campaignId === selectedCampaign?.id);
+  const geoDemo = showMovistarGeo && !hasMovistarSpeech;
+  const scopedDepartment = showMovistarGeo && !geoDemo ? geographicDepartment : '';
+  const geoCalls = useMemo(() => geoDemo ? MOVISTAR_GEO_DEMO : filteredEvaluations.filter(item => item.origin === 'SPEECH_ANALYTICS' && item.campaignId === selectedCampaign?.id).map(evaluationGeoCall), [geoDemo, filteredEvaluations, selectedCampaign?.id]);
+  const advisorNames = useMemo(() => new Map(advisors.map(advisor => [advisor.id,advisor.name])),[advisors]);
   const filterSummary = useExecutiveFilterSummary();
-  const data = useExecutiveHome(mode, originFilter, speechTypification);
+  const data = useExecutiveHome(mode, originFilter, speechTypification, scopedDepartment);
   const canCreateEvaluation = Boolean(onOpenNewEvaluation) && ['ADMINISTRADOR', 'CONSULTOR', 'MONITOR'].includes(currentUser.role);
   const firstName = currentUser.name.trim().split(/\s+/)[0] || currentUser.role;
   const hardError = Boolean(platformLoadError && !data.scopedEvaluations.length);
@@ -29,7 +44,7 @@ export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpe
   const methodologyName = mode === 'D3C' ? 'D+3C' : 'PUE';
   const scoreCount = data.scopedEvaluations.filter(item => mode === 'QUALITY' ? (item.technicalScore !== null && item.technicalScore !== undefined) || item.scoreTotal !== null : item.scoreTotal !== null).length;
   // Keep both comparison cards visible even when the dashboard's origin filter is active.
-  const comparableEvaluations = filteredEvaluations.filter(item => (item.evaluationType === 'QUALITY' ? 'QUALITY' : 'D3C') === mode);
+  const comparableEvaluations = filteredEvaluations.filter(item => (!scopedDepartment || normalizeDepartment(item.geoAnalysis?.department) === scopedDepartment) && (item.evaluationType === 'QUALITY' ? 'QUALITY' : 'D3C') === mode);
   const originAverage = (speech: boolean) => {
     const scores = comparableEvaluations.filter(item => (item.origin === 'SPEECH_ANALYTICS') === speech && isQualityEvaluable(item) && (!speech || originFilter !== 'SPEECH_ANALYTICS' || matchesSpeechTypification(item,speechTypification)))
       .map(item => mode === 'QUALITY' ? item.technicalScore ?? item.scoreTotal : item.scoreTotal)
@@ -38,7 +53,7 @@ export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpe
   };
   const manual = originAverage(false);
   const speech = originAverage(true);
-  const shortCalls = filteredEvaluations.filter(item=>item.evaluationType==='QUALITY'&&item.origin==='SPEECH_ANALYTICS'&&item.speechTypification==='CORTA_LLAMADA').length;
+  const shortCalls = filteredEvaluations.filter(item=>(!scopedDepartment||normalizeDepartment(item.geoAnalysis?.department)===scopedDepartment)&&item.evaluationType==='QUALITY'&&item.origin==='SPEECH_ANALYTICS'&&item.speechTypification==='CORTA_LLAMADA').length;
   const kpis = [
     { label: `Resultado global ${methodologyName}`, value: scoreLabel(data.scoreAverage), detail: detailInfo(data.scoreAverage === null ? 'Sin evaluaciones con score' : `${scoreCount} evaluaciones con score`, `Promedio calculado sobre evaluaciones ${methodologyName} con score del periodo seleccionado.`), icon: <Activity />, className: data.scoreAverage === null ? undefined : data.scoreAverage < data.criticalThreshold ? 'is-danger' : 'is-success' },
     { label: 'Evaluaciones realizadas', value: String(data.scopedEvaluations.length), detail: detailInfo('Registros del periodo', `Cantidad de evaluaciones ${methodologyName} dentro de los filtros actuales.`), icon: <CheckSquare /> },
@@ -67,6 +82,9 @@ export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpe
       <CompanyDistributionCard data={data.companyDistribution} error={hardError ? platformLoadError : undefined} loading={loading} />
       <EvaluationStatusCard data={data.evaluationStatus} error={hardError ? platformLoadError : undefined} loading={loading} />
     </section>
+
+    {showMovistarGeo && <MovistarGeoCard calls={geoCalls} demo={geoDemo} selectedDepartment={geographicDepartment} onDepartmentChange={setGeographicDepartment} dateFrom={filters.dateFrom} dateTo={filters.dateTo} advisorId={filters.advisorId} advisorNames={advisorNames} />}
+    {showMovistarGeo && geoDemo && geographicDepartment && <p className="cm-geo-demo-disclaimer">Modo muestra: la selección geográfica afecta el mapa y ranking; los indicadores reales permanecen sin alterar.</p>}
 
     {(data.unresolvedEvaluations > 0 || data.advisorsWithoutCompany > 0) && <aside className="cm-data-quality" aria-label="Calidad de datos"><span><Info /></span><div><b>Calidad de datos</b><p>{data.unresolvedEvaluations > 0 && `${data.unresolvedEvaluations} evaluaciones sin empresa resuelta.`} {data.advisorsWithoutCompany > 0 && `${data.advisorsWithoutCompany} asesores requieren asignación de empresa.`}</p></div><button onClick={() => setCurrentSection('advisors')}>Revisar dotación <ArrowRight /></button></aside>}
 
