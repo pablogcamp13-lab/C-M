@@ -13,7 +13,7 @@ assert.equal(isTechcenterMovistarCampaign('TECHCENTER','Portabilidad Bitel'),fal
 for(const flow of TECHCENTER_MOVISTAR_FLOWS){
   const fields=techcenterFieldsForFlow(flow);
   assert.ok(fields.some(field=>field.id===8));
-  assert.ok(fields.some(field=>field.id===108));
+  assert.equal(fields.some(field=>field.id===108),flow.startsWith('Venta'));
   assert.ok(fields.some(isTechcenterCriterion));
   assert.equal(fields.some(field=>field.section==='Migración / Convertibilidad'),false);
   const criteria=fields.filter(isTechcenterCriterion);

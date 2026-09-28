@@ -95,7 +95,7 @@ export const TechcenterMovistarQualityModal:React.FC<{operationId:string;campaig
         <div className="rounded-lg border border-[var(--cm-border)] p-2.5 text-xs"><b>Socio: Techcenter</b><span className="mt-1 block text-[var(--cm-text-secondary)]">Auditor: {currentUser.name} · {currentUser.email}</span><span className="block text-[var(--cm-text-secondary)]">Inicio: {new Date(startedAt.current).toLocaleString('es-PE')}</span></div>
       </div></section>
       <section className="cm-card space-y-3 p-4"><h3 className="font-bold">Datos generales de la llamada</h3><div className="grid gap-3 sm:grid-cols-2">{general.map(renderField)}</div></section>
-      <section className="cm-card space-y-3 p-4"><h3 className="font-bold">Grabación</h3><CallTypificationFields value={classification} onChange={setClassification}/><AudioPlayer audioUrl={audio?.url} audioFileName={audio?.file.name} audioDurationSeconds={audio?.duration} onAudioUpload={(file,url,duration)=>{setAudio({file,url,duration});setValue(8,file.name);}} onRemoveAudio={()=>setAudio(null)}/></section>
+      <section className="cm-card space-y-3 p-4"><h3 className="font-bold">Grabación</h3><CallTypificationFields value={classification} onChange={setClassification} allowSecondary/><AudioPlayer audioUrl={audio?.url} audioFileName={audio?.file.name} audioDurationSeconds={audio?.duration} onAudioUpload={(file,url,duration)=>{setAudio({file,url,duration});setValue(8,file.name);}} onRemoveAudio={()=>setAudio(null)}/></section>
       {sections.map(section=><section key={section} className="cm-card space-y-3 p-4">
         <h3 className="border-b border-[var(--cm-border)] pb-2 font-bold">{section}</h3>
         {flowFields.filter(field=>field.section===section).map(field=>{

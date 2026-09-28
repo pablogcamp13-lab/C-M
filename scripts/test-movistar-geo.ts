@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { aggregateDepartments, geoHeatColor, matchesGeoMotive, normalizeDepartment, PERU_GEOJSON, resolveGeoAnalysis } from '../src/utils/movistarGeo';
 import { MOVISTAR_GEO_DEMO } from '../src/data/movistarGeoDemo';
-import { classificationError, classificationPayload, DELIVERY_TYPIFICATION, PERU_DISTRICTS, requiresLocation, SIGNAL_TYPIFICATION } from '../src/utils/evaluationTypification';
+import { classificationError, classificationFromEvaluation, classificationPayload, DELIVERY_TYPIFICATION, PERU_DISTRICTS, requiresLocation, SECONDARY_SIGNAL_TYPIFICATION, SIGNAL_TYPIFICATION } from '../src/utils/evaluationTypification';
+import type { Evaluation } from '../src/types';
 
 assert.equal(normalizeDepartment('Áncash'),'ANCASH');
 assert.equal(normalizeDepartment('Lima Provincia'),'LIMA');
@@ -27,6 +28,21 @@ assert.equal(classificationError({typification:DELIVERY_TYPIFICATION,department:
 assert.equal(delivery.geoAnalysis?.district,sampleDistrict.district);
 assert.equal(delivery.geoAnalysis?.primaryMotive,DELIVERY_TYPIFICATION);
 assert.equal(delivery.geoAnalysis?.fallResponsibility,'NEGOCIO');
+const experience={typification:'Mala experiencia Movistar',secondaryTypification:SECONDARY_SIGNAL_TYPIFICATION,department:'',province:'',districtCode:''};
+assert.equal(classificationError(experience),'','El motivo 2 de mala señal no exige ubicación');
+const optionalCoverage=classificationPayload(experience);
+assert.equal(optionalCoverage.geoAnalysis?.primaryMotive,'Mala experiencia Movistar');
+assert.equal(optionalCoverage.geoAnalysis?.secondaryMotive,'Cobertura / señal');
+assert.ok(optionalCoverage.geoAnalysis?.mentionedMotives?.includes('Cobertura / señal'));
+assert.equal(optionalCoverage.geoAnalysis?.district,undefined);
+const withProvince=classificationPayload({...experience,department:'ANCASH',province:sampleDistrict.province});
+assert.equal(classificationError({...experience,department:'ANCASH',province:sampleDistrict.province}),'');
+assert.ok(classificationError({...experience,department:'ANCASH',province:'Provincia inexistente'}));
+assert.equal(withProvince.geoAnalysis?.province,sampleDistrict.province);
+assert.equal(classificationFromEvaluation({typification:withProvince.typification,geoAnalysis:withProvince.geoAnalysis} as Evaluation).secondaryTypification,SECONDARY_SIGNAL_TYPIFICATION);
+const secondaryCall={...coverageCall,primaryMotive:withProvince.geoAnalysis?.primaryMotive,mentionedMotives:withProvince.geoAnalysis?.mentionedMotives};
+assert.equal(matchesGeoMotive(secondaryCall,'Cobertura / señal','PRIMARY'),false);
+assert.equal(matchesGeoMotive(secondaryCall,'Cobertura / señal','MENTIONED'),true);
 assert.equal(aggregateDepartments(MOVISTAR_GEO_DEMO,'Cobertura / señal','PRIMARY').find(item=>item.department==='ANCASH')?.incidence,60);
 assert.equal(aggregateDepartments(MOVISTAR_GEO_DEMO,'Cobertura / señal','PRIMARY').find(item=>item.department==='TUMBES')?.incidence,null);
 assert.equal(aggregateDepartments([{...MOVISTAR_GEO_DEMO[0],sale:null}],'Cobertura / señal','PRIMARY').find(item=>item.department==='ANCASH')?.selectedCases,0);

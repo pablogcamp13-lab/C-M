@@ -164,10 +164,10 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
               <label className="text-xs font-semibold">Resultado<select className="cm-select mt-1 p-2 font-normal" value={draftMeta.saleResult} onChange={event=>setDraftMeta(value=>({...value,saleResult:event.target.value,sale:event.target.value==='VENTA_CONCRETADA'}))}><option value="NO_VENTA">No venta</option><option value="VENTA_CONCRETADA">Venta concretada</option><option value="VENTA_OBSERVADA">Venta observada</option><option value="VOLVER_A_LLAMAR">Volver a llamar</option></select></label>
               {!draftMeta.sale&&<label className="text-xs font-semibold">Motivo de no venta<input className="cm-input mt-1 p-2 font-normal" value={draftMeta.noSaleReason} onChange={event=>setDraftMeta(value=>({...value,noSaleReason:event.target.value}))}/></label>}
             </div>
-            <CallTypificationFields value={classification} onChange={setClassification}/>
+            <CallTypificationFields value={classification} onChange={setClassification} allowSecondary={evaluation.qualityForm?.id===TECHCENTER_MOVISTAR_FORM_ID}/>
           </div>}
           
-          {evaluation.typification&&<div className="cm-card rounded-xl p-4 text-xs"><b>Tipificación:</b> {evaluation.typification}{evaluation.geoAnalysis?.department&&<> · <b>Departamento:</b> {evaluation.geoAnalysis.department}</>}{evaluation.geoAnalysis?.district&&<> · <b>Distrito:</b> {evaluation.geoAnalysis.district}</>}</div>}
+          {(evaluation.typification||evaluation.geoAnalysis?.secondaryMotive)&&<div className="cm-card rounded-xl p-4 text-xs"><b>Tipificación:</b> {evaluation.typification||'Sin tipificar'}{evaluation.geoAnalysis?.secondaryMotive&&<> · <b>Motivo 2:</b> {evaluation.geoAnalysis.secondaryMotive==='Cobertura / señal'?'Mala señal (cobertura)':evaluation.geoAnalysis.secondaryMotive}</>}{evaluation.geoAnalysis?.department&&<> · <b>Departamento:</b> {evaluation.geoAnalysis.department}</>}{evaluation.geoAnalysis?.province&&<> · <b>Provincia:</b> {evaluation.geoAnalysis.province}</>}{evaluation.geoAnalysis?.district&&<> · <b>Distrito:</b> {evaluation.geoAnalysis.district}</>}</div>}
           {/* Metadata & Scores Top Card */}
           <div className="cm-card rounded-xl p-4 sm:p-5 grid grid-cols-1 md:grid-cols-4 gap-4">
             
