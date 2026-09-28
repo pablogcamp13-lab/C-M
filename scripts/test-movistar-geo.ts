@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { aggregateDepartments, normalizeDepartment, resolveGeoAnalysis } from '../src/utils/movistarGeo';
+import { aggregateDepartments, normalizeDepartment, PERU_GEOJSON, resolveGeoAnalysis } from '../src/utils/movistarGeo';
 import { MOVISTAR_GEO_DEMO } from '../src/data/movistarGeoDemo';
 import { classificationPayload, PERU_DISTRICTS, SIGNAL_TYPIFICATION } from '../src/utils/evaluationTypification';
 
@@ -19,4 +19,10 @@ assert.equal(manual.geoAnalysis?.fallResponsibility,'NEGOCIO');
 assert.equal(aggregateDepartments(MOVISTAR_GEO_DEMO,'Cobertura / señal','PRIMARY').find(item=>item.department==='ANCASH')?.incidence,60);
 assert.equal(aggregateDepartments(MOVISTAR_GEO_DEMO,'Cobertura / señal','PRIMARY').find(item=>item.department==='TUMBES')?.incidence,null);
 assert.equal(aggregateDepartments([{...MOVISTAR_GEO_DEMO[0],sale:null}],'Cobertura / señal','PRIMARY').find(item=>item.department==='ANCASH')?.selectedCases,0);
+const tenDepartments=PERU_GEOJSON.features.slice(0,10).map((feature,index)=>({...MOVISTAR_GEO_DEMO[0],id:`geo_${index}`,department:feature.properties.NM_DEPA,sale:false,primaryMotive:'Cobertura / señal'}));
+const equalShares=aggregateDepartments(tenDepartments,'Cobertura / señal','PRIMARY');
+assert.equal(equalShares.find(item=>item.department===normalizeDepartment(tenDepartments[0].department))?.participation,10);
+const unequalShares=aggregateDepartments([...tenDepartments,{...tenDepartments[0],id:'extra'}],'Cobertura / señal','PRIMARY');
+assert.ok(Math.abs((unequalShares.find(item=>item.department===normalizeDepartment(tenDepartments[0].department))?.participation||0)-200/11)<0.001);
+assert.ok(Math.abs(unequalShares.reduce((sum,item)=>sum+(item.participation||0),0)-100)<0.001);
 console.log('Movistar geo: verificaciones correctas');
