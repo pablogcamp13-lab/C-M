@@ -30,10 +30,10 @@ export const HomeView: React.FC<{ onOpenNewEvaluation?: () => void }> = ({ onOpe
   const selectedCompany = companies.find(item => item.id === selectedOperation?.companyId);
   const showMovistarGeo = Boolean(selectedOperation && selectedCampaign && isTechcenterMovistarCampaign(selectedCompany?.name || '', selectedCampaign.name, selectedCompany?.id));
   useEffect(() => setGeographicDepartment(''), [filters.operationId]);
-  const hasMovistarSpeech = showMovistarGeo && evaluations.some(item => item.origin === 'SPEECH_ANALYTICS' && item.campaignId === selectedCampaign?.id);
-  const geoDemo = showMovistarGeo && !hasMovistarSpeech;
+  const hasMovistarGeo = showMovistarGeo && evaluations.some(item => item.campaignId === selectedCampaign?.id && normalizeDepartment(item.geoAnalysis?.department) !== 'No identificado');
+  const geoDemo = showMovistarGeo && !hasMovistarGeo;
   const scopedDepartment = showMovistarGeo && !geoDemo ? geographicDepartment : '';
-  const geoCalls = useMemo(() => geoDemo ? MOVISTAR_GEO_DEMO : filteredEvaluations.filter(item => item.origin === 'SPEECH_ANALYTICS' && item.campaignId === selectedCampaign?.id).map(evaluationGeoCall), [geoDemo, filteredEvaluations, selectedCampaign?.id]);
+  const geoCalls = useMemo(() => geoDemo ? (originFilter === 'ALL' ? MOVISTAR_GEO_DEMO : []) : filteredEvaluations.filter(item => item.campaignId === selectedCampaign?.id && (mode !== 'QUALITY' || (item.evaluationType === 'QUALITY' && isQualityEvaluable(item) && (originFilter === 'ALL' || (item.origin === 'SPEECH_ANALYTICS') === (originFilter === 'SPEECH_ANALYTICS')))) && (item.origin !== 'SPEECH_ANALYTICS' || originFilter !== 'SPEECH_ANALYTICS' || matchesSpeechTypification(item,speechTypification))).map(evaluationGeoCall), [geoDemo, filteredEvaluations, selectedCampaign?.id, mode, originFilter, speechTypification]);
   const advisorNames = useMemo(() => new Map(advisors.map(advisor => [advisor.id,advisor.name])),[advisors]);
   const filterSummary = useExecutiveFilterSummary();
   const data = useExecutiveHome(mode, originFilter, speechTypification, scopedDepartment);

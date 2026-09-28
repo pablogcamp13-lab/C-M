@@ -280,10 +280,12 @@ export interface Evaluation {
   sale: boolean;
   saleResult: 'VENTA_CONCRETADA' | 'NO_VENTA' | 'VENTA_OBSERVADA' | 'VOLVER_A_LLAMAR';
   noSaleReason?: string;
+  typification?: string;
   geoAnalysis?: {
     department: string;
     province?: string;
     district?: string;
+    districtCode?: string;
     locality?: string;
     primaryMotive?: string;
     secondaryMotive?: string;
@@ -294,6 +296,7 @@ export interface Evaluation {
     source?: 'STRUCTURED' | 'TRANSCRIPT' | 'MANUAL';
   };
   comments: string;
+  callDescription?: string;
   
   // Audio Evidence
   audioUrl?: string;

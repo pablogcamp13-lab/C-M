@@ -22,6 +22,8 @@ import type {
   QualityGuideline,
 } from "../../types";
 import { AudioPlayer } from "../common/AudioPlayer";
+import { CallTypificationFields } from './CallTypificationFields';
+import { EMPTY_CLASSIFICATION, classificationError, classificationPayload } from '../../utils/evaluationTypification';
 import { filesApi } from "../../api/sharedRepository";
 import { isTechcenterMovistarCampaign } from '../../data/techcenterMovistarScope';
 
@@ -59,6 +61,7 @@ export const QualityEvaluationModal: React.FC<{
   );
   const [callId, setCallId] = useState(`PUE-${Date.now()}`);
   const [recordingCode, setRecordingCode] = useState("");
+  const [classification,setClassification] = useState(EMPTY_CLASSIFICATION);
   const [answers, setAnswers] = useState<Record<string, Result>>({});
   const [comments, setComments] = useState<Record<string, string>>({});
   const [commentOpen, setCommentOpen] = useState<string | null>(null);
@@ -66,6 +69,7 @@ export const QualityEvaluationModal: React.FC<{
   const [critical, setCritical] = useState<string[]>([]);
   const [draftSaved, setDraftSaved] = useState(false);
   const [generalComments, setGeneralComments] = useState("");
+  const [callDescription,setCallDescription] = useState('');
   const [audio, setAudio] = useState<{
     url: string;
     name: string;
@@ -140,6 +144,7 @@ export const QualityEvaluationModal: React.FC<{
   };
   const finalize = async () => {
     if (!advisor || savingRef.current) return;
+    if (classificationError(classification)) { setAudioError(classificationError(classification)); return; }
     savingRef.current = true;
     setIsSaving(true);
     let persistedAudioUrl = audio?.url;
@@ -202,6 +207,7 @@ export const QualityEvaluationModal: React.FC<{
       time,
       callId,
       recordingCode: recordingCode || audio?.name || "",
+      ...classificationPayload(classification),
       type: evaluationType,
       evaluationType: "QUALITY",
       qualityStatus: "FINALIZED",
@@ -211,6 +217,7 @@ export const QualityEvaluationModal: React.FC<{
       sale: false,
       saleResult: "NO_VENTA",
       comments: generalComments,
+      callDescription:callDescription.trim(),
       primaryGap: "",
       secondaryGap: "",
       strongestPillar: "",
@@ -449,6 +456,7 @@ export const QualityEvaluationModal: React.FC<{
                 {audioError}
               </p>
             )}
+            <CallTypificationFields value={classification} onChange={setClassification}/>
             <AudioPlayer
               audioUrl={audio?.url}
               audioFileName={audio?.name}
@@ -602,7 +610,7 @@ export const QualityEvaluationModal: React.FC<{
           </section>
           <section className="rounded-xl border border-[#E2E9E9] bg-[#FBFCFC] p-4">
             <label className="text-sm font-bold">
-              Descripción general de la llamada
+              Observaciones y retroalimentación
             </label>
             <textarea
               value={generalComments}
@@ -611,7 +619,7 @@ export const QualityEvaluationModal: React.FC<{
                 setDraftSaved(false);
               }}
               rows={3}
-              placeholder="Describe el desarrollo general de la llamada y la retroalimentación para el asesor..."
+              placeholder="Anota hallazgos y recomendaciones para el asesor..."
               className="mt-2 w-full rounded-lg border border-[#A9D2D0] bg-white p-3 text-sm text-[#102A2E] outline-none focus:border-[#008B88]"
             />
           </section>
@@ -642,6 +650,10 @@ export const QualityEvaluationModal: React.FC<{
                 </label>
               ))}
             </div>
+          </section>
+          <section className="rounded-xl border border-[#E2E9E9] bg-[#FBFCFC] p-4">
+            <label htmlFor="quality-call-description" className="text-sm font-bold">Descripción de la llamada</label>
+            <textarea id="quality-call-description" rows={3} value={callDescription} onChange={event=>{setCallDescription(event.target.value);setDraftSaved(false);}} placeholder="Resume qué ocurrió durante la llamada..." className="cm-input mt-2 w-full p-3 text-sm"/>
           </section>
         </div>
         <footer className="flex flex-col items-center justify-between gap-3 border-t border-[#E2E9E9] bg-white px-6 py-4 sm:flex-row">

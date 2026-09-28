@@ -417,7 +417,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         (adv && (adv.name.toLowerCase().includes(q) || adv.dni.includes(q) || adv.employeeCode.toLowerCase().includes(q))) ||
         ev.callId.toLowerCase().includes(q) ||
         ev.recordingCode.toLowerCase().includes(q) ||
-        ev.comments.toLowerCase().includes(q);
+        ev.comments.toLowerCase().includes(q) ||
+        ev.callDescription?.toLowerCase().includes(q);
       if (!match) return false;
     }
 

@@ -34,6 +34,8 @@ import {
 } from 'lucide-react';
 import { calculateEvaluationSummary } from '../../utils/calculations';
 import { AudioPlayer } from '../common/AudioPlayer';
+import { CallTypificationFields } from './CallTypificationFields';
+import { EMPTY_CLASSIFICATION, classificationError, classificationPayload } from '../../utils/evaluationTypification';
 import { COMMERCIAL_PLANS } from '../../data/plansData';
 import { filesApi } from '../../api/sharedRepository';
 
@@ -76,6 +78,8 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
   const [sale, setSale] = useState<boolean>(false);
   const [saleResult, setSaleResult] = useState<string>('No Venta - Dudas sobre recarga BiPay');
   const [comments, setComments] = useState<string>('');
+  const [callDescription,setCallDescription] = useState('');
+  const [classification,setClassification] = useState(EMPTY_CLASSIFICATION);
 
   // Audio state
   const [audioFile, setAudioFile] = useState<File | null>(null);
@@ -166,9 +170,9 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
   const contextualMetadata = [selectedAdvisor?.name, selectedCampaign?.name, selectedSupervisor?.name, evaluationTypeLabel, evalDate && evalTime ? `${evalDate} ${evalTime}` : ''].filter(Boolean).join(' · ');
   const draftStorageKey = `cm:d3c-draft:${currentUser.id}:${preselectedOperationId || selectedCampaignId}:${preselectedAdvisor?.id || 'new'}`;
   const draftData = useMemo(() => ({
-    selectedAdvisorId,evaluatorId,evalDate,evalTime,callId,recordingCode,evalType,sale,saleResult,product,comments,criteriaScores,
+    selectedAdvisorId,evaluatorId,evalDate,evalTime,callId,recordingCode,evalType,sale,saleResult,product,comments,callDescription,classification,criteriaScores,
     audioUrl:audioUrl && !audioUrl.startsWith('blob:') ? audioUrl : '',audioFileName,audioFileSize,audioDurationSeconds,audioMimeType,audioNeedsReselect:Boolean(audioFile)
-  }), [selectedAdvisorId,evaluatorId,evalDate,evalTime,callId,recordingCode,evalType,sale,saleResult,product,comments,criteriaScores,audioUrl,audioFileName,audioFileSize,audioDurationSeconds,audioMimeType,audioFile]);
+  }), [selectedAdvisorId,evaluatorId,evalDate,evalTime,callId,recordingCode,evalType,sale,saleResult,product,comments,callDescription,classification,criteriaScores,audioUrl,audioFileName,audioFileSize,audioDurationSeconds,audioMimeType,audioFile]);
   const draftSnapshot = useMemo(() => JSON.stringify(draftData), [draftData]);
   const hasUnsavedChanges = draftReady && draftSnapshot !== savedDraftSnapshot;
 
@@ -184,7 +188,9 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
         if (draft.callId) setCallId(draft.callId); if (draft.recordingCode) setRecordingCode(draft.recordingCode);
         if (draft.evalType) setEvalType(draft.evalType); if (typeof draft.sale === 'boolean') setSale(draft.sale);
         if (draft.saleResult) setSaleResult(draft.saleResult); if (draft.product) setProduct(draft.product);
+        if (draft.classification) setClassification(draft.classification);
         if (typeof draft.comments === 'string') setComments(draft.comments); if (draft.criteriaScores) setCriteriaScores(draft.criteriaScores);
+        if (typeof draft.callDescription === 'string') setCallDescription(draft.callDescription);
         if (draft.audioUrl) { setAudioUrl(draft.audioUrl); setAudioFileName(draft.audioFileName || 'Audio asociado'); setAudioFileSize(Number(draft.audioFileSize || 0)); setAudioDurationSeconds(Number(draft.audioDurationSeconds || 380)); setAudioMimeType(String(draft.audioMimeType || '')); }
         else if (draft.audioNeedsReselect && draft.audioFileName) setRestoredAudioHint(`Vuelve a seleccionar “${draft.audioFileName}” para adjuntarlo antes de finalizar.`);
       }
@@ -267,11 +273,7 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
     setAudioMimeType(file.type || (/\.(mp3|mpeg|mpg)$/i.test(file.name) ? 'audio/mpeg' : 'application/octet-stream'));
     setAudioUploadError(null);
     setRestoredAudioHint('');
-    // Suggest recording code from file name
-    if (file.name) {
-      const cleanName = file.name.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, "_").substring(0, 30);
-      setRecordingCode(cleanName);
-    }
+    setRecordingCode(file.name);
   };
 
   const handleRemoveAudio = () => {
@@ -302,6 +304,7 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
     e.preventDefault();
     if (savingRef.current) return;
     if (!selectedAdvisor || !evaluatorId || !product || !evalDate || !evalTime || !callId.trim() || !recordingCode.trim()) { setSaveError('Completa los datos obligatorios de la llamada antes de finalizar.'); return; }
+    if (classificationError(classification)) { setSaveError(classificationError(classification)); return; }
     if (!d3cScore.answered || !d3cScore.evaluable) { setSaveError('Responde al menos un criterio evaluable antes de finalizar.'); return; }
     savingRef.current = true;
     setIsSaving(true);
@@ -326,11 +329,13 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
       time: evalTime,
       callId: callId,
       recordingCode: recordingCode,
+      ...classificationPayload(classification),
       type: evalType,
       sale: sale,
       saleResult: sale ? 'Venta Concretada' : saleResult,
       product: product,
       comments: comments,
+      callDescription:callDescription.trim(),
       audioUrl: persistedAudioUrl || undefined,
       audioFileName: audioFileName || undefined,
       audioFileSize: audioFileSize || undefined,
@@ -663,6 +668,7 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
             {restoredAudioHint&&<p className="cm-d3c-inline-warning" role="status">{restoredAudioHint}</p>}
             {audioUploadError&&<p className="cm-d3c-inline-error" role="alert">{audioUploadError}</p>}
             {isUploadingAudio&&<p className="cm-d3c-inline-status" role="status">Guardando el audio en el almacenamiento privado…</p>}
+            <CallTypificationFields value={classification} onChange={setClassification}/>
             <AudioPlayer
               audioUrl={audioUrl}
               audioFileName={audioFileName}
@@ -929,6 +935,10 @@ export const NewEvaluationModal: React.FC<NewEvaluationModalProps> = ({
               placeholder="Añade retroalimentación adicional para el asesor o su supervisor..."
               className="w-full bg-white border border-[#E5E8EC] rounded-lg p-2.5 text-xs text-[#031E3C] focus:outline-none focus:ring-1 focus:ring-[#FF6B00]"
             />
+          </section>
+          <section className="space-y-2 border-t border-[var(--cm-border)] pt-4">
+            <label htmlFor="d3c-call-description" className="block text-xs font-bold uppercase tracking-wider">Descripción de la llamada</label>
+            <textarea id="d3c-call-description" rows={3} value={callDescription} onChange={event=>setCallDescription(event.target.value)} placeholder="Resume qué ocurrió durante la llamada..." className="cm-input w-full p-3 text-sm"/>
           </section>
 
           {saveError && (

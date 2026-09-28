@@ -7,6 +7,8 @@ import { QUALITY_ATTRIBUTES } from '../../data/qualityPueData';
 import { StatusBadge } from '../common/StatusBadge';
 import { ThreeScore } from '../common/ThreeScore';
 import { AudioPlayer } from '../common/AudioPlayer';
+import { CallTypificationFields } from './CallTypificationFields';
+import { EMPTY_CLASSIFICATION, classificationError, classificationFromEvaluation, classificationPayload } from '../../utils/evaluationTypification';
 import { getItemCompliance } from '../../utils/calculations';
 import { filesApi } from '../../api/sharedRepository';
 import { SPEECH_TYPIFICATIONS } from '../../utils/speechTypification';
@@ -41,7 +43,8 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   const [isEditing,setIsEditing]=useState(false); const [savingEdit,setSavingEdit]=useState(false); const [editError,setEditError]=useState(''); const [uploadingAudio,setUploadingAudio]=useState(false); const [audioError,setAudioError]=useState('');
   const [feedbackModalOpen,setFeedbackModalOpen]=useState(false); const [feedbackText,setFeedbackText]=useState(''); const [creatingFeedback,setCreatingFeedback]=useState(false); const [feedbackError,setFeedbackError]=useState('');
   const [draftItems,setDraftItems]=useState<EvaluationItem[]>([]);
-  const [draftMeta,setDraftMeta]=useState({date:'',time:'',callId:'',recordingCode:'',type:'DIAGNOSTICO_INICIAL',product:'',sale:false,saleResult:'NO_VENTA',noSaleReason:'',comments:''});
+  const [draftMeta,setDraftMeta]=useState({date:'',time:'',callId:'',recordingCode:'',type:'DIAGNOSTICO_INICIAL',product:'',sale:false,saleResult:'NO_VENTA',noSaleReason:'',comments:'',callDescription:''});
+  const [classification,setClassification]=useState(EMPTY_CLASSIFICATION);
 
   useEffect(()=>{
     if(!evaluation)return;
@@ -54,7 +57,8 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
       ...item,
       compliance:item.compliance||((item.level!==undefined||item.percentage!==undefined)?getItemCompliance(item):undefined)
     })));
-    setDraftMeta({date:evaluation.date||'',time:evaluation.time||'',callId:evaluation.callId||'',recordingCode:evaluation.recordingCode||'',type:evaluation.type||'DIAGNOSTICO_INICIAL',product:evaluation.product||'',sale:Boolean(evaluation.sale),saleResult:evaluation.saleResult||'NO_VENTA',noSaleReason:evaluation.noSaleReason||'',comments:evaluation.comments||''});
+    setDraftMeta({date:evaluation.date||'',time:evaluation.time||'',callId:evaluation.callId||'',recordingCode:evaluation.recordingCode||'',type:evaluation.type||'DIAGNOSTICO_INICIAL',product:evaluation.product||'',sale:Boolean(evaluation.sale),saleResult:evaluation.saleResult||'NO_VENTA',noSaleReason:evaluation.noSaleReason||'',comments:evaluation.comments||'',callDescription:evaluation.callDescription||''});
+    setClassification(classificationFromEvaluation(evaluation));
     setIsEditing(false);setEditError('');
   },[evaluation]);
 
@@ -79,16 +83,18 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   const saveEdit=async()=>{
     if(!evaluation||savingEdit)return;
     if(!draftItems.some(item=>item.compliance==='CUMPLE'||item.compliance==='NO_CUMPLE')){setEditError('Responde al menos un criterio evaluable antes de guardar.');return;}
+    if(classificationError(classification)){setEditError(classificationError(classification));return;}
     setSavingEdit(true);setEditError('');
     try{
-      const saved=await updateEvaluation(evaluation.id,{...draftMeta,type:draftMeta.type as Evaluation['type'],saleResult:draftMeta.saleResult as Evaluation['saleResult'],items:draftItems,...(monitorCanValidate?{validationStatus:'VALIDATED' as const}:{})});
+      const classificationChanged=JSON.stringify(classification)!==JSON.stringify(classificationFromEvaluation(evaluation));
+      const saved=await updateEvaluation(evaluation.id,{...draftMeta,...(classificationChanged?classificationPayload(classification):{}),type:draftMeta.type as Evaluation['type'],saleResult:draftMeta.saleResult as Evaluation['saleResult'],items:draftItems,...(monitorCanValidate?{validationStatus:'VALIDATED' as const}:{})});
       onUpdated?.(saved);setIsEditing(false);
     }catch(error){setEditError(error instanceof Error?error.message:'No fue posible actualizar la evaluación.');}
     finally{setSavingEdit(false);}
   };
   const saveCommitment=async()=>{setSavingCommitment(true);setCommitmentError('');try{const token=sessionStorage.getItem('CONTACT_CENTER_AUTH_TOKEN');const response=await fetch(`/api/evaluations/${evaluation.id}/commitment`,{method:'PATCH',headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify({commitment,commitmentDate})});const data=await response.json();if(!response.ok)throw new Error(data.error);setAgentDetail((value:any)=>({...value,commitment:data.commitment}));}catch(error:any){setCommitmentError(error.message||'No fue posible guardar el compromiso.');}finally{setSavingCommitment(false);}};
   const createSpeechFeedback=async()=>{if(creatingFeedback||!feedbackText.trim())return;setCreatingFeedback(true);setFeedbackError('');try{const token=sessionStorage.getItem('CONTACT_CENTER_AUTH_TOKEN');const response=await fetch('/api/feedbacks',{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify({evaluation_id:evaluation.id,feedback_text:feedbackText.trim()})});const data=await response.json();if(!response.ok)throw new Error(data.error||'No fue posible crear el feedback.');setAgentDetail((value:any)=>({...value,feedback:data.feedback}));setFeedbackModalOpen(false);window.dispatchEvent(new Event('cm:data-changed'));}catch(error){setFeedbackError(error instanceof Error?error.message:'No fue posible crear el feedback.');}finally{setCreatingFeedback(false);}};
-  const attachAudio=async(file:File,_previewUrl:string,duration:number)=>{if(!evaluation||uploadingAudio)return;setUploadingAudio(true);setAudioError('');try{const uploaded=await filesApi.upload(file);const saved=await updateEvaluation(evaluation.id,{audioUrl:uploaded.url,audioFileName:uploaded.name,audioFileSize:Number(uploaded.size)||file.size,audioDurationSeconds:duration,audioMimeType:uploaded.mimeType});onUpdated?.(saved);}catch(error){setAudioError(error instanceof Error?error.message:'No fue posible guardar el audio.');}finally{setUploadingAudio(false);}};
+  const attachAudio=async(file:File,_previewUrl:string,duration:number)=>{if(!evaluation||uploadingAudio)return;setUploadingAudio(true);setAudioError('');try{const uploaded=await filesApi.upload(file);const saved=await updateEvaluation(evaluation.id,{audioUrl:uploaded.url,audioFileName:uploaded.name,recordingCode:file.name,audioFileSize:Number(uploaded.size)||file.size,audioDurationSeconds:duration,audioMimeType:uploaded.mimeType});setDraftMeta(value=>({...value,recordingCode:file.name}));onUpdated?.(saved);}catch(error){setAudioError(error instanceof Error?error.message:'No fue posible guardar el audio.');}finally{setUploadingAudio(false);}};
   const isQuality = evaluation.evaluationType === 'QUALITY' || evaluation.items.some(item => QUALITY_ATTRIBUTES.some(attribute => attribute.id === item.criterionId));
   const advisorName = advisor?.name || evaluation.sourceAdvisorName || 'Asesor por relacionar';
   const canCreateSpeechFeedback = evaluation.origin==='SPEECH_ANALYTICS'&&['ADMINISTRADOR','CONSULTOR','MONITOR','SUPERVISOR'].includes(currentUser.role);
@@ -153,8 +159,10 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
               <label className="text-xs font-semibold">Resultado<select className="cm-select mt-1 p-2 font-normal" value={draftMeta.saleResult} onChange={event=>setDraftMeta(value=>({...value,saleResult:event.target.value,sale:event.target.value==='VENTA_CONCRETADA'}))}><option value="NO_VENTA">No venta</option><option value="VENTA_CONCRETADA">Venta concretada</option><option value="VENTA_OBSERVADA">Venta observada</option><option value="VOLVER_A_LLAMAR">Volver a llamar</option></select></label>
               {!draftMeta.sale&&<label className="text-xs font-semibold">Motivo de no venta<input className="cm-input mt-1 p-2 font-normal" value={draftMeta.noSaleReason} onChange={event=>setDraftMeta(value=>({...value,noSaleReason:event.target.value}))}/></label>}
             </div>
+            <CallTypificationFields value={classification} onChange={setClassification}/>
           </div>}
           
+          {evaluation.typification&&<div className="cm-card rounded-xl p-4 text-xs"><b>Tipificación:</b> {evaluation.typification}{evaluation.geoAnalysis?.department&&<> · <b>Departamento:</b> {evaluation.geoAnalysis.department}</>}{evaluation.geoAnalysis?.district&&<> · <b>Distrito:</b> {evaluation.geoAnalysis.district}</>}</div>}
           {/* Metadata & Scores Top Card */}
           <div className="cm-card rounded-xl p-4 sm:p-5 grid grid-cols-1 md:grid-cols-4 gap-4">
             
@@ -380,6 +388,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
               {isEditing?<textarea rows={4} className="cm-input p-3" value={draftMeta.comments} onChange={event=>setDraftMeta(value=>({...value,comments:event.target.value}))}/>:<p className="text-[var(--cm-text-secondary)] leading-relaxed bg-[var(--cm-surface-elevated)] p-3 rounded-lg border border-[var(--cm-border)]">{evaluation.comments}</p>}
             </div>
           )}
+          {(evaluation.callDescription||isEditing)&&<div className="cm-card rounded-xl p-4 sm:p-5 space-y-2 text-xs"><label htmlFor="evaluation-call-description" className="block font-bold uppercase tracking-wider">Descripción de la llamada</label>{isEditing?<textarea id="evaluation-call-description" rows={4} className="cm-input w-full p-3" value={draftMeta.callDescription} onChange={event=>setDraftMeta(value=>({...value,callDescription:event.target.value}))}/>:<p id="evaluation-call-description" className="whitespace-pre-wrap rounded-lg border border-[var(--cm-border)] bg-[var(--cm-surface-elevated)] p-3 text-[var(--cm-text-secondary)]">{evaluation.callDescription}</p>}</div>}
 
           {editError&&<div role="alert" className="rounded-xl border border-[var(--cm-danger)] bg-[rgba(255,77,79,.09)] px-4 py-3 text-xs text-[var(--cm-danger)]">{editError}</div>}
 

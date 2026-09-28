@@ -4,6 +4,8 @@ import { useApp } from '../../context/AppContext';
 import type { Evaluation, EvaluationItem, EvaluationType, QualityGuideline } from '../../types';
 import { filesApi } from '../../api/sharedRepository';
 import { AudioPlayer } from '../common/AudioPlayer';
+import { CallTypificationFields } from './CallTypificationFields';
+import { EMPTY_CLASSIFICATION, classificationError, classificationPayload } from '../../utils/evaluationTypification';
 import { TECHCENTER_MOVISTAR_FIELDS, TECHCENTER_MOVISTAR_FLOWS, TECHCENTER_MOVISTAR_FORM_ID, isReverseTechcenterCriterion, isTechcenterCriterion, scoreTechcenterMovistar, techcenterFieldsForFlow, type TechcenterMovistarField, type TechcenterMovistarFlow } from '../../data/techcenterMovistarForm';
 
 const inputClass='cm-input mt-1 w-full rounded-lg p-2.5 text-sm font-normal';
@@ -22,6 +24,8 @@ export const TechcenterMovistarQualityModal:React.FC<{operationId:string;campaig
   const [answers,setAnswers]=useState<Record<number,string>>({});
   const [comments,setComments]=useState<Record<number,string>>({});
   const [audio,setAudio]=useState<{file:File;url:string;duration:number}|null>(null);
+  const [classification,setClassification]=useState(EMPTY_CLASSIFICATION);
+  const [callDescription,setCallDescription]=useState('');
   const [error,setError]=useState('');
   const [saving,setSaving]=useState(false);
   const savingRef=useRef(false);
@@ -46,6 +50,7 @@ export const TechcenterMovistarQualityModal:React.FC<{operationId:string;campaig
   const save=async()=>{
     if(savingRef.current)return;
     if(!advisor){setError('Selecciona un asesor activo de esta campaña.');return;}
+    if(classificationError(classification)){setError(classificationError(classification));return;}
     const required=[8,11,12,13,14,15,108,109,...(flow.includes('Fija')?[16]:[])];
     if(required.some(id=>!fieldValue(id).trim())){setError('Completa los campos obligatorios de datos generales y finales.');return;}
     if(!Number.isInteger(Number(fieldValue(108)))||Number(fieldValue(108))<0){setError('La duración debe ser un número entero de minutos.');return;}
@@ -66,7 +71,7 @@ export const TechcenterMovistarQualityModal:React.FC<{operationId:string;campaig
         return {id:`item_tc_mov_${field.id}`,criterionId:guideline.id,dimension,compliance,percentage:compliance==='CUMPLE'?100:0,level:compliance==='CUMPLE'?4:compliance==='NO_CUMPLE'?1:0,finding:comments[field.id]||'',evidence:'',recommendedAction:'',attributeWeight:1,qualityGuideline:guideline,category:field.section,attribute:field.label,classification:'NO_CRITICO'};
       });
       const sale=flow.startsWith('Venta');
-      const saved=await addEvaluation({advisorId:advisor.id,evaluatorId:currentUser.id,campaignId,operationId,teamId:advisor.teamId,supervisorId:advisor.supervisorId,product:fieldValue(107)||'Portabilidad Movistar',date,time,callId:fieldValue(8).trim(),recordingCode:fieldValue(8).trim(),type:evaluationType,evaluationType:'QUALITY',qualityStatus:'FINALIZED',origin:'MANUAL',qualityCriticalErrorIds:[],sale,saleResult:sale?'VENTA_CONCRETADA':'NO_VENTA',comments:[fieldValue(7),fieldValue(110)].filter(Boolean).join('\n\n'),audioUrl,audioFileName:audio?.file.name,audioFileSize:audio?.file.size,audioMimeType:audio?.file.type,audioDurationSeconds:audio?.duration,items,qualityForm:{id:TECHCENTER_MOVISTAR_FORM_ID,flow,startedAt:startedAt.current,completedAt,fields:sourceValues,responses:Object.fromEntries(Object.entries(answers).map(([key,value])=>[key,value])),comments:Object.fromEntries(Object.entries(comments).map(([key,value])=>[key,value])),earned:scored.earned,possible:scored.possible}});
+      const saved=await addEvaluation({advisorId:advisor.id,evaluatorId:currentUser.id,campaignId,operationId,teamId:advisor.teamId,supervisorId:advisor.supervisorId,product:fieldValue(107)||'Portabilidad Movistar',date,time,callId:fieldValue(8).trim(),recordingCode:fieldValue(8).trim(),...classificationPayload(classification),type:evaluationType,evaluationType:'QUALITY',qualityStatus:'FINALIZED',origin:'MANUAL',qualityCriticalErrorIds:[],sale,saleResult:sale?'VENTA_CONCRETADA':'NO_VENTA',comments:[fieldValue(7),fieldValue(110)].filter(Boolean).join('\n\n'),callDescription:callDescription.trim(),audioUrl,audioFileName:audio?.file.name,audioFileSize:audio?.file.size,audioMimeType:audio?.file.type,audioDurationSeconds:audio?.duration,items,qualityForm:{id:TECHCENTER_MOVISTAR_FORM_ID,flow,startedAt:startedAt.current,completedAt,fields:sourceValues,responses:Object.fromEntries(Object.entries(answers).map(([key,value])=>[key,value])),comments:Object.fromEntries(Object.entries(comments).map(([key,value])=>[key,value])),earned:scored.earned,possible:scored.possible}});
       onSuccess?.(saved);onClose();
     }catch(caught){setError(caught instanceof Error?caught.message:'No fue posible guardar la evaluación.');}
     finally{savingRef.current=false;setSaving(false);}
@@ -89,9 +94,10 @@ export const TechcenterMovistarQualityModal:React.FC<{operationId:string;campaig
         <div className="rounded-lg border border-[var(--cm-border)] p-2.5 text-xs"><b>Socio: Techcenter</b><span className="mt-1 block text-[var(--cm-text-secondary)]">Auditor: {currentUser.name} · {currentUser.email}</span><span className="block text-[var(--cm-text-secondary)]">Inicio: {new Date(startedAt.current).toLocaleString('es-PE')}</span></div>
       </div></section>
       <section className="cm-card space-y-3 p-4"><h3 className="font-bold">Datos generales de la llamada</h3><div className="grid gap-3 sm:grid-cols-2">{general.map(renderField)}</div></section>
-      <section className="cm-card space-y-3 p-4"><h3 className="font-bold">Grabación</h3><AudioPlayer audioUrl={audio?.url} audioFileName={audio?.file.name} audioDurationSeconds={audio?.duration} onAudioUpload={(file,url,duration)=>{setAudio({file,url,duration});if(!fieldValue(8))setValue(8,file.name);}} onRemoveAudio={()=>setAudio(null)}/></section>
+      <section className="cm-card space-y-3 p-4"><h3 className="font-bold">Grabación</h3><CallTypificationFields value={classification} onChange={setClassification}/><AudioPlayer audioUrl={audio?.url} audioFileName={audio?.file.name} audioDurationSeconds={audio?.duration} onAudioUpload={(file,url,duration)=>{setAudio({file,url,duration});setValue(8,file.name);}} onRemoveAudio={()=>setAudio(null)}/></section>
       {sections.map(section=><section key={section} className="cm-card space-y-3 p-4"><h3 className="border-b border-[var(--cm-border)] pb-2 font-bold">{section}</h3>{flowFields.filter(field=>field.section===section).map(field=>isTechcenterCriterion(field)?<div key={field.id} className="rounded-lg border border-[var(--cm-border)] p-3"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><label className="max-w-2xl text-xs font-semibold"><span className="text-[var(--cm-primary)]">{field.id}. </span>{field.label}</label><select aria-label={`Resultado: ${field.label}`} value={answers[field.id]||''} onChange={event=>setAnswers(previous=>({...previous,[field.id]:event.target.value}))} className="cm-select min-w-36 p-2 text-xs"><option value="">Sin responder</option><option value="Sí">Sí</option><option value="No">No</option><option value="No aplica">No aplica</option></select></div><label className="mt-2 block text-[11px] text-[var(--cm-text-secondary)]">Comentario asociado<input value={comments[field.id]||''} onChange={event=>setComments(previous=>({...previous,[field.id]:event.target.value}))} className={inputClass} placeholder="Hallazgo o minuto del audio"/></label></div>:<div key={field.id}>{renderField(field)}</div>)}</section>)}
       <section className="cm-card space-y-3 p-4"><h3 className="font-bold">Datos finales</h3><div className="grid gap-3 sm:grid-cols-2">{final.map(renderField)}</div></section>
+      <section className="cm-card space-y-2 p-4"><label htmlFor="techcenter-call-description" className="text-sm font-bold">Descripción de la llamada</label><textarea id="techcenter-call-description" rows={3} value={callDescription} onChange={event=>setCallDescription(event.target.value)} placeholder="Resume qué ocurrió durante la llamada..." className={inputClass}/></section>
     </div>
     <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--cm-border)] p-4 sm:p-5"><div className="text-sm"><b>{scored.percent===null?'Sin nota':`${scored.percent}%`}</b><span className="ml-2 text-xs text-[var(--cm-text-secondary)]">{scored.earned} de {scored.possible} criterios evaluables · {scored.missing} pendientes</span></div><div className="flex items-center gap-2"><button type="button" onClick={onClose} disabled={saving} className="cm-button-secondary px-4 py-2">Cancelar</button><button type="button" onClick={()=>void save()} disabled={saving||!advisor} className="cm-button-primary px-4 py-2 disabled:opacity-50"><Save className="h-4 w-4"/>{saving?'Guardando…':'Guardar evaluación'}</button></div>{error&&<p role="alert" className="w-full text-xs text-rose-400">{error}</p>}</footer>
   </div></div>;
