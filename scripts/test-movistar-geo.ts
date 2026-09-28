@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { aggregateDepartments, normalizeDepartment, PERU_GEOJSON, resolveGeoAnalysis } from '../src/utils/movistarGeo';
+import { aggregateDepartments, matchesGeoMotive, normalizeDepartment, PERU_GEOJSON, resolveGeoAnalysis } from '../src/utils/movistarGeo';
 import { MOVISTAR_GEO_DEMO } from '../src/data/movistarGeoDemo';
 import { classificationPayload, PERU_DISTRICTS, SIGNAL_TYPIFICATION } from '../src/utils/evaluationTypification';
 
@@ -10,6 +10,10 @@ assert.equal(resolveGeoAnalysis({transcript:'Estoy en Pampa Chico, provincia de 
 const classified=resolveGeoAnalysis({primaryMotive:'No hay delivery',secondaryMotive:'Cobertura',transcript:'Movistar anteriormente tenía mala señal.'});
 assert.equal(classified.primaryMotive,'No hay delivery');
 assert.ok(classified.mentionedMotives?.includes('Cobertura / señal'));
+const coverageCall={...MOVISTAR_GEO_DEMO[0],sale:false,primaryMotive:'Cobertura / señal',mentionedMotives:['Cobertura / señal']};
+assert.equal(matchesGeoMotive(coverageCall,'No hay delivery','PRIMARY'),false);
+assert.equal(matchesGeoMotive(coverageCall,'No hay delivery','MENTIONED'),false);
+assert.equal(matchesGeoMotive(coverageCall,'Cobertura / señal','PRIMARY'),true);
 assert.equal(resolveGeoAnalysis({primaryMotive:'Cobertura',responsibility:'Cliente'}).fallResponsibility,'NEGOCIO');
 const sampleDistrict=PERU_DISTRICTS.find(item=>item.department==='ANCASH');
 assert.ok(sampleDistrict);

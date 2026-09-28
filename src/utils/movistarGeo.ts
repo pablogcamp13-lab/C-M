@@ -81,12 +81,14 @@ export const evaluationGeoCall = (evaluation:Evaluation):GeoCall => ({
   date:evaluation.date, audioId:evaluation.recordingCode || evaluation.callId,
 });
 
+export const matchesGeoMotive = (call:GeoCall, motive:GeoMotive, mode:GeoMode) => call.sale === false && (motive === 'Todos' || (mode === 'PRIMARY' ? call.primaryMotive === motive : call.mentionedMotives?.includes(motive) === true));
+
 export interface DepartmentStats { department:string; totalAudios:number; totalNoSales:number; selectedCases:number; incidence:number|null; participation:number|null; leadingMotive:string; }
 export const aggregateDepartments = (calls:GeoCall[], motive:GeoMotive, mode:GeoMode):DepartmentStats[] => {
   const rows=departmentNames.map(department => {
   const rows = calls.filter(call => normalizeDepartment(call.department) === department);
   const noSales = rows.filter(call => call.sale === false);
-  const selected = noSales.filter(call => motive === 'Todos' || (mode === 'PRIMARY' ? call.primaryMotive === motive : call.mentionedMotives?.includes(motive)));
+  const selected = noSales.filter(call => matchesGeoMotive(call,motive,mode));
   const frequencies = new Map<string,number>();
   noSales.forEach(call => { if (call.primaryMotive) frequencies.set(call.primaryMotive,(frequencies.get(call.primaryMotive)||0)+1); });
   return {department,totalAudios:rows.length,totalNoSales:noSales.length,selectedCases:selected.length,incidence:rows.length ? selected.length/rows.length*100 : null,leadingMotive:[...frequencies].sort((a,b)=>b[1]-a[1])[0]?.[0] || 'Sin motivo registrado'};
