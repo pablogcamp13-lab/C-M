@@ -1238,6 +1238,7 @@ async function startServer() {
     const monitorImported=user.role==='MONITOR'&&current.origin==='SPEECH_ANALYTICS'&&normalizedValidationStatus(current)==='AUTOMATIC_PENDING'&&current.evaluatorId===user.id;
     if(user.role!=='ADMINISTRADOR'&&!monitorImported) return res.status(403).json({error:'No tienes permiso para editar esta evaluación.'});
     const body=req.body||{},now=new Date().toISOString();
+    if(body.advisorId!==undefined&&user.role!=='ADMINISTRADOR')return res.status(403).json({error:'Solo administración puede cambiar al asesor evaluado.'});
     if((body.validate||body.validationStatus==='VALIDATED')&&current.advisorResolutionStatus==='PENDING')return res.status(400).json({error:'Relaciona primero la evaluación con un asesor activo.'});
     const editableFields=['date','time','callId','recordingCode','type','product','sale','saleResult','noSaleReason','typification','geoAnalysis','comments','callDescription','items','qualityCriticalErrorIds','qualityCriticalErrorSnapshot','audioUrl','audioFileName','audioFileSize','audioDurationSeconds','audioMimeType'];
     const changes=Object.fromEntries(editableFields.filter(key=>body[key]!==undefined).map(key=>[key,body[key]]));
@@ -1260,13 +1261,38 @@ async function startServer() {
     const invalidNa=items.some((item:any)=>item.compliance==='NO_APLICA'&&item.qualityGuideline&&!item.qualityGuideline?.applicableRules?.length);
     if(invalidNa)return res.status(400).json({error:'NO_APLICA requiere una regla explícita en el atributo.'});
     const directory=await readRepository();
+    const advisorChanged=body.advisorId!==undefined&&String(body.advisorId)!==current.advisorId;
+    let advisorChanges:Record<string,any>={};
+    if(advisorChanged){
+      const target=directory.advisors.find(item=>item.id===String(body.advisorId));
+      const operation=directory.operations?.find(item=>item.id===target?.operationId);
+      if(!target||target.campaignId!==current.campaignId||(current.operationId&&target.operationId!==current.operationId)||(current.companyId&&operation?.companyId!==current.companyId))return res.status(400).json({error:'Selecciona un asesor de la misma campaña y operación.'});
+      const assignments=(directory.operationAssignments||[]).filter(item=>item.advisorId===target.id&&item.operationId===target.operationId);
+      const assignment=assignments.find(item=>item.startDate<=current.date&&(!item.endDate||item.endDate>=current.date))||assignments.find(item=>item.active);
+      const supervisorId=assignment?.supervisorId||target.supervisorId;
+      advisorChanges={advisorId:target.id,teamId:assignment?.teamId||target.teamId,supervisorId,supervisorAtEvaluation:supervisorId,assignmentId:assignment?.id,advisorResolutionStatus:'RESOLVED',importAlert:undefined};
+      if(current.qualityForm?.id===TECHCENTER_MOVISTAR_FORM_ID&&current.qualityForm.fields?.['13']===current.advisorId)advisorChanges.qualityForm={...current.qualityForm,fields:{...current.qualityForm.fields,'13':target.id}};
+    }
     const validationStatus=body.validate||body.validationStatus==='VALIDATED'?'VALIDATED':current.validationStatus;
-    const merged={...current,...changes,items:items.map((item:any)=>({...item,compliance:itemCompliance(item)})),validationStatus,updatedAt:now,audit:[...(current.audit||[]),{action:body.validate?'VALIDATED':'EDITED',userId:user.id,at:now}]};
+    const merged={...current,...changes,...advisorChanges,items:items.map((item:any)=>({...item,compliance:itemCompliance(item)})),validationStatus,updatedAt:now,audit:[...(current.audit||[]),{action:advisorChanged?'ADVISOR_REASSIGNED':body.validate?'VALIDATED':'EDITED',userId:user.id,at:now,...(advisorChanged?{previousAdvisorId:current.advisorId,advisorId:body.advisorId}:{})}]};
     const next=contentEdit?recalculateEditedEvaluation(merged,directory.campaigns):correctMigracionesQualityEvaluation(merged,directory.campaigns);
     try {
-      if(googleStorage.enabled) await googleStorage.saveEvaluation(next);
-      db.prepare('UPDATE evaluations SET evaluated_at=?,payload_json=? WHERE id=?').run(`${next.date}T${next.time||'00:00'}:00`,JSON.stringify(next),next.id);
-      if(lastCompletePlatformState) lastCompletePlatformState={...lastCompletePlatformState,evaluations:(lastCompletePlatformState.evaluations||[]).map((item:any)=>item.id===next.id?next:item)};
+      const localFeedback=advisorChanged?db.prepare('SELECT * FROM feedbacks WHERE evaluation_id=?').get(next.id) as any:null;
+      const linkedFeedback=advisorChanged&&googleStorage.enabled?(await googleStorage.loadFeedbacks()).find((item:any)=>item.evaluation_id===next.id)||localFeedback:localFeedback;
+      if(advisorChanged&&linkedFeedback&&(linkedFeedback.status!=='PENDIENTE'||linkedFeedback.advisor_action_at))return res.status(409).json({error:'Esta evaluación ya tiene un feedback respondido o cerrado. No se puede cambiar de asesor sin alterar su firma.'});
+      const commitment=advisorChanged?(supabaseStorage.enabled?await supabaseStorage.loadEvaluationCommitment(next.id):db.prepare('SELECT * FROM evaluation_commitments WHERE evaluation_id=?').get(next.id)):null;
+      if(advisorChanged&&(commitment||current.agentCommitment))return res.status(409).json({error:'Esta evaluación ya tiene un compromiso del asesor anterior. No se puede reasignar sin alterar ese registro.'});
+      if(googleStorage.enabled){
+        if(supabaseStorage.enabled)await supabaseStorage.saveEvaluation(next,advisorChanged?current.advisorId:undefined);
+        else {await googleStorage.saveEvaluation(next);if(advisorChanged&&linkedFeedback)await googleStorage.saveFeedback({...linkedFeedback,advisor_id:next.advisorId,supervisor_id:next.supervisorId,updated_at:now});}
+      }
+      db.exec('BEGIN');
+      try{
+        db.prepare('UPDATE evaluations SET advisor_id=?,evaluated_at=?,payload_json=? WHERE id=?').run(next.advisorId,`${next.date}T${next.time||'00:00'}:00`,JSON.stringify(next),next.id);
+        if(advisorChanged)db.prepare("UPDATE feedbacks SET advisor_id=?,supervisor_id=?,updated_at=? WHERE evaluation_id=? AND status='PENDIENTE'").run(next.advisorId,next.supervisorId,now,next.id);
+        db.exec('COMMIT');
+      }catch(error){db.exec('ROLLBACK');throw error;}
+      if(lastCompletePlatformState) lastCompletePlatformState={...lastCompletePlatformState,evaluations:(lastCompletePlatformState.evaluations||[]).map((item:any)=>item.id===next.id?next:item),...(advisorChanged?{feedbacks:(lastCompletePlatformState.feedbacks||[]).map((item:any)=>item.evaluation_id===next.id&&item.status==='PENDIENTE'?{...item,advisor_id:next.advisorId,supervisor_id:next.supervisorId,updated_at:now}:item)}:{})};
       return res.json({evaluation:next});
     } catch(error:any) {
       const status=Number(error?.response?.status||error?.code||0),detail=[error?.message,error?.response?.data?.error,error?.response?.data?.error_description].filter(Boolean).map(String).join(' ').toLowerCase();

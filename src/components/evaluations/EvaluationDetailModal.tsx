@@ -37,12 +37,13 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   onUpdated,
   onOpenNewActionPlan 
 }) => {
-  const { advisors, users, currentUser, updateEvaluation } = useApp();
+  const { advisors, operations, users, currentUser, updateEvaluation } = useApp();
   const [expandedCriterion, setExpandedCriterion] = useState<string | null>(null);
   const [agentDetail,setAgentDetail]=useState<any>(null); const [commitment,setCommitment]=useState(''); const [commitmentDate,setCommitmentDate]=useState(''); const [savingCommitment,setSavingCommitment]=useState(false); const [commitmentError,setCommitmentError]=useState('');
   const [isEditing,setIsEditing]=useState(false); const [savingEdit,setSavingEdit]=useState(false); const [editError,setEditError]=useState(''); const [uploadingAudio,setUploadingAudio]=useState(false); const [audioError,setAudioError]=useState('');
   const [feedbackModalOpen,setFeedbackModalOpen]=useState(false); const [feedbackText,setFeedbackText]=useState(''); const [creatingFeedback,setCreatingFeedback]=useState(false); const [feedbackError,setFeedbackError]=useState('');
   const [draftItems,setDraftItems]=useState<EvaluationItem[]>([]);
+  const [draftAdvisorId,setDraftAdvisorId]=useState('');
   const [draftMeta,setDraftMeta]=useState({date:'',time:'',callId:'',recordingCode:'',type:'DIAGNOSTICO_INICIAL',product:'',sale:false,saleResult:'NO_VENTA',noSaleReason:'',comments:'',callDescription:''});
   const [classification,setClassification]=useState(EMPTY_CLASSIFICATION);
 
@@ -58,6 +59,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
       compliance:item.compliance||((item.level!==undefined||item.percentage!==undefined)?getItemCompliance(item):undefined)
     })));
     setDraftMeta({date:evaluation.date||'',time:evaluation.time||'',callId:evaluation.callId||'',recordingCode:evaluation.recordingCode||'',type:evaluation.type||'DIAGNOSTICO_INICIAL',product:evaluation.product||'',sale:Boolean(evaluation.sale),saleResult:evaluation.saleResult||'NO_VENTA',noSaleReason:evaluation.noSaleReason||'',comments:evaluation.comments||'',callDescription:evaluation.callDescription||''});
+    setDraftAdvisorId(evaluation.advisorId);
     setClassification(classificationFromEvaluation(evaluation));
     setIsEditing(false);setEditError('');
   },[evaluation]);
@@ -78,16 +80,18 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   const isPendingSpeech = evaluation.origin==='SPEECH_ANALYTICS'&&(evaluation.validationStatus==='AUTOMATIC_PENDING'||evaluation.validationStatus==='PENDIENTE_AUTOMATICO');
   const monitorCanValidate = currentUser.role==='MONITOR'&&isPendingSpeech&&evaluation.evaluatorId===currentUser.id;
   const canEdit = currentUser.role === 'ADMINISTRADOR'||monitorCanValidate;
+  const advisorOptions=advisors.filter(item=>item.id===evaluation.advisorId||(item.campaignId===evaluation.campaignId&&(!evaluation.operationId||item.operationId===evaluation.operationId)&&(!evaluation.companyId||operations.some(operation=>operation.id===item.operationId&&operation.companyId===evaluation.companyId))));
   const canAttachAudio = canEdit && !evaluation.audioUrl;
   const changeItem=(id:string,changes:Partial<EvaluationItem>)=>setDraftItems(items=>items.map(item=>item.id===id?{...item,...changes}:item));
   const saveEdit=async()=>{
     if(!evaluation||savingEdit)return;
+    if(currentUser.role==='ADMINISTRADOR'&&!advisorOptions.some(item=>item.id===draftAdvisorId)){setEditError('Selecciona una asesora de la misma campaña y operación.');return;}
     if(!draftItems.some(item=>item.compliance==='CUMPLE'||item.compliance==='NO_CUMPLE')){setEditError('Responde al menos un criterio evaluable antes de guardar.');return;}
     if(classificationError(classification)){setEditError(classificationError(classification));return;}
     setSavingEdit(true);setEditError('');
     try{
       const classificationChanged=JSON.stringify(classification)!==JSON.stringify(classificationFromEvaluation(evaluation));
-      const saved=await updateEvaluation(evaluation.id,{...draftMeta,...(classificationChanged?classificationPayload(classification):{}),type:draftMeta.type as Evaluation['type'],saleResult:draftMeta.saleResult as Evaluation['saleResult'],items:draftItems,...(monitorCanValidate?{validationStatus:'VALIDATED' as const}:{})});
+      const saved=await updateEvaluation(evaluation.id,{...draftMeta,...(currentUser.role==='ADMINISTRADOR'?{advisorId:draftAdvisorId}:{}),...(classificationChanged?classificationPayload(classification):{}),type:draftMeta.type as Evaluation['type'],saleResult:draftMeta.saleResult as Evaluation['saleResult'],items:draftItems,...(monitorCanValidate?{validationStatus:'VALIDATED' as const}:{})});
       onUpdated?.(saved);setIsEditing(false);
     }catch(error){setEditError(error instanceof Error?error.message:'No fue posible actualizar la evaluación.');}
     finally{setSavingEdit(false);}
@@ -148,7 +152,8 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
           {evaluation.origin==='SPEECH_ANALYTICS'&&evaluation.speechTypification==='CORTA_LLAMADA'&&<p role="status" className="rounded-xl border border-amber-400/40 bg-amber-400/10 p-3 text-xs text-amber-200">Corta llamada: no evaluable para Calidad. La nota de Speech Analytics se conserva solo como referencia y no entra en los promedios.</p>}
           {evaluation.importAlert&&<div role="alert" className="rounded-xl border border-amber-400/45 bg-amber-400/10 px-4 py-3 text-xs text-amber-200"><b className="block">Asesor pendiente de relación</b><span>{evaluation.importAlert}</span></div>}
           {isEditing&&<div className="cm-card rounded-xl p-4 sm:p-5 space-y-4">
-            <div><h4 className="text-sm font-bold">Editar datos de la evaluación</h4><p className="mt-1 text-xs text-[var(--cm-text-secondary)]">Se conserva el ID, el asesor, la campaña, el audio, el feedback y todo el histórico relacionado.</p></div>
+            <div><h4 className="text-sm font-bold">Editar datos de la evaluación</h4><p className="mt-1 text-xs text-[var(--cm-text-secondary)]">Se conserva el ID, la campaña, el audio y el historial. El feedback pendiente se reasigna; si ya hay firma o compromiso, el cambio de asesora se bloquea.</p></div>
+            {currentUser.role==='ADMINISTRADOR'&&<label className="block text-xs font-semibold">Asesora evaluada *<select className="cm-select mt-1 w-full p-2 font-normal" value={draftAdvisorId} onChange={event=>setDraftAdvisorId(event.target.value)}><option value="">Seleccionar asesora</option>{advisorOptions.map(item=><option key={item.id} value={item.id}>{item.name} · DNI {item.dni}{item.status==='INACTIVO'?' (inactiva)':''}</option>)}</select></label>}
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <label className="text-xs font-semibold">Fecha<input type="date" className="cm-input mt-1 p-2 font-normal" value={draftMeta.date} onChange={event=>setDraftMeta(value=>({...value,date:event.target.value}))}/></label>
               <label className="text-xs font-semibold">Hora<input type="time" className="cm-input mt-1 p-2 font-normal" value={draftMeta.time} onChange={event=>setDraftMeta(value=>({...value,time:event.target.value}))}/></label>
