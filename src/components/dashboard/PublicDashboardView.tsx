@@ -127,7 +127,7 @@ const PublicQualityPage:React.FC<QualityPageProps>=({snapshot,loading,error,data
   const critical=selected.filter(item=>item.criticalError).length;
   const statuses=(snapshot?.planStatuses||[]).filter(plan=>advisorId==='ALL'||plan.advisorIds.includes(advisorId)).map(plan=>plan.status);
   const typifications=new Map<string,number>();
-  for(const item of selected){const raw=item.typification?.trim()||item.geoAnalysis?.primaryMotive||item.speechTypification||'Sin tipificación';const label=normalizeMotive(raw)==='Cobertura / señal'?'Señal deficiente / No hay señal':raw;typifications.set(label,(typifications.get(label)||0)+1);}
+  for(const item of selected){const raw=item.typification?.trim()||item.geoAnalysis?.primaryMotive||item.speechTypification||'Sin tipificación';if(raw==='Sin tipificación')continue;const label=normalizeMotive(raw)==='Cobertura / señal'?'Señal deficiente / No hay señal':raw;typifications.set(label,(typifications.get(label)||0)+1);}
   const geoCalls:GeoCall[]=selected.map(item=>({id:item.id,department:item.geoAnalysis?.department||'No identificado',province:item.geoAnalysis?.province,district:item.geoAnalysis?.district,sale:item.geoAnalysis?.outcomeKnown===false?null:item.sale??null,primaryMotive:item.geoAnalysis?.primaryMotive,mentionedMotives:item.geoAnalysis?.mentionedMotives,responsibility:item.geoAnalysis?.primaryMotive==='Cobertura / señal'?'NEGOCIO':item.geoAnalysis?.fallResponsibility||undefined,advisorId:item.advisorId,date:item.date,audioId:''}));
   const maxFailure=Math.max(1,...data.pareto.map(item=>item.frequency));
   const cards=[

@@ -78,6 +78,7 @@ export const QualityDashboardView: React.FC = () => {
   const typificationCounts=new Map<string,number>();
   for(const evaluation of quality){
     const raw=evaluation.typification?.trim()||evaluation.geoAnalysis?.primaryMotive||evaluation.noSaleReason?.trim()||({PREFIERE_PREPAGO:'Prefiere mantenerse en prepago',NO_ES_TITULAR:'No es titular',CORTA_LLAMADA:'Corta llamada'} as Record<string,string>)[evaluation.speechTypification||'']||'Sin tipificación';
+    if(raw==='Sin tipificación')continue;
     const label=normalizeMotive(raw)==='Cobertura / señal'?COVERAGE_TYPIFICATION:raw;
     typificationCounts.set(label,(typificationCounts.get(label)||0)+1);
   }
