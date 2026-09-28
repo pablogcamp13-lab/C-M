@@ -11,7 +11,7 @@ export type GeoMotive = typeof GEO_MOTIVES[number];
 export type GeoMetric = 'PERCENT' | 'COUNT';
 export type GeoMode = 'PRIMARY' | 'MENTIONED';
 export type GeoAnalysis = NonNullable<Evaluation['geoAnalysis']>;
-export type GeoCall = { id:string; department:string; sale:boolean|null; primaryMotive?:string; mentionedMotives?:string[]; responsibility?:GeoAnalysis['fallResponsibility']; advisorId?:string; date:string; audioId:string };
+export type GeoCall = { id:string; department:string; province?:string; district?:string; sale:boolean|null; primaryMotive?:string; mentionedMotives?:string[]; responsibility?:GeoAnalysis['fallResponsibility']; advisorId?:string; date:string; audioId:string };
 
 const clean = (value:unknown) => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('es-PE').replace(/[^a-z0-9]+/g,' ').trim();
 const departmentNames = (departments.features as Array<{properties:{NM_DEPA:string}}>).map(item => item.properties.NM_DEPA);
@@ -68,16 +68,16 @@ export const resolveGeoAnalysis = (fields: {department?:unknown; province?:unkno
     department, province:province || undefined, district:String(fields.district ?? '').trim() || undefined,
     locality:String(fields.locality ?? '').trim() || undefined,
     primaryMotive, secondaryMotive, mentionedMotives,
-    fallResponsibility:responsibility === 'cliente' ? 'CLIENTE' : responsibility === 'negocio' ? 'NEGOCIO' : responsibility === 'asesor' ? 'ASESOR' : undefined,
+    fallResponsibility:primaryMotive === 'Cobertura / señal' ? 'NEGOCIO' : responsibility === 'cliente' ? 'CLIENTE' : responsibility === 'negocio' ? 'NEGOCIO' : responsibility === 'asesor' ? 'ASESOR' : undefined,
     currentOperator:String(fields.currentOperator ?? '').trim() || undefined,
     source:fields.department || fields.province || fields.primaryMotive ? 'STRUCTURED' : 'TRANSCRIPT',
   };
 };
 
 export const evaluationGeoCall = (evaluation:Evaluation):GeoCall => ({
-  id:evaluation.id, department:normalizeDepartment(evaluation.geoAnalysis?.department), sale:evaluation.geoAnalysis?.outcomeKnown === false ? null : evaluation.sale,
+  id:evaluation.id, department:normalizeDepartment(evaluation.geoAnalysis?.department), province:evaluation.geoAnalysis?.province, district:evaluation.geoAnalysis?.district, sale:evaluation.geoAnalysis?.outcomeKnown === false ? null : evaluation.sale,
   primaryMotive:evaluation.geoAnalysis?.primaryMotive, mentionedMotives:evaluation.geoAnalysis?.mentionedMotives,
-  responsibility:evaluation.geoAnalysis?.fallResponsibility, advisorId:evaluation.advisorId,
+  responsibility:evaluation.geoAnalysis?.primaryMotive==='Cobertura / señal'?'NEGOCIO':evaluation.geoAnalysis?.fallResponsibility, advisorId:evaluation.advisorId,
   date:evaluation.date, audioId:evaluation.recordingCode || evaluation.callId,
 });
 

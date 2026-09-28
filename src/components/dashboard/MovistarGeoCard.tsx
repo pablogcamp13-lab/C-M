@@ -8,8 +8,10 @@ const featurePath = (geometry:{type:'Polygon'|'MultiPolygon';coordinates:number[
   ? polygonPath(geometry.coordinates as number[][][])
   : (geometry.coordinates as number[][][][]).map(polygonPath).join('');
 const paths = PERU_GEOJSON.features.map(feature => ({department:normalizeDepartment(feature.properties.NM_DEPA),path:featurePath(feature.geometry)}));
+const counts=(values:string[])=>[...values.reduce((result,value)=>result.set(value,(result.get(value)||0)+1),new Map<string,number>())].sort((a,b)=>b[1]-a[1]).map(([name,count])=>`${name}: ${count}`).join(' · ')||'Sin clasificar';
+const responsibilityName=(value:GeoCall['responsibility'])=>value==='NEGOCIO'?'Negocio':value==='CLIENTE'?'Cliente':value==='ASESOR'?'Asesor':'Sin clasificar';
 
-export const MovistarGeoCard:React.FC<{calls:GeoCall[]; demo:boolean; selectedDepartment:string; onDepartmentChange:(department:string)=>void; dateFrom:string; dateTo:string; advisorId:string; advisorNames:Map<string,string>}> = ({calls,demo,selectedDepartment,onDepartmentChange,dateFrom,dateTo,advisorId,advisorNames}) => {
+export const MovistarGeoCard:React.FC<{calls:GeoCall[]; demo:boolean; selectedDepartment:string; onDepartmentChange:(department:string)=>void; dateFrom:string; dateTo:string; advisorId:string}> = ({calls,demo,selectedDepartment,onDepartmentChange,dateFrom,dateTo,advisorId}) => {
   const [motive,setMotive] = useState<GeoMotive>('Cobertura / señal');
   const [metric,setMetric] = useState<GeoMetric>('PERCENT');
   const [mode,setMode] = useState<GeoMode>('PRIMARY');
@@ -23,9 +25,17 @@ export const MovistarGeoCard:React.FC<{calls:GeoCall[]; demo:boolean; selectedDe
   const inspected = byDepartment.get(hovered || selectedDepartment);
   const departmentCalls = useMemo(() => selectedDepartment ? scoped.filter(call => normalizeDepartment(call.department) === selectedDepartment) : [],[scoped,selectedDepartment]);
   const noSales = departmentCalls.filter(call => call.sale === false);
-  const motiveCounts = new Map<string,number>();
-  const responsibilityCounts = new Map<string,number>();
-  noSales.forEach(call => {if(call.primaryMotive)motiveCounts.set(call.primaryMotive,(motiveCounts.get(call.primaryMotive)||0)+1);const key=call.responsibility||'Sin clasificar';responsibilityCounts.set(key,(responsibilityCounts.get(key)||0)+1);});
+  const districts=useMemo(()=>{
+    const groups=new Map<string,{district:string;province:string;calls:GeoCall[]}>();
+    for(const call of departmentCalls){
+      const district=call.district?.trim()||'Distrito no identificado';
+      const province=call.district?.trim()?call.province?.trim()||'':'';
+      const key=`${district.toLocaleUpperCase('es-PE')}|${province.toLocaleUpperCase('es-PE')}`;
+      const group=groups.get(key)||{district,province,calls:[]};
+      group.calls.push(call);groups.set(key,group);
+    }
+    return [...groups.values()].sort((a,b)=>b.calls.length-a.calls.length||a.district.localeCompare(b.district,'es-PE'));
+  },[departmentCalls]);
   const fill = (department:string) => {
     const item=byDepartment.get(department);
     if (!item?.totalAudios) return '#183046';
@@ -58,7 +68,7 @@ export const MovistarGeoCard:React.FC<{calls:GeoCall[]; demo:boolean; selectedDe
     </Card>
     <Card className="cm-geo-ranking-card"><div className="cm-geo-card-head"><div><h2>Departamentos con mayor incidencia</h2><p>Top 5 por {metric==='PERCENT'?'porcentaje':'cantidad'} de {motive.toLocaleLowerCase('es-PE')}.</p></div></div>
       {ranked.length?<ol className="cm-geo-ranking">{ranked.map((item,index)=><li key={item.department}><button className={selectedDepartment===item.department?'is-selected':''} onClick={()=>onDepartmentChange(selectedDepartment===item.department?'':item.department)}><span>{index+1}</span><b>{item.department}</b><strong>{formatValue(item)}</strong><i><em style={{width:`${metric==='PERCENT'?item.incidence||0:item.selectedCases/maxCount*100}%`}}/></i></button></li>)}</ol>:<p className="cm-geo-empty">Sin departamentos con datos para este alcance.</p>}
-      {selectedDepartment&&<div className="cm-geo-detail"><h3>{selectedDepartment} · {departmentCalls.length} audios</h3><p><b>Motivos de No Venta:</b> {[...motiveCounts].sort((a,b)=>b[1]-a[1]).slice(0,3).map(([name,count])=>`${name} ${count}`).join(' · ')||'Sin clasificar'}</p><p><b>Responsabilidad:</b> {[...responsibilityCounts].map(([name,count])=>`${name} ${count}`).join(' · ')||'Sin clasificar'}</p><p><b>Asesores:</b> {new Set(departmentCalls.map(call=>call.advisorId).filter(Boolean)).size || 'Sin datos en la muestra'}</p><h4>Auditorías de la selección</h4>{noSales.length?<ul>{noSales.slice(0,5).map(call=><li key={call.id}><span>{call.date} · {call.audioId}</span><small>{advisorNames.get(call.advisorId||'')||'Asesor no identificado'} · {call.primaryMotive||'Motivo sin clasificar'}</small></li>)}</ul>:<p>No hay No Ventas registradas.</p>}</div>}
+      {selectedDepartment&&<div className="cm-geo-detail"><h3>{selectedDepartment} · {departmentCalls.length} evaluaciones</h3><p>{noSales.length} No Ventas · {districts.filter(group=>group.district!=='Distrito no identificado').length} distritos identificados</p><h4>Detalle por distrito</h4>{districts.length?<ul>{districts.map(group=>{const cases=group.calls.filter(call=>call.sale===false);return <li key={`${group.district}|${group.province}`}><strong>{group.district}{group.province?` · ${group.province}`:''}</strong><span>{group.calls.length} {group.calls.length===1?'evaluación':'evaluaciones'} · {cases.length} No Ventas</span><small><b>Motivos:</b> {counts(cases.map(call=>call.primaryMotive||'Sin clasificar'))}</small><small><b>Responsabilidad:</b> {counts(cases.map(call=>responsibilityName(call.responsibility)))}</small></li>;})}</ul>:<p>No hay evaluaciones registradas en este departamento.</p>}</div>}
       <p className="cm-geo-ranking-note">% incidencia = casos del motivo ÷ todos los audios del departamento. Sin llamadas no equivale a 0%.</p>
     </Card>
   </section>;

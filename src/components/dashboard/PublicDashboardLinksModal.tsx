@@ -12,11 +12,11 @@ const request = async (path:string, init?:RequestInit) => {
   return body;
 };
 
-export const PublicDashboardLinksModal:React.FC<{onClose:()=>void}>=({onClose})=>{
+export const PublicDashboardLinksModal:React.FC<{onClose:()=>void;initialCompanyId?:string;initialCampaignId?:string;initialDashboardType?:'QUALITY'|'D3C'}>=({onClose,initialCompanyId='',initialCampaignId='',initialDashboardType=''})=>{
   const {companies,campaigns,operations}=useApp();
-  const [companyId,setCompanyId]=useState('');
-  const [campaignId,setCampaignId]=useState('');
-  const [dashboardType,setDashboardType]=useState<'QUALITY'|'D3C'|''>('');
+  const [companyId,setCompanyId]=useState(initialCompanyId);
+  const [campaignId,setCampaignId]=useState(initialCampaignId);
+  const [dashboardType,setDashboardType]=useState<'QUALITY'|'D3C'|''>(initialDashboardType);
   const [expiresInDays,setExpiresInDays]=useState(90);
   const [links,setLinks]=useState<LinkRecord[]>([]);
   const [newUrl,setNewUrl]=useState('');

@@ -13,5 +13,5 @@ export const classificationFromEvaluation = (evaluation:Evaluation):CallClassifi
 export const classificationPayload = (value:CallClassification):Pick<Evaluation,'typification'|'geoAnalysis'> => {
   if(value.typification!==SIGNAL_TYPIFICATION)return {typification:value.typification,geoAnalysis:undefined};
   const district=PERU_DISTRICTS.find(item=>item.department===value.department&&item.code===value.districtCode);
-  return {typification:value.typification,geoAnalysis:{department:value.department,province:district?.province,district:district?.district,districtCode:district?.code,primaryMotive:'Cobertura / señal',mentionedMotives:['Cobertura / señal'],outcomeKnown:true,source:'MANUAL'}};
+  return {typification:value.typification,geoAnalysis:{department:value.department,province:district?.province,district:district?.district,districtCode:district?.code,primaryMotive:'Cobertura / señal',mentionedMotives:['Cobertura / señal'],fallResponsibility:'NEGOCIO',outcomeKnown:true,source:'MANUAL'}};
 };

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { aggregateDepartments, normalizeDepartment, resolveGeoAnalysis } from '../src/utils/movistarGeo';
 import { MOVISTAR_GEO_DEMO } from '../src/data/movistarGeoDemo';
+import { classificationPayload, PERU_DISTRICTS, SIGNAL_TYPIFICATION } from '../src/utils/evaluationTypification';
 
 assert.equal(normalizeDepartment('Áncash'),'ANCASH');
 assert.equal(normalizeDepartment('Lima Provincia'),'LIMA');
@@ -9,7 +10,13 @@ assert.equal(resolveGeoAnalysis({transcript:'Estoy en Pampa Chico, provincia de 
 const classified=resolveGeoAnalysis({primaryMotive:'No hay delivery',secondaryMotive:'Cobertura',transcript:'Movistar anteriormente tenía mala señal.'});
 assert.equal(classified.primaryMotive,'No hay delivery');
 assert.ok(classified.mentionedMotives?.includes('Cobertura / señal'));
+assert.equal(resolveGeoAnalysis({primaryMotive:'Cobertura',responsibility:'Cliente'}).fallResponsibility,'NEGOCIO');
+const sampleDistrict=PERU_DISTRICTS.find(item=>item.department==='ANCASH');
+assert.ok(sampleDistrict);
+const manual=classificationPayload({typification:SIGNAL_TYPIFICATION,department:'ANCASH',districtCode:sampleDistrict.code});
+assert.equal(manual.geoAnalysis?.district,sampleDistrict.district);
+assert.equal(manual.geoAnalysis?.fallResponsibility,'NEGOCIO');
 assert.equal(aggregateDepartments(MOVISTAR_GEO_DEMO,'Cobertura / señal','PRIMARY').find(item=>item.department==='ANCASH')?.incidence,60);
 assert.equal(aggregateDepartments(MOVISTAR_GEO_DEMO,'Cobertura / señal','PRIMARY').find(item=>item.department==='TUMBES')?.incidence,null);
 assert.equal(aggregateDepartments([{...MOVISTAR_GEO_DEMO[0],sale:null}],'Cobertura / señal','PRIMARY').find(item=>item.department==='ANCASH')?.selectedCases,0);
-console.log('Movistar geo: 8 verificaciones correctas');
+console.log('Movistar geo: verificaciones correctas');
