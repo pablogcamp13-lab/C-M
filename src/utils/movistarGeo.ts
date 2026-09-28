@@ -83,6 +83,15 @@ export const evaluationGeoCall = (evaluation:Evaluation):GeoCall => ({
 
 export const matchesGeoMotive = (call:GeoCall, motive:GeoMotive, mode:GeoMode) => call.sale === false && (motive === 'Todos' || (mode === 'PRIMARY' ? call.primaryMotive === motive : call.mentionedMotives?.includes(motive) === true));
 
+/** Equal case counts share a shade; each higher observed count is brighter. */
+export const geoHeatColor = (count:number, sortedPositiveCounts:readonly number[]):string => {
+  if(count<=0)return '#183046';
+  const position=sortedPositiveCounts.indexOf(count);
+  const ratio=sortedPositiveCounts.length>1&&position>=0?position/(sortedPositiveCounts.length-1):0;
+  const low=[23,105,174],high=[91,196,255];
+  return `#${low.map((channel,index)=>Math.round(channel+(high[index]-channel)*ratio).toString(16).padStart(2,'0')).join('')}`;
+};
+
 export interface DepartmentStats { department:string; totalAudios:number; totalNoSales:number; selectedCases:number; incidence:number|null; participation:number|null; leadingMotive:string; }
 export const aggregateDepartments = (calls:GeoCall[], motive:GeoMotive, mode:GeoMode):DepartmentStats[] => {
   const rows=departmentNames.map(department => {

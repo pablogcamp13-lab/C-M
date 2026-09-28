@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Card, Modal } from '../ui';
-import { aggregateDepartments, GEO_MOTIVES, matchesGeoMotive, normalizeDepartment, PERU_GEOJSON, type GeoCall, type GeoMetric, type GeoMode, type GeoMotive } from '../../utils/movistarGeo';
+import { aggregateDepartments, geoHeatColor, GEO_MOTIVES, matchesGeoMotive, normalizeDepartment, PERU_GEOJSON, type GeoCall, type GeoMetric, type GeoMode, type GeoMotive } from '../../utils/movistarGeo';
 
 const point = ([lon,lat]:number[]) => `${((lon+82)*30).toFixed(1)},${((0.5-lat)*26).toFixed(1)}`;
 const polygonPath = (rings:number[][][]) => rings.map(ring => `M${ring.map(point).join('L')}Z`).join('');
@@ -22,8 +22,8 @@ export const MovistarGeoCard:React.FC<{calls:GeoCall[]; demo:boolean; selectedDe
   const byDepartment = useMemo(() => new Map(stats.map(item => [item.department,item])),[stats]);
   useEffect(()=>{if(selectedDepartment&&!byDepartment.get(selectedDepartment)?.selectedCases)onDepartmentChange('');},[selectedDepartment,byDepartment,onDepartmentChange]);
   const ranked = useMemo(() => stats.filter(item => item.selectedCases > 0).sort((a,b) => b.selectedCases-a.selectedCases || a.department.localeCompare(b.department,'es-PE')),[stats]);
+  const caseLevels=useMemo<number[]>(()=>Array.from(new Set<number>(stats.map(item=>item.selectedCases).filter(count=>count>0))).sort((a,b)=>a-b),[stats]);
   const maxCount = Math.max(1,...stats.map(item=>item.selectedCases));
-  const maxParticipation=Math.max(1,...stats.map(item=>item.participation||0));
   const inspected = byDepartment.get(hovered || selectedDepartment);
   const departmentCalls = useMemo(() => selectedDepartment ? scoped.filter(call => normalizeDepartment(call.department) === selectedDepartment) : [],[scoped,selectedDepartment]);
   const districts=useMemo(()=>{
@@ -37,16 +37,7 @@ export const MovistarGeoCard:React.FC<{calls:GeoCall[]; demo:boolean; selectedDe
     }
     return [...groups.values()].sort((a,b)=>b.calls.length-a.calls.length||a.district.localeCompare(b.district,'es-PE'));
   },[departmentCalls]);
-  const fill = (department:string) => {
-    const item=byDepartment.get(department);
-    if (!item?.selectedCases) return '#183046';
-    const ratio=metric==='PERCENT' ? (item.participation||0)/maxParticipation : item.selectedCases/maxCount;
-    if (ratio===0) return '#194668';
-    if (ratio<.15) return '#1769ae';
-    if (ratio<.3) return '#168bd5';
-    if (ratio<.5) return '#269ff0';
-    return '#5bc4ff';
-  };
+  const fill = (department:string) => geoHeatColor(byDepartment.get(department)?.selectedCases||0,caseLevels);
   const formatValue=(item:typeof stats[number])=>metric==='PERCENT'?`${item.participation?.toFixed(1)??'—'}%`:`${item.selectedCases}`;
 
   return <section className="cm-geo-grid" aria-label="Mapa geográfico de participación de No Ventas – Perú">
@@ -62,7 +53,7 @@ export const MovistarGeoCard:React.FC<{calls:GeoCall[]; demo:boolean; selectedDe
       <div className="cm-geo-map-layout"><div className="cm-geo-map-frame"><svg viewBox="0 0 440 520" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Mapa interactivo de departamentos del Perú">
         {paths.map(({department,path}) => {const item=byDepartment.get(department);return <path key={department} d={path} fill={fill(department)} fillRule="evenodd" className={`cm-geo-department ${selectedDepartment===department?'is-selected':''}`} role="button" tabIndex={0} aria-label={`${department}: ${item?.selectedCases?`${formatValue(item)}; ${item.selectedCases} casos de ${motive}`:'Sin casos del motivo seleccionado'}`} onMouseEnter={()=>setHovered(department)} onMouseLeave={()=>setHovered('')} onFocus={()=>setHovered(department)} onBlur={()=>setHovered('')} onClick={()=>{if(item?.selectedCases)onDepartmentChange(selectedDepartment===department?'':department);}} onKeyDown={event=>{if((event.key==='Enter'||event.key===' ')&&item?.selectedCases){event.preventDefault();onDepartmentChange(selectedDepartment===department?'':department);}}}/>;})}
       </svg>{inspected&&<div className="cm-geo-tooltip" role="status"><b>{inspected.department}</b>{inspected.selectedCases ? <><span>{motive}: {inspected.selectedCases} casos</span><span>Participación nacional: {inspected.participation?.toFixed(1)??'—'}%</span></> : <span>Sin casos de {motive.toLocaleLowerCase('es-PE')}</span>}</div>}</div>
-      <div className="cm-geo-legend"><span>Sin casos</span><i/><span>Baja participación</span><em/><span>Alta participación</span></div></div>
+      <div className="cm-geo-legend"><span>Sin casos</span><i/><span>{caseLevels[0]??0} casos</span><em/><span>{caseLevels.at(-1)??0} casos</span></div></div>
       <div className="cm-geo-map-foot"><span>{scoped.filter(call=>normalizeDepartment(call.department)!=='No identificado').length} casos de {motive.toLocaleLowerCase('es-PE')} con ubicación · {scoped.filter(call=>normalizeDepartment(call.department)==='No identificado').length} sin departamento</span>{selectedDepartment&&<button onClick={()=>onDepartmentChange('')}>Ver todo Perú</button>}</div>
       {!stats.some(item=>item.selectedCases)&&<p className="cm-geo-empty">No hay casos de {motive.toLocaleLowerCase('es-PE')} con ubicación para estos filtros.</p>}
       <small className="cm-geo-source">Límites departamentales: INGEMMET / INEI (referenciales).</small>

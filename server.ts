@@ -21,7 +21,7 @@ import { calculateEvaluationSummary, getItemCompliance } from './src/utils/calcu
 import { QUALITY_ATTRIBUTES } from './src/data/qualityPueData';
 import { TECHCENTER_MOVISTAR_FORM_ID, TECHCENTER_MOVISTAR_FLOWS, isTechcenterMovistarCampaign, isTechcenterCriterion, isReverseTechcenterCriterion, techcenterFieldsForFlow, type TechcenterMovistarFlow } from './src/data/techcenterMovistarForm';
 import { resolveGeoAnalysis } from './src/utils/movistarGeo';
-import { SIGNAL_TYPIFICATION, classificationError, classificationPayload } from './src/utils/evaluationTypification';
+import { classificationError, classificationPayload, requiresLocation } from './src/utils/evaluationTypification';
 
 // Keep the existing Sheets repository available during the Supabase cutover.
 // An explicit "false" disables it; an unset variable must never leave
@@ -906,7 +906,7 @@ async function startServer() {
     let evaluation = authUser.role === 'MONITOR' ? { ...(req.body || {}), evaluatorId: authUser.id, evaluatorName: authUser.name } : req.body;
     if (!evaluation?.id || !evaluation?.advisorId || !evaluation?.evaluatorId || !['QUALITY', 'D3C'].includes(evaluation?.evaluationType)) return res.status(400).json({ error: 'Evaluación inválida.' });
     if (!evaluation?.date || !/^\d{4}-\d{2}-\d{2}$/.test(String(evaluation.date)) || (evaluation.time && !/^\d{2}:\d{2}$/.test(String(evaluation.time)))) return res.status(400).json({ error: 'La fecha u hora de evaluación no es válida.' });
-    if(evaluation.typification===SIGNAL_TYPIFICATION){
+    if(requiresLocation(evaluation.typification||'')){
       const classification={typification:evaluation.typification,department:evaluation.geoAnalysis?.department||'',districtCode:evaluation.geoAnalysis?.districtCode||''};
       const error=classificationError(classification);
       if(error)return res.status(400).json({error});
@@ -1242,14 +1242,14 @@ async function startServer() {
     if((body.validate||body.validationStatus==='VALIDATED')&&current.advisorResolutionStatus==='PENDING')return res.status(400).json({error:'Relaciona primero la evaluación con un asesor activo.'});
     const editableFields=['date','time','callId','recordingCode','type','product','sale','saleResult','noSaleReason','typification','geoAnalysis','comments','callDescription','items','qualityCriticalErrorIds','qualityCriticalErrorSnapshot','audioUrl','audioFileName','audioFileSize','audioDurationSeconds','audioMimeType'];
     const changes=Object.fromEntries(editableFields.filter(key=>body[key]!==undefined).map(key=>[key,body[key]]));
-    if(body.typification!==undefined){
-      if(body.typification===SIGNAL_TYPIFICATION){
-        const classification={typification:body.typification,department:body.geoAnalysis?.department||current.geoAnalysis?.department||'',districtCode:body.geoAnalysis?.districtCode||current.geoAnalysis?.districtCode||''};
-        const error=classificationError(classification);
-        if(error)return res.status(400).json({error});
-        Object.assign(changes,classificationPayload(classification));
-      }else if(current.typification===SIGNAL_TYPIFICATION)changes.geoAnalysis=undefined;
-    }
+    const nextTypification=body.typification===undefined?current.typification:body.typification;
+    if(requiresLocation(nextTypification||'')){
+      const location=body.geoAnalysis||(nextTypification===current.typification?current.geoAnalysis:undefined);
+      const classification={typification:nextTypification,department:location?.department||'',districtCode:location?.districtCode||''};
+      const error=classificationError(classification);
+      if(error)return res.status(400).json({error});
+      Object.assign(changes,classificationPayload(classification));
+    }else if(body.typification!==undefined&&requiresLocation(current.typification||''))changes.geoAnalysis=undefined;
     const contentEdit=editableFields.filter(key=>!key.startsWith('audio')).some(key=>body[key]!==undefined);
     if(changes.date&&!/^\d{4}-\d{2}-\d{2}$/.test(String(changes.date))) return res.status(400).json({error:'La fecha de evaluación no es válida.'});
     if(changes.time&&!/^\d{2}:\d{2}$/.test(String(changes.time))) return res.status(400).json({error:'La hora de evaluación no es válida.'});

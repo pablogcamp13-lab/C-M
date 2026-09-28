@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { aggregateDepartments, matchesGeoMotive, normalizeDepartment, PERU_GEOJSON, resolveGeoAnalysis } from '../src/utils/movistarGeo';
+import { aggregateDepartments, geoHeatColor, matchesGeoMotive, normalizeDepartment, PERU_GEOJSON, resolveGeoAnalysis } from '../src/utils/movistarGeo';
 import { MOVISTAR_GEO_DEMO } from '../src/data/movistarGeoDemo';
-import { classificationPayload, PERU_DISTRICTS, SIGNAL_TYPIFICATION } from '../src/utils/evaluationTypification';
+import { classificationError, classificationPayload, DELIVERY_TYPIFICATION, PERU_DISTRICTS, requiresLocation, SIGNAL_TYPIFICATION } from '../src/utils/evaluationTypification';
 
 assert.equal(normalizeDepartment('Áncash'),'ANCASH');
 assert.equal(normalizeDepartment('Lima Provincia'),'LIMA');
@@ -20,6 +20,13 @@ assert.ok(sampleDistrict);
 const manual=classificationPayload({typification:SIGNAL_TYPIFICATION,department:'ANCASH',districtCode:sampleDistrict.code});
 assert.equal(manual.geoAnalysis?.district,sampleDistrict.district);
 assert.equal(manual.geoAnalysis?.fallResponsibility,'NEGOCIO');
+assert.equal(requiresLocation(DELIVERY_TYPIFICATION),true);
+assert.ok(classificationError({typification:DELIVERY_TYPIFICATION,department:'ANCASH',districtCode:''}));
+const delivery=classificationPayload({typification:DELIVERY_TYPIFICATION,department:'ANCASH',districtCode:sampleDistrict.code});
+assert.equal(classificationError({typification:DELIVERY_TYPIFICATION,department:'ANCASH',districtCode:sampleDistrict.code}),'');
+assert.equal(delivery.geoAnalysis?.district,sampleDistrict.district);
+assert.equal(delivery.geoAnalysis?.primaryMotive,DELIVERY_TYPIFICATION);
+assert.equal(delivery.geoAnalysis?.fallResponsibility,'NEGOCIO');
 assert.equal(aggregateDepartments(MOVISTAR_GEO_DEMO,'Cobertura / señal','PRIMARY').find(item=>item.department==='ANCASH')?.incidence,60);
 assert.equal(aggregateDepartments(MOVISTAR_GEO_DEMO,'Cobertura / señal','PRIMARY').find(item=>item.department==='TUMBES')?.incidence,null);
 assert.equal(aggregateDepartments([{...MOVISTAR_GEO_DEMO[0],sale:null}],'Cobertura / señal','PRIMARY').find(item=>item.department==='ANCASH')?.selectedCases,0);
@@ -29,4 +36,10 @@ assert.equal(equalShares.find(item=>item.department===normalizeDepartment(tenDep
 const unequalShares=aggregateDepartments([...tenDepartments,{...tenDepartments[0],id:'extra'}],'Cobertura / señal','PRIMARY');
 assert.ok(Math.abs((unequalShares.find(item=>item.department===normalizeDepartment(tenDepartments[0].department))?.participation||0)-200/11)<0.001);
 assert.ok(Math.abs(unequalShares.reduce((sum,item)=>sum+(item.participation||0),0)-100)<0.001);
+assert.equal(geoHeatColor(0,[1,2,3]),'#183046');
+assert.equal(geoHeatColor(1,[1,2,3]),'#1769ae');
+assert.equal(geoHeatColor(2,[1,2,3]),'#3997d7');
+assert.equal(geoHeatColor(3,[1,2,3]),'#5bc4ff');
+assert.notEqual(geoHeatColor(1,[1,2,3]),geoHeatColor(2,[1,2,3]));
+assert.notEqual(geoHeatColor(2,[1,2,3]),geoHeatColor(3,[1,2,3]));
 console.log('Movistar geo: verificaciones correctas');
