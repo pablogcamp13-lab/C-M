@@ -7,11 +7,23 @@ export type TechcenterMovistarField = { id:number; section:string; flow:string; 
 export const TECHCENTER_MOVISTAR_FIELDS:TechcenterMovistarField[] = sourceFields;
 
 export const isTechcenterCriterion = (field:TechcenterMovistarField) => field.kind==='Criterio de auditoría';
+const criterionSubtitles:[RegExp,string][]=[
+  [/^Solo Movil(?: Out)?\s+/i,'Solo móvil'],
+  [/^Gestion regular\s+/i,'Gestión regular'],
+  [/^Segun base\s+/i,'Según base'],
+  [/^Rebate de Objeciones\s+/i,'Rebate de objeciones'],
+  [/^Base Mejora de cobertura de RED\s+/i,'Base mejora de cobertura de RED'],
+];
+export const techcenterCriterionPresentation=(field:TechcenterMovistarField)=>{
+  const match=criterionSubtitles.find(([pattern])=>pattern.test(field.label));
+  return match?{subtitle:match[1],criterion:field.label.replace(match[0],'').trim()}:{subtitle:'',criterion:field.label};
+};
 const reverseCriterionIds = new Set([57,59,60,61,83,84]);
 export const isReverseTechcenterCriterion = (id:number) => reverseCriterionIds.has(id);
 
 export function techcenterFieldsForFlow(flow:TechcenterMovistarFlow):TechcenterMovistarField[]{
   return TECHCENTER_MOVISTAR_FIELDS.filter(field=>{
+    if(field.section==='Datos finales'&&!flow.startsWith('Venta'))return false;
     if(field.flow==='Todos')return true;
     if(field.section==='No Venta Out'){
       if(!flow.startsWith('No Venta'))return false;
