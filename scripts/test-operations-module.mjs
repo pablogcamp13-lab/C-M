@@ -19,8 +19,10 @@ try{
   const retentions=repo.operations.find(operation=>operation.companyId===techcenter.id&&operation.name==='TECHCENTER / Retenciones Bitel');assert.ok(retentions);
   const duplicatedCampaign={id:'camp_duplicate_retentions',name:'Retenciones Bitel',client:'Bitel',status:'ACTIVA',products:[]};
   const duplicatedOperation={id:'op_duplicate_retentions',companyId:techcenter.id,campaignId:duplicatedCampaign.id,name:'TECHCENTER / Retenciones Bitel',status:'ACTIVA',legacy:false};
+  const unstaffedCampaign={id:'camp_monitor_unstaffed',name:'Campaña sin dotación',client:'Test',status:'ACTIVA',products:[]};
+  const unstaffedOperation={id:'op_monitor_unstaffed',companyId:techcenter.id,campaignId:unstaffedCampaign.id,name:'TECHCENTER / Campaña sin dotación',status:'ACTIVA',legacy:false};
   const duplicatedAdvisor={id:'adv_duplicate_retentions',dni:'90000000',employeeCode:'DUP1',name:'Asesor Retenciones',campaignId:duplicatedCampaign.id,operationId:duplicatedOperation.id,teamId:'',supervisorId:'usr_admin',status:'ACTIVO',active:true,hireDate:'2026-01-01'};
-  const reconciled=await api('/api/shared-repository/sync',{token:admin,method:'PUT',body:{...repo,campaigns:[...repo.campaigns,duplicatedCampaign],operations:[...repo.operations,duplicatedOperation],advisors:[...repo.advisors,duplicatedAdvisor]}});
+  const reconciled=await api('/api/shared-repository/sync',{token:admin,method:'PUT',body:{...repo,campaigns:[...repo.campaigns,duplicatedCampaign,unstaffedCampaign],operations:[...repo.operations,duplicatedOperation,unstaffedOperation],advisors:[...repo.advisors,duplicatedAdvisor]}});
   assert.equal(reconciled.response.status,200);
   const retainedOperations=reconciled.data.repository.operations.filter(operation=>operation.companyId===techcenter.id&&operation.name==='TECHCENTER / Retenciones Bitel'&&operation.status==='ACTIVA');assert.equal(retainedOperations.length,1,'Equivalent company/campaign operations are consolidated');
   const retainedStaffing=await api(`/api/staffing?operationId=${retainedOperations[0].id}`,{token:admin});assert.ok(retainedStaffing.data.rows.some(row=>row.id==='adv_duplicate_retentions'),'Reassigned people are visible in the canonical operation');
@@ -53,6 +55,10 @@ try{
   const persistedSpeech=(await api('/api/admin/dashboard',{token:admin})).data.evaluations.find(item=>item.id===pendingSpeech.id);assert.equal(persistedSpeech.advisorId,createdSpeechAdvisor.data.advisor.id);
   const monitorUser=await api('/api/admin/users',{token:admin,method:'POST',body:{name:'Monitor Speech Test',email:'monitor.speech@test.local',username:'monitor.speech.test',role:'MONITOR'}});assert.equal(monitorUser.response.status,201);
   const monitorLogin=await api('/api/auth/login',{method:'POST',body:{identity:'monitor.speech.test',password:'12345678'}});assert.equal(monitorLogin.response.status,200);const monitor=monitorLogin.data.token;
+  const monitorRepository=await api('/api/shared-repository',{token:monitor});assert.equal(monitorRepository.response.status,200);
+  assert.ok(monitorRepository.data.repository.companies.some(company=>company.id===techcenter.id),'Monitor can access Techcenter');
+  assert.ok(monitorRepository.data.repository.campaigns.some(campaign=>campaign.id===unstaffedCampaign.id),'Monitor can see active campaigns without assigned advisors');
+  assert.ok(monitorRepository.data.repository.operations.some(operation=>operation.id===unstaffedOperation.id),'Monitor can select an unstaffed operation');
   const monitorState=await api('/api/platform-state',{token:monitor});assert.equal(monitorState.response.status,200);
   assert.ok(monitorState.data.state.evaluations.some(item=>item.id===pendingSpeech.id),'Monitor can see an SA evaluation imported by another user');
   assert.equal((await api(`/api/evaluations/${pendingSpeech.id}/agent-detail`,{token:monitor})).response.status,200,'Monitor can open another importer\'s SA evaluation');

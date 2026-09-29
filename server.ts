@@ -829,9 +829,10 @@ async function startServer() {
     if (['ADMINISTRADOR','CONSULTOR','FORMADOR','GERENCIA'].includes(user.role) && user.accessScope && user.accessScope !== 'GLOBAL') return res.json({ repository: scopedRepository(user,source) });
     if (user.role === 'MONITOR') {
       const advisors = source.advisors.filter(item => item.active !== false && item.status === 'ACTIVO');
-      const campaignIds = new Set(advisors.map(item => item.campaignId));
-      const operationIds=new Set(advisors.map(item=>item.operationId||`op_legacy_${item.campaignId}`)), operations=(source.operations||[]).filter(item=>operationIds.has(item.id)), companyIds=new Set(operations.map(item=>item.companyId));
-      return res.json({ repository: { advisors, campaigns: source.campaigns.filter(item => item.status === 'ACTIVA' && campaignIds.has(item.id)), companies:(source.companies||[]).filter(item=>companyIds.has(item.id)), operations, teams: source.teams.filter(item => campaignIds.has(item.campaignId)), users: source.users } });
+      const campaigns = source.campaigns.filter(item => item.status === 'ACTIVA');
+      const companies = (source.companies||[]).filter(item => item.status === 'ACTIVA');
+      const operations = (source.operations||[]).filter(item => item.status === 'ACTIVA' && !item.legacy && companies.some(company => company.id === item.companyId) && campaigns.some(campaign => campaign.id === item.campaignId));
+      return res.json({ repository: { advisors, campaigns, companies, operations, teams: source.teams.filter(item => advisors.some(advisor => advisor.teamId === item.id)), users: source.users } });
     }
     if (user.role === 'SUPERVISOR') {
       const advisors = source.advisors.filter(item => item.supervisorId === user.id || (user.teamId && item.teamId === user.teamId));

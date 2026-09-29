@@ -322,7 +322,7 @@
     "id": 27,
     "section": "No Venta Out",
     "flow": "No Venta Movil Out / No Venta Fija Out",
-    "label": "Solo Movil En caso el cliente indica que la señal de Movistar es deficiente o no hay señal en su zona de indicar el rebate correspondiente En Movistar estamos trabajando dia a dia para tener una m...",
+    "label": "Solo Movil En caso el cliente indica que la señal de Movistar es deficiente o no hay señal en su zona de indicar el rebate correspondiente En Movistar estamos trabajando dia a dia para tener una mejor cobertura...",
     "sourceField": "Solo_Movil_En_caso_el_cliente_indica_que_la_señal_de_Movistar_es_deficiente_o_no_hay_señal_en_su_zona_de_indicar_el_rebate_correspondiente_En_Movistar_estamos_trabajando_dia_a_dia_para_tener_una_m...",
     "kind": "Criterio de auditoría",
     "options": [
@@ -336,7 +336,7 @@
     "id": 28,
     "section": "No Venta Out",
     "flow": "No Venta Movil Out / No Venta Fija Out",
-    "label": "Base Mejora de cobertura de RED Asesor cumple con informar la glosa Hemos migrando a la Nueva Red Movil de Movistar que te brindara MAS velocidad y una MEJOR cobertura para brindarte una mejor exp...",
+    "label": "Base Mejora de cobertura de RED Asesor cumple con informar la glosa Hemos migrando a la Nueva Red Movil de Movistar que te brindara MAS velocidad y una MEJOR cobertura para brindarte una mejor experiencia...",
     "sourceField": "Base_Mejora_de_cobertura_de_RED_Asesor_cumple_con_informar_la_glosa_Hemos_migrando_a_la_Nueva_Red_Movil_de_Movistar_que_te_brindara_MAS_velocidad_y_una_MEJOR_cobertura_para_brindarte_una_mejor_exp...",
     "kind": "Criterio de auditoría",
     "options": [
