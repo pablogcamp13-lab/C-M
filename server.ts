@@ -1541,7 +1541,7 @@ async function startServer() {
   app.get('/api/files/:id', requireAuth, async (_req, res) => res.status(404).json({error:'Usa el endpoint autorizado del registro asociado.'}));
   app.delete('/api/files/:id', requireAuth, async (req, res) => { const user=(req as any).authUser as User;if(user.role!=='ADMINISTRADOR'||!isGlobalActor(user))return res.status(403).json({error:'Acceso denegado.'});try { await fileStorageFor(req.params.id).deleteFile(req.params.id); res.status(204).end(); } catch { res.status(404).json({ error: 'Archivo no encontrado.' }); } });
 
-  const qualityManagers = new Set(['ADMINISTRADOR', 'CONSULTOR']);
+  const qualityManagers = new Set(['ADMINISTRADOR', 'CONSULTOR', 'MONITOR']);
   const alertRows = () => (db.prepare('SELECT data_json FROM quality_alerts ORDER BY updated_at DESC').all() as any[]).map(row => JSON.parse(row.data_json));
   const calibrationRows = () => (db.prepare('SELECT data_json FROM calibrations ORDER BY updated_at DESC').all() as any[]).map(row => JSON.parse(row.data_json));
   const persistAlert = (item: any) => db.prepare(`INSERT INTO quality_alerts (id,status,advisor_id,supervisor_id,campaign_id,data_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,advisor_id=excluded.advisor_id,supervisor_id=excluded.supervisor_id,campaign_id=excluded.campaign_id,data_json=excluded.data_json,updated_at=excluded.updated_at`).run(item.id,item.status,item.advisorId,item.supervisorId,item.campaignId,JSON.stringify(item),item.publishedAt,item.updatedAt);
@@ -1591,10 +1591,10 @@ async function startServer() {
   });
   app.get('/api/supervisor/advisors/:id/evaluations', requireAuth, async (req,res) => { const user=(req as any).authUser as User;if(user.role!=='SUPERVISOR')return res.status(403).json({error:'Acceso denegado.'});const directory=await readRepository();if(!teamAdvisorIds(user,directory).has(req.params.id))return res.status(404).json({error:'Asesor no encontrado.'});const evaluations=(await loadVisibleEvaluations()).filter(e=>e.advisorId===req.params.id&&normalizedValidationStatus(e)==='VALIDATED').sort((a,b)=>String(b.date).localeCompare(String(a.date)));res.json({evaluations}); });
   app.get('/api/quality-alerts', requireAuth, async (req, res) => {
-    const user=(req as any).authUser as User; const directory=await readRepository(); if(user.role==='MONITOR')return res.status(403).json({error:'Acceso denegado.'}); res.json({alerts:visibleAlerts(await loadAlerts(),user,directory)});
+    const user=(req as any).authUser as User; const directory=await readRepository(); res.json({alerts:visibleAlerts(await loadAlerts(),user,directory)});
   });
   app.post('/api/quality-alerts', requireAuth, async (req, res) => {
-    const user = (req as any).authUser as User; if (!qualityManagers.has(user.role)) return res.status(403).json({ error:'Solo Calidad o Administración puede publicar alertas.' });
+    const user = (req as any).authUser as User; if (!qualityManagers.has(user.role)) return res.status(403).json({ error:'No tienes permiso para publicar alertas.' });
     const body = req.body || {}, directory=await readRepository(); if (!body.title || !body.advisorId || !body.campaignId || !body.validUntil || !String(body.detail||'').trim()) return res.status(400).json({ error:'Completa los datos obligatorios.' });
     const advisor=directory.advisors.find(a=>a.id===body.advisorId); if(!advisor||advisor.campaignId!==body.campaignId)return res.status(400).json({error:'El asesor y la campaña no coinciden.'});
     const operationId=advisor.operationId||`op_legacy_${advisor.campaignId}`;

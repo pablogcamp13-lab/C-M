@@ -26,6 +26,7 @@ const all: NavigationItem[] = [
 const monitor: NavigationItem[] = [
   { label: 'Evaluar', section: 'evaluations', icon: <ClipboardCheck />, group: 'GENERAL' },
   { label: 'Feedbacks', section: 'feedback', icon: <MessageSquareText />, group: 'GENERAL' },
+  { label: 'Alertas', section: 'quality_alerts', icon: <BellRing />, group: 'ANÁLISIS' },
   { label: 'Resultados', section: 'monitor_results', icon: <BarChart3 />, group: 'ANÁLISIS' },
   { label: 'Cápsulas', section: 'development', icon: <GraduationCap />, group: 'GESTIÓN' },
   { label: 'Mis avances', section: 'monitor_progress', icon: <LineChart />, group: 'GESTIÓN' },
