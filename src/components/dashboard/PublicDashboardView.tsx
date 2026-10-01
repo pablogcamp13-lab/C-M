@@ -9,7 +9,7 @@ import { SpeechTypificationFilter } from './SpeechTypificationFilter';
 import { CompanyDistributionCard, EvaluationStatusCard, QualityTrendCard } from './ExecutiveCharts';
 import type { StatusItem, TrendPoint } from './useExecutiveHome';
 import type { SpeechTypificationFilter as SpeechFilterValue } from '../../utils/speechTypification';
-import { normalizeMotive, type GeoCall } from '../../utils/movistarGeo';
+import { type GeoCall } from '../../utils/movistarGeo';
 
 const MovistarGeoCard=React.lazy(()=>import('./MovistarGeoCard').then(module=>({default:module.MovistarGeoCard})));
 
@@ -125,16 +125,17 @@ const PublicQualityPage:React.FC<QualityPageProps>=({snapshot,loading,error,data
   const activeAdvisors=snapshot?.advisors.filter(advisor=>advisor.status==='ACTIVO'&&(advisorId==='ALL'||advisor.id===advisorId))||[];
   const coverage=new Set(selected.map(item=>item.advisorId).filter(id=>activeAdvisors.some(advisor=>advisor.id===id))).size;
   const critical=selected.filter(item=>item.criticalError).length;
+  const movistarOnly=selected.length>0&&selected.every(item=>item.items.some(criterion=>criterion.criterionId.startsWith('tc_mov_')));
   const statuses=(snapshot?.planStatuses||[]).filter(plan=>advisorId==='ALL'||plan.advisorIds.includes(advisorId)).map(plan=>plan.status);
   const typifications=new Map<string,number>();
-  for(const item of selected){const raw=item.typification?.trim()||item.geoAnalysis?.primaryMotive||item.speechTypification||'Sin tipificación';if(raw==='Sin tipificación')continue;const label=normalizeMotive(raw)==='Cobertura / señal'?'Señal deficiente / No hay señal':raw;typifications.set(label,(typifications.get(label)||0)+1);}
+  for(const item of selected){const raw=item.typification?.trim()||item.geoAnalysis?.primaryMotive||item.speechTypification||'Sin tipificación';const label=raw==='Cobertura / señal'?'Señal deficiente / No hay señal':raw;typifications.set(label,(typifications.get(label)||0)+1);}
   const geoCalls:GeoCall[]=selected.map(item=>({id:item.id,department:item.geoAnalysis?.department||'No identificado',province:item.geoAnalysis?.province,district:item.geoAnalysis?.district,sale:item.geoAnalysis?.outcomeKnown===false?null:item.sale??null,primaryMotive:item.geoAnalysis?.primaryMotive,mentionedMotives:item.geoAnalysis?.mentionedMotives,responsibility:item.geoAnalysis?.primaryMotive==='Cobertura / señal'?'NEGOCIO':item.geoAnalysis?.fallResponsibility||undefined,advisorId:item.advisorId,date:item.date,audioId:''}));
   const maxFailure=Math.max(1,...data.pareto.map(item=>item.frequency));
   const cards=[
-    {label:'Resultado global PUE',value:scoreLabel(data.average),detail:`${data.scoredSelected.length} evaluaciones con nota`,icon:<ClipboardCheck/>},
+    {label:movistarOnly?'Resultado global Movistar':'Resultado global PUE',value:scoreLabel(data.average),detail:`${data.scoredSelected.length} evaluaciones con nota`,icon:<ClipboardCheck/>},
     {label:'Cobertura de Calidad',value:`${coverage}/${activeAdvisors.length}`,detail:'Asesores activos evaluados del alcance',icon:<UsersRound/>},
-    {label:'Errores críticos',value:selected.length?String(critical):'Sin datos',detail:critical?'Evaluaciones con error crítico':'Sin errores críticos',icon:<AlertTriangle/>},
-    {label:'Evaluaciones PUE',value:selected.length?String(selected.length):'Sin datos',detail:'Registros del período',icon:<CheckSquare/>},
+    {label:'Errores críticos',value:movistarOnly?'No configurado':selected.length?String(critical):'Sin datos',detail:movistarOnly?'La ficha Movistar no clasifica errores críticos':critical?'Evaluaciones con error crítico':'Sin errores críticos',icon:<AlertTriangle/>},
+    {label:movistarOnly?'Evaluaciones Movistar':'Evaluaciones PUE',value:selected.length?String(selected.length):'Sin datos',detail:'Registros del período',icon:<CheckSquare/>},
     {label:'Planes de acción',value:statuses.length?String(statuses.length):'Sin datos',detail:`${statuses.filter(status=>status==='EN_CURSO'||status==='PENDIENTE').length} en ejecución`,icon:<ListChecks/>},
   ];
   return <div className="cm-dashboard-legacy quality-dashboard min-h-screen bg-[#0b1727] text-slate-100">

@@ -5,7 +5,7 @@ import type { Evaluation, EvaluationItem, EvaluationType, QualityGuideline } fro
 import { filesApi } from '../../api/sharedRepository';
 import { AudioPlayer } from '../common/AudioPlayer';
 import { CallTypificationFields } from './CallTypificationFields';
-import { EMPTY_CLASSIFICATION, classificationError, classificationPayload } from '../../utils/evaluationTypification';
+import { EMPTY_CLASSIFICATION, classificationError, classificationPayload, inferredSourceTypification } from '../../utils/evaluationTypification';
 import { TECHCENTER_MOVISTAR_FIELDS, TECHCENTER_MOVISTAR_FLOWS, TECHCENTER_MOVISTAR_FORM_ID, isReverseTechcenterCriterion, isTechcenterCriterion, scoreTechcenterMovistar, techcenterCriterionPresentation, techcenterFieldsForFlow, type TechcenterMovistarField, type TechcenterMovistarFlow } from '../../data/techcenterMovistarForm';
 
 const inputClass='cm-input mt-1 w-full rounded-lg p-2.5 text-sm font-normal';
@@ -34,7 +34,7 @@ export const TechcenterMovistarQualityModal:React.FC<{operationId:string;campaig
   const fields=useMemo(()=>techcenterFieldsForFlow(flow),[flow]);
   const isSaleFlow=flow.startsWith('Venta');
   const scored=scoreTechcenterMovistar(fields,answers);
-  const setValue=(id:number,value:string)=>setValues(previous=>({...previous,[id]:value}));
+  const setValue=(id:number,value:string)=>{setValues(previous=>({...previous,[id]:value}));if(id===30||id===31){const inferred=inferredSourceTypification(value);if(inferred)setClassification(previous=>previous.typification?previous:{...previous,typification:inferred});}};
   const fieldValue=(id:number)=>id===9?values[id]||({Q1:'Cuartil I',Q2:'Cuartil II',Q3:'Cuartil III',Q4:'Cuartil IV'} as Record<string,string>)[advisor?.quartile||'']||'':id===10?'Techcenter':id===12||id===13?values[id]||advisorId:id===14?flow.startsWith('Venta')?'Venta':'No venta':id===17?flow:values[id]||'';
 
   const renderField=(field:TechcenterMovistarField)=>{
@@ -51,6 +51,7 @@ export const TechcenterMovistarQualityModal:React.FC<{operationId:string;campaig
   const save=async()=>{
     if(savingRef.current)return;
     if(!advisor){setError('Selecciona un asesor activo de esta campaña.');return;}
+    if(!isSaleFlow&&!classification.typification){setError('Selecciona la tipificación principal en Grabación antes de guardar.');return;}
     if(classificationError(classification)){setError(classificationError(classification));return;}
     const required=[8,11,12,13,14,15,...(flow.includes('Fija')?[16]:[]),...(isSaleFlow?[108,109]:[])];
     if(required.some(id=>!fieldValue(id).trim())){setError('Completa los campos obligatorios de esta encuesta.');return;}
@@ -95,7 +96,7 @@ export const TechcenterMovistarQualityModal:React.FC<{operationId:string;campaig
         <div className="rounded-lg border border-[var(--cm-border)] p-2.5 text-xs"><b>Socio: Techcenter</b><span className="mt-1 block text-[var(--cm-text-secondary)]">Auditor: {currentUser.name} · {currentUser.email}</span><span className="block text-[var(--cm-text-secondary)]">Inicio: {new Date(startedAt.current).toLocaleString('es-PE')}</span></div>
       </div></section>
       <section className="cm-card space-y-3 p-4"><h3 className="font-bold">Datos generales de la llamada</h3><div className="grid gap-3 sm:grid-cols-2">{general.map(renderField)}</div></section>
-      <section className="cm-card space-y-3 p-4"><h3 className="font-bold">Grabación</h3><CallTypificationFields value={classification} onChange={setClassification} allowSecondary/><AudioPlayer audioUrl={audio?.url} audioFileName={audio?.file.name} audioDurationSeconds={audio?.duration} onAudioUpload={(file,url,duration)=>{setAudio({file,url,duration});setValue(8,file.name);}} onRemoveAudio={()=>setAudio(null)}/></section>
+      <section className="cm-card space-y-3 p-4"><h3 className="font-bold">Grabación</h3><p className="text-xs text-[var(--cm-text-secondary)]">La tipificación principal alimenta el dashboard. La respuesta de la ficha puede sugerirla; confirma aquí la categoría específica.</p><CallTypificationFields value={classification} onChange={setClassification} allowSecondary/><AudioPlayer audioUrl={audio?.url} audioFileName={audio?.file.name} audioDurationSeconds={audio?.duration} onAudioUpload={(file,url,duration)=>{setAudio({file,url,duration});setValue(8,file.name);}} onRemoveAudio={()=>setAudio(null)}/></section>
       {sections.map(section=><section key={section} className="cm-card space-y-3 p-4">
         <h3 className="border-b border-[var(--cm-border)] pb-2 font-bold">{section}</h3>
         {flowFields.filter(field=>field.section===section).map(field=>{

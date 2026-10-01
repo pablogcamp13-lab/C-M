@@ -8,7 +8,7 @@ import { StatusBadge } from '../common/StatusBadge';
 import { ThreeScore } from '../common/ThreeScore';
 import { AudioPlayer } from '../common/AudioPlayer';
 import { CallTypificationFields } from './CallTypificationFields';
-import { EMPTY_CLASSIFICATION, classificationError, classificationFromEvaluation, classificationPayload } from '../../utils/evaluationTypification';
+import { EMPTY_CLASSIFICATION, classificationError, classificationFromEvaluation, classificationPayload, evaluationTypificationLabel } from '../../utils/evaluationTypification';
 import { getItemCompliance } from '../../utils/calculations';
 import { filesApi } from '../../api/sharedRepository';
 import { SPEECH_TYPIFICATIONS } from '../../utils/speechTypification';
@@ -167,7 +167,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
             <CallTypificationFields value={classification} onChange={setClassification} allowSecondary={evaluation.qualityForm?.id===TECHCENTER_MOVISTAR_FORM_ID}/>
           </div>}
           
-          {(evaluation.typification||evaluation.geoAnalysis?.secondaryMotive)&&<div className="cm-card rounded-xl p-4 text-xs"><b>Tipificación:</b> {evaluation.typification||'Sin tipificar'}{evaluation.geoAnalysis?.secondaryMotive&&<> · <b>Motivo 2:</b> {evaluation.geoAnalysis.secondaryMotive==='Cobertura / señal'?'Mala señal (cobertura)':evaluation.geoAnalysis.secondaryMotive}</>}{evaluation.geoAnalysis?.department&&<> · <b>Departamento:</b> {evaluation.geoAnalysis.department}</>}{evaluation.geoAnalysis?.province&&<> · <b>Provincia:</b> {evaluation.geoAnalysis.province}</>}{evaluation.geoAnalysis?.district&&<> · <b>Distrito:</b> {evaluation.geoAnalysis.district}</>}</div>}
+          {evaluation.evaluationType==='QUALITY'&&<div className="cm-card rounded-xl p-4 text-xs"><b>Tipificación:</b> {evaluationTypificationLabel(evaluation)}{evaluation.geoAnalysis?.secondaryMotive&&<> · <b>Motivo 2:</b> {evaluation.geoAnalysis.secondaryMotive==='Cobertura / señal'?'Mala señal (cobertura)':evaluation.geoAnalysis.secondaryMotive}</>}{evaluation.geoAnalysis?.department&&<> · <b>Departamento:</b> {evaluation.geoAnalysis.department}</>}{evaluation.geoAnalysis?.province&&<> · <b>Provincia:</b> {evaluation.geoAnalysis.province}</>}{evaluation.geoAnalysis?.district&&<> · <b>Distrito:</b> {evaluation.geoAnalysis.district}</>}</div>}
           {/* Metadata & Scores Top Card */}
           <div className="cm-card rounded-xl p-4 sm:p-5 grid grid-cols-1 md:grid-cols-4 gap-4">
             

@@ -1,12 +1,33 @@
 import districts from '../data/peruDistricts.json';
 import type { Evaluation } from '../types';
+import { TECHCENTER_MOVISTAR_FORM_ID } from '../data/techcenterMovistarScope';
 
 export const SIGNAL_TYPIFICATION = 'Señal deficiente / No hay señal';
 export const DELIVERY_TYPIFICATION = 'No hay delivery';
 export const SECONDARY_SIGNAL_TYPIFICATION = 'Mala señal';
 export const requiresLocation = (typification:string) => typification===SIGNAL_TYPIFICATION||typification===DELIVERY_TYPIFICATION;
-export const CALL_TYPIFICATIONS = ['', SIGNAL_TYPIFICATION, DELIVERY_TYPIFICATION, 'Mala experiencia Movistar', 'Precio', 'Conforme con operador', 'Agenda / timing', 'No titular', 'No califica scoring', 'Cliente no permite argumentar', 'Otro'];
+export const CALL_TYPIFICATIONS = ['', SIGNAL_TYPIFICATION, DELIVERY_TYPIFICATION, 'Mala experiencia Movistar', 'Precio', 'Conforme con operador', 'Agenda / timing', 'No titular', 'Corta llamada', 'No califica scoring', 'Cliente no permite argumentar', 'Otro'];
 export const SECONDARY_TYPIFICATIONS = [SECONDARY_SIGNAL_TYPIFICATION,...CALL_TYPIFICATIONS.filter(item=>item&&item!==SIGNAL_TYPIFICATION)];
+export const UNTYPIFIED_LABEL = 'Sin tipificación';
+const sourceLabels:Record<string,string>={
+  'SEÑAL ES DEFICIENTE/NO HAY SEÑAL':SIGNAL_TYPIFICATION,
+  'NO HAY COBERTURA (FACILIDADES TÉCNICAS)':SIGNAL_TYPIFICATION,
+  'NO HAY DELIVERY':DELIVERY_TYPIFICATION,
+  'CLIENTE MALA EXPERIENCIA CON MOVISTAR':'Mala experiencia Movistar',
+  'CLIENTE NO ACEPTA OFERTA/MUY CARO':'Precio',
+  'NO CALIFICA SCORING (EQUIPO/CHIP/EQUIPO)':'No califica scoring',
+  'CLIENTE NO PERMITE ARGUMENTAR':'Cliente no permite argumentar',
+  'CLIENTE CORTA LLAMADA':'Corta llamada',
+};
+export const sourceTypification = (evaluation:Pick<Evaluation,'qualityForm'>):string => {
+  if(evaluation.qualityForm?.id!==TECHCENTER_MOVISTAR_FORM_ID)return '';
+  const raw=String(evaluation.qualityForm.fields?.[evaluation.qualityForm.flow==='No Venta Fija Out'?'31':'30']||'').trim();
+  return !raw||raw==='NO APLICA'?'':sourceLabels[raw]||raw;
+};
+export const inferredSourceTypification = (raw:string):string => sourceLabels[raw]||'';
+export const evaluationTypificationLabel = (evaluation:Evaluation):string =>
+  evaluation.typification?.trim()||(evaluation.geoAnalysis?.primaryMotive==='Cobertura / señal'?SIGNAL_TYPIFICATION:evaluation.geoAnalysis?.primaryMotive?.trim())||sourceTypification(evaluation)||evaluation.noSaleReason?.trim()||
+  ({PREFIERE_PREPAGO:'Prefiere mantenerse en prepago',NO_ES_TITULAR:'No es titular',CORTA_LLAMADA:'Corta llamada'} as Record<string,string>)[evaluation.speechTypification||'']||UNTYPIFIED_LABEL;
 export type CallClassification = { typification: string; secondaryTypification?: string; department: string; province?: string; districtCode: string };
 export const EMPTY_CLASSIFICATION: CallClassification = {typification:'',secondaryTypification:'',department:'',province:'',districtCode:''};
 export const PERU_DISTRICTS = districts as Array<{code:string;department:string;province:string;district:string}>;

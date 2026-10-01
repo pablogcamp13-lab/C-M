@@ -1,8 +1,18 @@
 import assert from 'node:assert/strict';
-import { aggregateDepartments, geoHeatColor, matchesGeoMotive, normalizeDepartment, PERU_GEOJSON, resolveGeoAnalysis } from '../src/utils/movistarGeo';
+import { aggregateDepartments, evaluationGeoCall, geoHeatColor, matchesGeoMotive, normalizeDepartment, PERU_GEOJSON, resolveGeoAnalysis } from '../src/utils/movistarGeo';
 import { MOVISTAR_GEO_DEMO } from '../src/data/movistarGeoDemo';
-import { classificationError, classificationFromEvaluation, classificationPayload, DELIVERY_TYPIFICATION, PERU_DISTRICTS, requiresLocation, SECONDARY_SIGNAL_TYPIFICATION, SIGNAL_TYPIFICATION } from '../src/utils/evaluationTypification';
+import { classificationError, classificationFromEvaluation, classificationPayload, DELIVERY_TYPIFICATION, evaluationTypificationLabel, inferredSourceTypification, PERU_DISTRICTS, requiresLocation, SECONDARY_SIGNAL_TYPIFICATION, SIGNAL_TYPIFICATION, UNTYPIFIED_LABEL } from '../src/utils/evaluationTypification';
 import type { Evaluation } from '../src/types';
+import { TECHCENTER_MOVISTAR_FORM_ID } from '../src/data/techcenterMovistarForm';
+
+const historical=(answer:string)=>({evaluationType:'QUALITY',qualityForm:{id:TECHCENTER_MOVISTAR_FORM_ID,flow:'No Venta Movil Out',fields:{'30':answer}}} as unknown as Evaluation);
+assert.equal(evaluationTypificationLabel(historical('SEÑAL ES DEFICIENTE/NO HAY SEÑAL')),SIGNAL_TYPIFICATION);
+assert.equal(evaluationTypificationLabel(historical('CLIENTE MALA EXPERIENCIA CON MOVISTAR')),'Mala experiencia Movistar');
+assert.equal(evaluationTypificationLabel(historical('')),UNTYPIFIED_LABEL);
+assert.equal(inferredSourceTypification('SE CORTA LLAMADA/AGENDA/NO ES TITULAR'),'');
+assert.equal(evaluationGeoCall({...historical('SEÑAL ES DEFICIENTE/NO HAY SEÑAL'),sale:false} as Evaluation).primaryMotive,'Cobertura / señal');
+assert.equal(evaluationGeoCall({...historical('CLIENTE MALA EXPERIENCIA CON MOVISTAR'),sale:false} as Evaluation).primaryMotive,'Mala experiencia Movistar');
+assert.equal(evaluationGeoCall({...historical('SE CORTA LLAMADA/AGENDA/NO ES TITULAR'),sale:false} as Evaluation).primaryMotive,undefined);
 
 assert.equal(normalizeDepartment('Áncash'),'ANCASH');
 assert.equal(normalizeDepartment('Lima Provincia'),'LIMA');

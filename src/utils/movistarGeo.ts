@@ -1,6 +1,7 @@
 import departments from '../data/peruDepartments.json';
 import provinces from '../data/peruProvinces.json';
 import type { Evaluation } from '../types';
+import { sourceTypification, SIGNAL_TYPIFICATION } from './evaluationTypification';
 
 export const GEO_MOTIVES = [
   'Todos', 'Cobertura / señal', 'No hay delivery', 'Mala experiencia Movistar',
@@ -74,12 +75,17 @@ export const resolveGeoAnalysis = (fields: {department?:unknown; province?:unkno
   };
 };
 
-export const evaluationGeoCall = (evaluation:Evaluation):GeoCall => ({
+export const evaluationGeoCall = (evaluation:Evaluation):GeoCall => {
+  const inferred=evaluation.typification?.trim()||sourceTypification(evaluation);
+  const inferredMotive=inferred===SIGNAL_TYPIFICATION?'Cobertura / señal':GEO_MOTIVES.slice(1).includes(inferred as GeoMotive)?inferred:undefined;
+  const primaryMotive=evaluation.geoAnalysis?.primaryMotive||inferredMotive;
+  return ({
   id:evaluation.id, department:normalizeDepartment(evaluation.geoAnalysis?.department), province:evaluation.geoAnalysis?.province, district:evaluation.geoAnalysis?.district, sale:evaluation.geoAnalysis?.outcomeKnown === false ? null : evaluation.sale,
-  primaryMotive:evaluation.geoAnalysis?.primaryMotive, mentionedMotives:evaluation.geoAnalysis?.mentionedMotives,
-  responsibility:evaluation.geoAnalysis?.primaryMotive==='Cobertura / señal'?'NEGOCIO':evaluation.geoAnalysis?.fallResponsibility, advisorId:evaluation.advisorId,
+  primaryMotive, mentionedMotives:[...new Set([...(evaluation.geoAnalysis?.mentionedMotives||[]),...(inferredMotive?[inferredMotive]:[])])],
+  responsibility:primaryMotive==='Cobertura / señal'?'NEGOCIO':evaluation.geoAnalysis?.fallResponsibility, advisorId:evaluation.advisorId,
   date:evaluation.date, audioId:evaluation.recordingCode || evaluation.callId,
-});
+  });
+};
 
 export const matchesGeoMotive = (call:GeoCall, motive:GeoMotive, mode:GeoMode) => call.sale === false && (motive === 'Todos' || (mode === 'PRIMARY' ? call.primaryMotive === motive : call.mentionedMotives?.includes(motive) === true));
 

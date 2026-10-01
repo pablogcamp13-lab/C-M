@@ -9,7 +9,7 @@ import { speechImportApi } from '../../api/sharedRepository';
 import { FiltersBar } from '../common/FiltersBar';
 import { ThreeScore } from '../common/ThreeScore';
 import { StatusBadge } from '../common/StatusBadge';
-import { SPEECH_TYPIFICATIONS } from '../../utils/speechTypification';
+import { evaluationTypificationLabel, UNTYPIFIED_LABEL } from '../../utils/evaluationTypification';
 import { buildEvaluationFolders } from './evaluationFolders';
 import { 
   Eye, 
@@ -46,6 +46,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'QUALITY' | 'D3C'>('ALL');
   const [resultFilter, setResultFilter] = useState<'ALL' | 'VENTA' | 'NO_VENTA'>('ALL');
   const [stateFilter, setStateFilter] = useState<'ALL' | 'PENDIENTE' | 'FINALIZADA'>('ALL');
+  const [typificationFilter,setTypificationFilter]=useState('ALL');
   const [importOpen, setImportOpen] = useState(false);
   const [selectedBatchDate, setSelectedBatchDate] = useState<string | null>(null);
   const [selectedCompanyKey, setSelectedCompanyKey] = useState<string | null>(null);
@@ -56,8 +57,10 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
   const isReadOnly = ['ASESOR', 'SUPERVISOR'].includes(currentUser.role);
   const canDelete = ['ADMINISTRADOR', 'CONSULTOR'].includes(currentUser.role);
   const canImport = ['ADMINISTRADOR', 'CONSULTOR', 'MONITOR'].includes(currentUser.role);
+  const typificationOptions=useMemo(()=>[...new Set<string>(filteredEvaluations.filter(ev=>ev.evaluationType==='QUALITY').map(evaluationTypificationLabel))].sort((a,b)=>a===UNTYPIFIED_LABEL?1:b===UNTYPIFIED_LABEL?-1:a.localeCompare(b,'es-PE')),[filteredEvaluations]);
   const matchingEvaluations = filteredEvaluations.filter(ev => {
     if (typeFilter !== 'ALL' && ev.evaluationType !== typeFilter) return false;
+    if (typificationFilter !== 'ALL' && (ev.evaluationType!=='QUALITY'||evaluationTypificationLabel(ev)!==typificationFilter)) return false;
     if (resultFilter !== 'ALL' && (ev.sale ? 'VENTA' : 'NO_VENTA') !== resultFilter) return false;
     const state = ev.validationStatus === 'AUTOMATIC_PENDING' || ev.validationStatus === 'PENDIENTE_AUTOMATICO' ? 'PENDIENTE' : 'FINALIZADA';
     return stateFilter === 'ALL' || state === stateFilter;
@@ -109,12 +112,13 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
       {/* Global Filter Bar with Progressive Disclosure */}
       <FiltersBar
         visibleCount={visibleCount}
-        extraFilterCount={Number(typeFilter !== 'ALL') + Number(resultFilter !== 'ALL') + Number(stateFilter !== 'ALL')}
-        onResetExtraFilters={() => { setTypeFilter('ALL'); setResultFilter('ALL'); setStateFilter('ALL'); }}
+        extraFilterCount={Number(typeFilter !== 'ALL') + Number(resultFilter !== 'ALL') + Number(stateFilter !== 'ALL')+Number(typificationFilter!=='ALL')}
+        onResetExtraFilters={() => { setTypeFilter('ALL'); setResultFilter('ALL'); setStateFilter('ALL'); setTypificationFilter('ALL'); }}
         extraFilters={<div className="space-y-3">
           <label className="block text-xs font-semibold">Tipo<select value={typeFilter} onChange={event => setTypeFilter(event.target.value as typeof typeFilter)} className="cm-select mt-1.5 w-full px-3 py-2"><option value="ALL">Todas</option><option value="QUALITY">Calidad</option><option value="D3C">Mejora Continua</option></select></label>
           <label className="block text-xs font-semibold">Resultado<select value={resultFilter} onChange={event => setResultFilter(event.target.value as typeof resultFilter)} className="cm-select mt-1.5 w-full px-3 py-2"><option value="ALL">Todo resultado</option><option value="VENTA">Venta</option><option value="NO_VENTA">No venta</option></select></label>
           <label className="block text-xs font-semibold">Estado<select value={stateFilter} onChange={event => setStateFilter(event.target.value as typeof stateFilter)} className="cm-select mt-1.5 w-full px-3 py-2"><option value="ALL">Todo estado</option><option value="PENDIENTE">Pendiente de revisión</option><option value="FINALIZADA">Finalizada</option></select></label>
+          <label className="block text-xs font-semibold">Tipificación<select value={typificationFilter} onChange={event=>setTypificationFilter(event.target.value)} className="cm-select mt-1.5 w-full px-3 py-2"><option value="ALL">Todas las tipificaciones</option>{typificationOptions.map(label=><option key={label} value={label}>{label}</option>)}</select></label>
         </div>}
       />
 
@@ -235,7 +239,7 @@ export const EvaluationsList: React.FC<EvaluationsListProps> = ({
                           </div>
                         </td>
 
-                        <td className="py-3 px-3"><div className="flex flex-wrap gap-1"><span className="cm-badge">{ev.evaluationType === 'QUALITY' ? 'Calidad' : 'Mejora Continua'}</span>{ev.origin==='SPEECH_ANALYTICS'&&<><span className="cm-badge cm-badge--info" title="Speech Analytics">SA</span><span className="cm-badge">{SPEECH_TYPIFICATIONS.find(item=>item.value===ev.speechTypification)?.label||'Sin tipificación'}</span></>}</div></td>
+                        <td className="py-3 px-3"><div className="flex flex-wrap gap-1"><span className="cm-badge">{ev.evaluationType === 'QUALITY' ? 'Calidad' : 'Mejora Continua'}</span>{ev.origin==='SPEECH_ANALYTICS'&&<span className="cm-badge cm-badge--info" title="Speech Analytics">SA</span>}{ev.evaluationType==='QUALITY'&&<span className="cm-badge" title={evaluationTypificationLabel(ev)}>{evaluationTypificationLabel(ev)}</span>}</div></td>
 
                         {/* 3. Score 3C (Numeric Badge) */}
                         <td className="py-3 px-3 text-center">
