@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ClipboardCheck, Link2, ListChecks, ShieldCheck, Users } from 'lucide-react';
+import { CheckCircle2, ClipboardCheck, Link2, ListChecks, ShieldCheck, Tag, Users } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { QUALITY_ATTRIBUTES } from '../../data/qualityPueData';
 import { FiltersBar } from '../common/FiltersBar';
 import { EvaluationOriginFilter, type EvaluationOriginFilterValue } from './EvaluationOriginFilter';
 import { isQualityEvaluable } from '../../utils/speechTypification';
 import { evaluationGeoCall } from '../../utils/movistarGeo';
-import { evaluationTypificationLabel } from '../../utils/evaluationTypification';
+import { evaluationTypificationLabel, UNTYPIFIED_LABEL } from '../../utils/evaluationTypification';
 import { TECHCENTER_MOVISTAR_FIELDS, TECHCENTER_MOVISTAR_FORM_ID, techcenterCriterionPresentation } from '../../data/techcenterMovistarForm';
 import { PublicDashboardLinksModal } from './PublicDashboardLinksModal';
 
@@ -33,7 +33,6 @@ export const QualityDashboardView: React.FC = () => {
   const scopedAdvisorIds=new Set(scopedAdvisors.map(advisor=>advisor.id));
   const selectedPlans=actionPlans.filter(plan=>!filters.companyId&&!filters.campaignId&&!filters.operationId&&!filters.supervisorId&&!filters.advisorId||[...(plan.advisorIds||[]),plan.advisorId].some(id=>scopedAdvisorIds.has(id)));
   const coverage = new Set(quality.map(e => e.advisorId).filter(id=>scopedAdvisorIds.has(id))).size;
-  const critical = quality.length ? quality.filter(e => Boolean(e.qualityCriticalErrorIds?.length)||e.items.some(item=>item.compliance==='NO_CUMPLE'&&(item.qualityGuideline?.critical||String(item.classification||'').startsWith('CRITICO_')))).length : null;
   const activePlans = selectedPlans.filter(p => p.status === 'EN_CURSO' || p.status === 'PENDIENTE').length;
   const overdue = selectedPlans.filter(p => p.status === 'VENCIDO').length;
   const selectedOperation=operations.find(operation=>operation.id===filters.operationId);
@@ -83,8 +82,9 @@ export const QualityDashboardView: React.FC = () => {
     typificationCounts.set(label,(typificationCounts.get(label)||0)+1);
   }
   const typifications=[...typificationCounts].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],'es-PE'));
+  const leadingTypification=typifications.find(([label])=>label!==UNTYPIFIED_LABEL);
   const movistarOnly=quality.length>0&&techcenterEvaluations.length===quality.length;
-  const cards = [{ label: movistarOnly?'Resultado global Movistar':'Resultado global PUE', display: value(average), detail: average === null ? 'Sin evaluaciones con nota' : `${scores.length} evaluaciones con nota`, icon: <ClipboardCheck /> }, { label: 'Cobertura de Calidad', display: `${coverage}/${scopedAdvisors.length}`, detail: 'Asesores activos evaluados del alcance', icon: <Users /> }, { label: 'Errores críticos', display: movistarOnly?'No configurado':critical === null ? 'Sin datos' : String(critical), detail: movistarOnly?'La ficha Movistar no clasifica errores críticos':critical === null ? 'Sin evaluaciones PUE' : critical ? 'Evaluaciones con error crítico' : 'Sin errores críticos', icon: <AlertTriangle /> }, { label: movistarOnly?'Evaluaciones Movistar':'Evaluaciones PUE', display: quality.length || 'Sin datos', detail: quality.length ? 'Registros del período' : 'Sin registros del período', icon: <CheckCircle2 /> }, { label: 'Planes de acción', display: selectedPlans.length || 'Sin datos', detail: activePlans ? `${activePlans} en ejecución` : 'Sin planes en ejecución', icon: <ListChecks /> }];
+  const cards = [{ label: movistarOnly?'Resultado global Movistar':'Resultado global PUE', display: value(average), detail: average === null ? 'Sin evaluaciones con nota' : `${scores.length} evaluaciones con nota`, icon: <ClipboardCheck /> }, { label: 'Cobertura de Calidad', display: `${coverage}/${scopedAdvisors.length}`, detail: 'Asesores activos evaluados del alcance', icon: <Users /> }, { label: 'Tipificación con mayor participación', display: leadingTypification?`${(leadingTypification[1]/quality.length*100).toFixed(1)}%`:'Sin datos', detail: leadingTypification?`${leadingTypification[0]} · ${leadingTypification[1]} de ${quality.length} evaluaciones`:'No hay evaluaciones tipificadas', icon: <Tag /> }, { label: movistarOnly?'Evaluaciones Movistar':'Evaluaciones PUE', display: quality.length || 'Sin datos', detail: quality.length ? 'Registros del período' : 'Sin registros del período', icon: <CheckCircle2 /> }, { label: 'Planes de acción', display: selectedPlans.length || 'Sin datos', detail: activePlans ? `${activePlans} en ejecución` : 'Sin planes en ejecución', icon: <ListChecks /> }];
   return <div className="cm-workspace cm-dashboard-legacy quality-dashboard flex-1 overflow-y-auto bg-[#F7F9F9]"><FiltersBar /><div className="w-full space-y-4 px-5 py-5 sm:px-7"><div className="cm-page-heading flex items-center justify-between gap-3"><div><span className="cm-eyebrow">CALIDAD · {selectedCampaign?.name || 'Todas las campañas'}</span><h2 className="text-lg font-bold">Dashboard Calidad</h2><p className="text-xs text-[#66767A]">Cumplimiento, cobertura y riesgos críticos de Calidad.</p></div><div className="flex flex-wrap gap-2">{currentUser.role==='ADMINISTRADOR'&&<button onClick={()=>setSharingOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-[#00B8B0] px-3 py-1.5 text-xs font-bold text-[#006B6B] hover:bg-[#E8F5F4]"><Link2 className="h-3.5 w-3.5"/>Compartir dashboard</button>}<button onClick={() => setCurrentSection('evaluations')} className="rounded-lg border border-[#00B8B0] px-3 py-1.5 text-xs font-bold text-[#006B6B] hover:bg-[#E8F5F4]">Ver evaluaciones →</button></div></div>
     {sharingOpen&&<PublicDashboardLinksModal onClose={()=>setSharingOpen(false)} initialCompanyId={shareCompanyId} initialCampaignId={shareCompanyId?selectedCampaign?.id:''} initialDashboardType="QUALITY"/>}
     <EvaluationOriginFilter value={originFilter} onChange={setOriginFilter}/>
