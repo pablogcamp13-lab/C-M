@@ -40,7 +40,7 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   const { advisors, operations, users, currentUser, updateEvaluation } = useApp();
   const [expandedCriterion, setExpandedCriterion] = useState<string | null>(null);
   const [agentDetail,setAgentDetail]=useState<any>(null); const [commitment,setCommitment]=useState(''); const [commitmentDate,setCommitmentDate]=useState(''); const [savingCommitment,setSavingCommitment]=useState(false); const [commitmentError,setCommitmentError]=useState('');
-  const [isEditing,setIsEditing]=useState(false); const [savingEdit,setSavingEdit]=useState(false); const [editError,setEditError]=useState(''); const [uploadingAudio,setUploadingAudio]=useState(false); const [audioError,setAudioError]=useState('');
+  const [isEditing,setIsEditing]=useState(false); const [savingEdit,setSavingEdit]=useState(false); const [editError,setEditError]=useState(''); const [editSuccess,setEditSuccess]=useState(''); const [itemsEdited,setItemsEdited]=useState(false); const [uploadingAudio,setUploadingAudio]=useState(false); const [audioError,setAudioError]=useState('');
   const [feedbackModalOpen,setFeedbackModalOpen]=useState(false); const [feedbackText,setFeedbackText]=useState(''); const [creatingFeedback,setCreatingFeedback]=useState(false); const [feedbackError,setFeedbackError]=useState('');
   const [draftItems,setDraftItems]=useState<EvaluationItem[]>([]);
   const [draftAdvisorId,setDraftAdvisorId]=useState('');
@@ -61,8 +61,10 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
     setDraftMeta({date:evaluation.date||'',time:evaluation.time||'',callId:evaluation.callId||'',recordingCode:evaluation.recordingCode||'',type:evaluation.type||'DIAGNOSTICO_INICIAL',product:evaluation.product||'',sale:Boolean(evaluation.sale),saleResult:evaluation.saleResult||'NO_VENTA',noSaleReason:evaluation.noSaleReason||'',comments:evaluation.comments||'',callDescription:evaluation.callDescription||''});
     setDraftAdvisorId(evaluation.advisorId);
     setClassification(classificationFromEvaluation(evaluation));
-    setIsEditing(false);setEditError('');
+    setIsEditing(false);setEditError('');setItemsEdited(false);
   },[evaluation]);
+
+  useEffect(()=>{setEditSuccess('');},[evaluation?.id]);
 
   useEffect(()=>{
     setAgentDetail(null);setFeedbackModalOpen(false);setFeedbackError('');
@@ -82,17 +84,23 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
   const canEdit = currentUser.role === 'ADMINISTRADOR'||monitorCanValidate;
   const advisorOptions=advisors.filter(item=>item.id===evaluation.advisorId||(item.campaignId===evaluation.campaignId&&(!evaluation.operationId||item.operationId===evaluation.operationId)&&(!evaluation.companyId||operations.some(operation=>operation.id===item.operationId&&operation.companyId===evaluation.companyId))));
   const canAttachAudio = canEdit && !evaluation.audioUrl;
-  const changeItem=(id:string,changes:Partial<EvaluationItem>)=>setDraftItems(items=>items.map(item=>item.id===id?{...item,...changes}:item));
+  const changeItem=(id:string,changes:Partial<EvaluationItem>)=>{setItemsEdited(true);setDraftItems(items=>items.map(item=>item.id===id?{...item,...changes}:item));};
   const saveEdit=async()=>{
     if(!evaluation||savingEdit)return;
+    const advisorChanged=currentUser.role==='ADMINISTRADOR'&&draftAdvisorId!==evaluation.advisorId;
     if(currentUser.role==='ADMINISTRADOR'&&!advisorOptions.some(item=>item.id===draftAdvisorId)){setEditError('Selecciona una asesora de la misma campaña y operación.');return;}
-    if(!draftItems.some(item=>item.compliance==='CUMPLE'||item.compliance==='NO_CUMPLE')){setEditError('Responde al menos un criterio evaluable antes de guardar.');return;}
-    if(classificationError(classification)){setEditError(classificationError(classification));return;}
-    setSavingEdit(true);setEditError('');
+    if(itemsEdited&&!draftItems.some(item=>item.compliance==='CUMPLE'||item.compliance==='NO_CUMPLE')){setEditError('Responde al menos un criterio evaluable antes de guardar.');return;}
+    const classificationChanged=JSON.stringify(classification)!==JSON.stringify(classificationFromEvaluation(evaluation));
+    if(classificationChanged&&classificationError(classification)){setEditError(classificationError(classification));return;}
+    const originalMeta={date:evaluation.date||'',time:evaluation.time||'',callId:evaluation.callId||'',recordingCode:evaluation.recordingCode||'',type:evaluation.type||'DIAGNOSTICO_INICIAL',product:evaluation.product||'',sale:Boolean(evaluation.sale),saleResult:evaluation.saleResult||'NO_VENTA',noSaleReason:evaluation.noSaleReason||'',comments:evaluation.comments||'',callDescription:evaluation.callDescription||''};
+    const changedMeta=Object.fromEntries((Object.keys(draftMeta) as (keyof typeof draftMeta)[]).filter(key=>draftMeta[key]!==originalMeta[key]).map(key=>[key,draftMeta[key]]));
+    const changes:Partial<Evaluation>={...changedMeta,...(advisorChanged?{advisorId:draftAdvisorId}:{}),...(classificationChanged?classificationPayload(classification):{}),...(itemsEdited?{items:draftItems}:{}),...(monitorCanValidate?{validationStatus:'VALIDATED' as const}:{})};
+    if(!Object.keys(changes).length){setEditError('No hay cambios para guardar.');return;}
+    setSavingEdit(true);setEditError('');setEditSuccess('');
     try{
-      const classificationChanged=JSON.stringify(classification)!==JSON.stringify(classificationFromEvaluation(evaluation));
-      const saved=await updateEvaluation(evaluation.id,{...draftMeta,...(currentUser.role==='ADMINISTRADOR'?{advisorId:draftAdvisorId}:{}),...(classificationChanged?classificationPayload(classification):{}),type:draftMeta.type as Evaluation['type'],saleResult:draftMeta.saleResult as Evaluation['saleResult'],items:draftItems,...(monitorCanValidate?{validationStatus:'VALIDATED' as const}:{})});
+      const saved=await updateEvaluation(evaluation.id,changes);
       onUpdated?.(saved);setIsEditing(false);
+      setEditSuccess(advisorChanged?'Asesora actualizada y evaluación guardada.':'Cambios guardados correctamente.');
     }catch(error){setEditError(error instanceof Error?error.message:'No fue posible actualizar la evaluación.');}
     finally{setSavingEdit(false);}
   };
@@ -395,18 +403,18 @@ export const EvaluationDetailModal: React.FC<EvaluationDetailModalProps> = ({
           )}
           {(evaluation.callDescription||isEditing)&&<div className="cm-card rounded-xl p-4 sm:p-5 space-y-2 text-xs"><label htmlFor="evaluation-call-description" className="block font-bold uppercase tracking-wider">Descripción de la llamada</label>{isEditing?<textarea id="evaluation-call-description" rows={4} className="cm-input w-full p-3" value={draftMeta.callDescription} onChange={event=>setDraftMeta(value=>({...value,callDescription:event.target.value}))}/>:<p id="evaluation-call-description" className="whitespace-pre-wrap rounded-lg border border-[var(--cm-border)] bg-[var(--cm-surface-elevated)] p-3 text-[var(--cm-text-secondary)]">{evaluation.callDescription}</p>}</div>}
 
-          {editError&&<div role="alert" className="rounded-xl border border-[var(--cm-danger)] bg-[rgba(255,77,79,.09)] px-4 py-3 text-xs text-[var(--cm-danger)]">{editError}</div>}
-
         </div>
 
         {/* Modal Footer Actions */}
-        <div className="p-4 bg-[var(--cm-surface-elevated)] border-t border-[var(--cm-border)] flex items-center justify-between">
+        <div className="p-4 bg-[var(--cm-surface-elevated)] border-t border-[var(--cm-border)] flex items-center justify-between gap-3">
           <button
-            onClick={()=>{if(isEditing){setIsEditing(false);setEditError('');}else onClose();}}
+            onClick={()=>{if(isEditing){setIsEditing(false);setEditError('');setEditSuccess('');}else onClose();}}
             className="cm-button-secondary px-4 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
           >
             {isEditing?'Cancelar edición':'Cerrar'}
           </button>
+
+          {(editError||editSuccess)&&<p role={editError?'alert':'status'} className={`min-w-0 flex-1 text-center text-xs font-semibold ${editError?'text-[var(--cm-danger)]':'text-[var(--cm-success)]'}`}>{editError||editSuccess}</p>}
 
           {isEditing?<button disabled={savingEdit} onClick={()=>void saveEdit()} className="cm-button-primary px-4 py-2 text-xs disabled:opacity-50"><Save className="h-4 w-4"/>{savingEdit?'Guardando…':monitorCanValidate?'Guardar y validar':'Guardar cambios'}</button>:<div className="flex flex-wrap justify-end gap-2">
             {canCreateSpeechFeedback&&<button type="button" disabled={Boolean(agentDetail?.feedback)||evaluation.advisorResolutionStatus==='PENDING'} onClick={()=>{setFeedbackText(evaluation.recommendation||evaluation.primaryGap||'');setFeedbackError('');setFeedbackModalOpen(true);}} className="cm-button-secondary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-55"><MessageSquarePlus className="h-4 w-4"/>{agentDetail?.feedback?'Feedback ya creado':evaluation.advisorResolutionStatus==='PENDING'?'Relaciona primero al asesor':'Generar feedback'}</button>}

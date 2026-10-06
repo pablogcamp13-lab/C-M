@@ -1253,7 +1253,7 @@ async function startServer() {
       const error=classificationError(classification);
       if(error)return res.status(400).json({error});
       Object.assign(changes,classificationPayload(classification));
-    }else if(requiresLocation(nextTypification||'')){
+    }else if((body.typification!==undefined||body.geoAnalysis!==undefined)&&requiresLocation(nextTypification||'')){
       const location=body.geoAnalysis||(nextTypification===current.typification?current.geoAnalysis:undefined);
       const classification={typification:nextTypification,department:location?.department||'',districtCode:location?.districtCode||''};
       const error=classificationError(classification);
